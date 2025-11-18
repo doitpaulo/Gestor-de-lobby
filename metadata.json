@@ -1,0 +1,5 @@
+{
+  "name": "Nexus Project",
+  "description": "Sistema de gerenciamento de demandas de desenvolvimento com suporte a upload de Excel, Kanban, Dashboards e gestão de desenvolvedores. Interface moderna em Dark Mode.",
+  "requestFramePermissions": []
+}
