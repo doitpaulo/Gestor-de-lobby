@@ -3,6 +3,13 @@ export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
 export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog';
 
+export interface HistoryEntry {
+  id: string;
+  date: string; // ISO String
+  user: string;
+  action: string;
+}
+
 export interface Task {
   id: string;
   type: TaskType;
@@ -21,7 +28,10 @@ export interface Task {
   endDate?: string;
   estimatedTime?: string; 
   actualTime?: string;
-  manualFields?: string[]; 
+  manualFields?: string[];
+  
+  // Audit Log
+  history?: HistoryEntry[];
 }
 
 export interface Developer {

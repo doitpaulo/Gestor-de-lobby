@@ -9,13 +9,13 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock } from './components/Icons';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft } from './components/Icons';
 
 // --- Components Helpers ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
-  const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md justify-center";
+  const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md justify-center text-sm";
   const variants: any = {
     primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30",
     secondary: "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600",
@@ -107,6 +107,58 @@ const FilterBar = ({ filters, setFilters }: { filters: any, setFilters: any }) =
     </div>
   )
 };
+
+// --- Helper: Detect Changes ---
+
+const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[] => {
+    const changes: HistoryEntry[] = [];
+    const timestamp = new Date().toISOString();
+
+    if (original.status !== updated.status) {
+        changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Alterou Status de '${original.status}' para '${updated.status}'`
+        });
+    }
+
+    if (original.priority !== updated.priority) {
+        changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Alterou Prioridade de '${original.priority}' para '${updated.priority}'`
+        });
+    }
+
+    if (original.assignee !== updated.assignee) {
+        const oldAssignee = original.assignee || 'Sem atribuição';
+        const newAssignee = updated.assignee || 'Sem atribuição';
+        changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Alterou Responsável de '${oldAssignee}' para '${newAssignee}'`
+        });
+    }
+    
+    // Check for generic text changes
+    const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type'];
+    const hasTextChanged = textFields.some(field => (original as any)[field] !== (updated as any)[field]);
+    
+    if (hasTextChanged && changes.length === 0) { 
+         changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Editou detalhes da tarefa`
+        });
+    }
+
+    return changes;
+};
+
 
 // --- User Profile View ---
 
@@ -219,7 +271,6 @@ const UserProfile = ({ user, setUser }: { user: User, setUser: (u: User) => void
 
 const GanttView = ({ tasks }: { tasks: Task[] }) => {
   const timelineData = useMemo(() => {
-    // Filter tasks with dates and valid assignee
     return tasks
       .filter(t => t.startDate && t.endDate)
       .map(t => ({
@@ -237,14 +288,13 @@ const GanttView = ({ tasks }: { tasks: Task[] }) => {
   const minDate = Math.min(...timelineData.map(t => t.start));
   const maxDate = Math.max(...timelineData.map(t => t.end));
   const dayMs = 86400000;
-  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 5; // Padding
+  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 5;
 
   return (
     <Card className="overflow-hidden">
       <h3 className="text-lg font-bold text-white mb-4">Linha do Tempo</h3>
       <div className="overflow-x-auto pb-4">
         <div className="relative min-w-[800px]" style={{ width: `${totalDays * 40}px` }}>
-          {/* Dates Header */}
           <div className="flex border-b border-slate-700 mb-2">
              {Array.from({ length: totalDays }).map((_, i) => {
                  const d = new Date(minDate + i * dayMs);
@@ -255,7 +305,6 @@ const GanttView = ({ tasks }: { tasks: Task[] }) => {
                  )
              })}
           </div>
-          {/* Bars */}
           <div className="space-y-2">
             {timelineData.map(task => {
                const duration = Math.ceil((task.end - task.start) / dayMs) + 1;
@@ -308,12 +357,10 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   }, [filteredTasks]);
 
   const capacityData = useMemo(() => {
-    // Calculate for all devs to show global capacity
     const data = devs.map(dev => ({
         name: dev.name,
         tasks: tasks.filter(t => t.assignee === dev.name && t.status !== 'Concluído' && t.status !== 'Resolvido').length
     }));
-    // Sort ascending: least busy first
     return data.sort((a, b) => a.tasks - b.tasks);
   }, [tasks, devs]);
 
@@ -321,13 +368,11 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     const pres = new pptxgen();
     pres.layout = 'LAYOUT_WIDE';
     
-    // Slide 1: Title
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Relatório Nexus Project", { x: 1, y: 2, fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
     slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 3, fontSize: 18, color: '94a3b8', align: 'center' });
 
-    // Slide 2: Metrics
     slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Métricas Gerais", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
@@ -399,7 +444,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         </Card>
       </div>
 
-      {/* Charts Row 1 */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <h3 className="text-lg font-semibold mb-6 text-slate-200">Demandas por Prioridade</h3>
@@ -447,7 +492,6 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         </Card>
       </div>
 
-       {/* Capacity Chart - Revised */}
        <Card>
           <div className="flex justify-between items-start mb-6">
             <div>
@@ -506,19 +550,27 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 
 // --- Kanban View ---
 
-const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void }) => {
+const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All' });
 
   const onDrop = (e: React.DragEvent, newStatus: string, newAssignee: string | null) => {
     e.preventDefault();
     const taskId = e.dataTransfer.getData("taskId");
+    
     const updatedTasks = tasks.map(t => {
       if (t.id === taskId) {
         let status = t.status;
         if (newStatus === 'Concluído') status = 'Resolvido';
         else if (t.status === 'Resolvido' || t.status === 'Concluído') status = 'Em Atendimento'; 
-
-        return { ...t, status: status, assignee: newAssignee };
+        
+        const updatedTask = { ...t, status: status, assignee: newAssignee };
+        
+        const history = detectChanges(t, updatedTask, user);
+        if(history.length > 0) {
+             updatedTask.history = [...(t.history || []), ...history];
+        }
+        
+        return updatedTask;
       }
       return t;
     });
@@ -619,7 +671,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setT
 
 // --- List View ---
 
-const ListView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void }) => {
+const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   
@@ -645,9 +697,34 @@ const ListView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setTas
       const updated = tasks.map(t => {
           if (selected.has(t.id)) {
               if (action === 'delete') return null;
-              if (action === 'status') return { ...t, status: payload };
-              if (action === 'priority') return { ...t, priority: payload };
-              if (action === 'assign') return { ...t, assignee: payload };
+              
+              let updatedTask = { ...t };
+              let actionName = '';
+
+              if (action === 'status') {
+                   updatedTask.status = payload;
+                   actionName = `Alterou Status (Em massa) para ${payload}`;
+              }
+              if (action === 'priority') {
+                  updatedTask.priority = payload;
+                  actionName = `Alterou Prioridade (Em massa) para ${payload}`;
+              }
+              if (action === 'assign') {
+                   updatedTask.assignee = payload;
+                   actionName = `Atribuiu (Em massa) para ${payload}`;
+              }
+              
+              if (actionName) {
+                  const entry: HistoryEntry = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      date: new Date().toISOString(),
+                      user: user.name,
+                      action: actionName
+                  };
+                  updatedTask.history = [...(t.history || []), entry];
+              }
+
+              return updatedTask;
           }
           return t;
       }).filter(Boolean) as Task[];
@@ -736,61 +813,93 @@ const ListView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setTas
 
 // --- Layout ---
 
-const Layout = ({ children, user, onLogout }: any) => {
+const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const menuItems = [
-    { path: '/', icon: <IconHome />, label: 'Dashboard' },
-    { path: '/kanban', icon: <IconKanban />, label: 'Kanban' },
-    { path: '/list', icon: <IconList />, label: 'Lista' },
-    { path: '/gantt', icon: <IconClock />, label: 'Gantt' },
+    { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' },
+    { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' },
+    { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' },
+    { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
   ];
 
   return (
     <div className="flex h-screen bg-dark-900 text-slate-200 font-sans">
-      <aside className="w-64 bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-20">
-        <div className="p-6 border-b border-slate-700 flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Nexus</h1>
+      <aside 
+        className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}
+      >
+        <button 
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"
+        >
+            <IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
+        </button>
+
+        <div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}>
+          <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div>
+          <h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1>
         </div>
+
         <nav className="flex-1 p-4 space-y-2 mt-4">
           {menuItems.map(item => (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
+              title={isCollapsed ? item.label : ''}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${
                 location.pathname === item.path 
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' 
                   : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'
-              }`}
+              } ${isCollapsed ? 'justify-center px-0' : ''}`}
             >
               {item.icon}
-              <span className="font-medium">{item.label}</span>
+              <span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
+                  {item.label}
+              </span>
             </button>
           ))}
         </nav>
+
         <div className="p-4 border-t border-slate-700 bg-slate-900/30">
             <div 
               onClick={() => navigate('/profile')}
-              className="flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors"
+              className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}
             >
-                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden">
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">
                     {user.avatar ? (
                         <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
                     ) : (
                         user.name.substring(0, 2).toUpperCase()
                     )}
                 </div>
-                <div className="overflow-hidden">
+                <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
                     <p className="text-sm font-medium text-white truncate">{user.name}</p>
                     <p className="text-xs text-slate-500 truncate">{user.email}</p>
                 </div>
             </div>
-            <Button variant="danger" onClick={onLogout} className="w-full justify-center text-xs py-2">Sair</Button>
+            <Button 
+                variant="danger" 
+                onClick={onLogout} 
+                className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`}
+                title={isCollapsed ? 'Sair' : ''}
+            >
+                {isCollapsed ? (
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                    </svg>
+                ) : 'Sair'}
+            </Button>
         </div>
       </aside>
       <main className="flex-1 overflow-hidden relative flex flex-col">
+         <header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800">
+             <div className="pointer-events-auto">
+                 {headerContent}
+             </div>
+         </header>
+         
          <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" />
          <div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">
              {children}
@@ -799,8 +908,6 @@ const Layout = ({ children, user, onLogout }: any) => {
     </div>
   );
 };
-
-// --- Authentication Page ---
 
 const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     const [isRegister, setIsRegister] = useState(false);
@@ -928,27 +1035,27 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-slate-700 flex justify-between items-center">
+                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl">
                     <h3 className="text-xl font-bold text-white">Editar Demanda</h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
                 </div>
                 <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
                     <div>
-                        <label className="block text-xs text-slate-400 mb-1">Título / Resumo</label>
-                        <input name="summary" value={formData.summary} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Título / Resumo</label>
+                        <input name="summary" value={formData.summary} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                          <div>
-                            <label className="block text-xs text-slate-400 mb-1">Tipo</label>
-                            <select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none">
+                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label>
+                            <select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="Incidente">Incidente</option>
                                 <option value="Melhoria">Melhoria</option>
                                 <option value="Nova Automação">Nova Automação</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs text-slate-400 mb-1">Prioridade</label>
-                            <select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none">
+                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label>
+                            <select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="1 - Crítica">1 - Crítica</option>
                                 <option value="2 - Alta">2 - Alta</option>
                                 <option value="3 - Moderada">3 - Moderada</option>
@@ -958,42 +1065,65 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label>
-                             <select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none">
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label>
+                             <select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="">Sem Atribuição</option>
                                 {developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}
                             </select>
                         </div>
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1">Status</label>
-                             <select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none">
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label>
+                             <select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
                                 <option value="Novo">Novo</option>
                                 <option value="Pendente">Pendente</option>
                                 <option value="Em Atendimento">Em Atendimento</option>
+                                <option value="Em Progresso">Em Progresso</option>
                                 <option value="Resolvido">Resolvido</option>
+                                <option value="Fechado">Fechado</option>
+                                <option value="Aguardando">Aguardando</option>
                             </select>
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1">Data Início</label>
-                             <input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300" />
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label>
+                             <input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                          <div>
-                             <label className="block text-xs text-slate-400 mb-1">Data Fim</label>
-                             <input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300" />
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim</label>
+                             <input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1">Tempo Estimado</label>
-                             <input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300" placeholder="ex: 2h" />
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label>
+                             <input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 2h" />
                         </div>
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1">Tempo Real</label>
-                             <input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300" placeholder="ex: 2h" />
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Real</label>
+                             <input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 2h" />
                         </div>
                     </div>
+
+                    {/* History Section */}
+                    {formData.history && formData.history.length > 0 && (
+                        <div className="mt-6 border-t border-slate-700 pt-4">
+                            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                                <IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações
+                            </h4>
+                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                                {formData.history.slice().reverse().map((entry: HistoryEntry) => (
+                                    <div key={entry.id} className="text-xs bg-slate-900/60 p-3 rounded border border-slate-700/50 hover:border-slate-600 transition-colors">
+                                        <div className="flex justify-between text-slate-500 mb-1">
+                                            <span className="font-mono">{new Date(entry.date).toLocaleString()}</span>
+                                            <span className="font-medium text-indigo-400">{entry.user}</span>
+                                        </div>
+                                        <p className="text-slate-300">{entry.action}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
-                <div className="p-6 border-t border-slate-700 flex justify-between">
+                <div className="p-6 border-t border-slate-700 flex justify-between bg-slate-900 rounded-b-2xl">
                     <Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button>
                     <div className="flex gap-3">
                         <Button variant="secondary" onClick={onClose}>Cancelar</Button>
@@ -1088,6 +1218,16 @@ export default function App() {
   };
 
   const handleTaskUpdate = (updatedTask: Task) => {
+      if (!user) return;
+
+      const oldTask = tasks.find(t => t.id === updatedTask.id);
+      if (oldTask) {
+          const history = detectChanges(oldTask, updatedTask, user);
+          if (history.length > 0) {
+              updatedTask.history = [...(oldTask.history || []), ...history];
+          }
+      }
+
       const newTasks = tasks.map(t => t.id === updatedTask.id ? updatedTask : t);
       setTasks(newTasks);
       StorageService.saveTasks(newTasks);
@@ -1105,17 +1245,19 @@ export default function App() {
 
   if (!user) return <AuthPage onLogin={handleLogin} />;
 
+  // Define the Header Content here (Buttons)
+  const headerActions = (
+    <div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700">
+        <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button>
+        <div className="w-px bg-slate-700 h-6 self-center"></div>
+        <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button>
+    </div>
+  );
+
   return (
     <HashRouter>
-      <Layout user={user} onLogout={handleLogout}>
-        {/* Header Actions - Only visible on dashboard pages */}
-        <div className="absolute top-6 right-10 flex gap-3 z-20 pointer-events-none">
-            <div className="pointer-events-auto flex gap-3">
-                <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5"><IconUsers /> Devs</Button>
-                <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload /> Upload</Button>
-            </div>
-        </div>
-
+      <Layout user={user} onLogout={handleLogout} headerContent={headerActions}>
+        
         {/* Modals */}
         {isUploadModalOpen && (
              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
@@ -1174,15 +1316,15 @@ export default function App() {
                 task={editingTask} 
                 developers={devs} 
                 onClose={() => setEditingTask(null)} 
-                onSave={handleTaskUpdate}
-                onDelete={handleTaskDelete}
+                onSave={handleTaskUpdate} 
+                onDelete={handleTaskDelete} 
             />
         )}
 
         <Routes>
           <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
-          <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} />} />
-          <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} />} />
+          <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
+          <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} />} />
           <Route path="/profile" element={<UserProfile user={user} setUser={setUser} />} />
           <Route path="*" element={<Navigate to="/" />} />
