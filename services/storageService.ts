@@ -1,9 +1,11 @@
+
 import { Task, Developer, User } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
   DEVS: 'nexus_devs_v2',
-  USER: 'nexus_user_v2'
+  USER: 'nexus_user_active', // Active session
+  REGISTRY: 'nexus_users_registry' // All registered users
 };
 
 export const StorageService = {
@@ -47,22 +49,56 @@ export const StorageService = {
     localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
   },
 
+  // --- Authentication Logic ---
+
+  getRegistry: (): User[] => {
+    const data = localStorage.getItem(KEYS.REGISTRY);
+    return data ? JSON.parse(data) : [];
+  },
+
+  registerUser: (user: User): boolean => {
+    const registry = StorageService.getRegistry();
+    if (registry.find(u => u.email === user.email)) {
+      return false; // User already exists
+    }
+    registry.push(user);
+    localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
+    return true;
+  },
+
+  authenticateUser: (email: string, password: string): User | null => {
+    const registry = StorageService.getRegistry();
+    const user = registry.find(u => u.email === email && u.password === password);
+    if (user) {
+      localStorage.setItem(KEYS.USER, JSON.stringify(user));
+      return user;
+    }
+    return null;
+  },
+
   getUser: (): User | null => {
     const data = localStorage.getItem(KEYS.USER);
     return data ? JSON.parse(data) : null;
   },
 
-  login: (email: string): User => {
-    const user: User = { id: Date.now().toString(), email, name: email.split('@')[0] };
-    localStorage.setItem(KEYS.USER, JSON.stringify(user));
-    return user;
-  },
-
   logout: () => {
     localStorage.removeItem(KEYS.USER);
   },
+
+  updateUser: (updatedUser: User) => {
+    // 1. Update Active Session
+    localStorage.setItem(KEYS.USER, JSON.stringify(updatedUser));
+
+    // 2. Update Registry
+    const registry = StorageService.getRegistry();
+    const index = registry.findIndex(u => u.id === updatedUser.id);
+    if (index !== -1) {
+      registry[index] = updatedUser;
+      localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
+    }
+  },
   
-  // Intelligent Merge Logic (The Core Requirement)
+  // Intelligent Merge Logic
   mergeTasks: (newTasks: Task[]) => {
     const currentTasks = StorageService.getTasks();
     const taskMap = new Map(currentTasks.map(t => [t.id, t]));
@@ -71,28 +107,19 @@ export const StorageService = {
       if (taskMap.has(newTask.id)) {
         const existing = taskMap.get(newTask.id)!;
         
-        // LOGIC:
-        // 1. Update basic fields from Excel (Summary, Status, Subcategory, etc.) because Excel is the source of truth for tickets.
-        // 2. PRESERVE internal fields that only exist in the App (Dates, Times).
-        // 3. Assignee Logic: If Excel has a value, use it. If Excel is empty, KEEP the existing assignee (don't unassign if manually assigned).
-        
         const mergedTask: Task = {
-          ...existing, // Base is existing to keep props not in Excel
-          
-          // Overwrite with Excel data
+          ...existing,
           summary: newTask.summary,
-          type: newTask.type, // Keep Excel type categorization
+          type: newTask.type,
           status: newTask.status, 
           subcategory: newTask.subcategory,
           category: newTask.category || existing.category,
-          priority: newTask.priority, // Assuming Excel priority is up to date
+          priority: newTask.priority,
           createdAt: newTask.createdAt,
           requester: newTask.requester,
-
-          // Assignee logic: Use Excel if present, otherwise keep existing
           assignee: newTask.assignee ? newTask.assignee : existing.assignee,
           
-          // STRICTLY PRESERVE LOCAL FIELDS (These are never in the simple Excel import)
+          // STRICTLY PRESERVE LOCAL FIELDS
           startDate: existing.startDate,
           endDate: existing.endDate,
           estimatedTime: existing.estimatedTime,
@@ -101,7 +128,6 @@ export const StorageService = {
 
         taskMap.set(newTask.id, mergedTask);
       } else {
-        // New task entirely
         taskMap.set(newTask.id, newTask);
       }
     });

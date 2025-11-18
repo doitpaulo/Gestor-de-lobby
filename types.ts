@@ -1,3 +1,4 @@
+
 export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
 export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog';
@@ -33,4 +34,6 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  password?: string; // Added for auth
+  avatar?: string;   // Base64 string for profile picture
 }

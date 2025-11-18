@@ -1,9 +1,9 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell, AreaChart, Area 
+  PieChart, Pie, Cell 
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
@@ -14,8 +14,8 @@ import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, Ic
 
 // --- Components Helpers ---
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }: any) => {
-  const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md";
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
+  const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md justify-center";
   const variants: any = {
     primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30",
     secondary: "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600",
@@ -23,7 +23,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
     success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30"
   };
   return (
-    <button onClick={onClick} disabled={disabled} className={`${baseClass} ${variants[variant]} ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`${baseClass} ${variants[variant]} ${className}`}>
       {children}
     </button>
   );
@@ -106,6 +106,113 @@ const FilterBar = ({ filters, setFilters }: { filters: any, setFilters: any }) =
        </select>
     </div>
   )
+};
+
+// --- User Profile View ---
+
+const UserProfile = ({ user, setUser }: { user: User, setUser: (u: User) => void }) => {
+  const [formData, setFormData] = useState({
+    name: user.name,
+    email: user.email,
+    password: user.password || '',
+    newPassword: ''
+  });
+  const [avatar, setAvatar] = useState<string | undefined>(user.avatar);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatar(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const updatedUser: User = {
+      ...user,
+      name: formData.name,
+      email: formData.email,
+      avatar: avatar,
+      password: formData.newPassword ? formData.newPassword : user.password
+    };
+
+    StorageService.updateUser(updatedUser);
+    setUser(updatedUser);
+    alert('Perfil atualizado com sucesso!');
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+      <h2 className="text-2xl font-bold text-white mb-6">Gerenciar Perfil</h2>
+      
+      <Card>
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+            <div className="w-32 h-32 rounded-full bg-slate-700 flex items-center justify-center text-4xl text-indigo-300 overflow-hidden border-4 border-slate-600 group-hover:border-indigo-500 transition-all">
+               {avatar ? (
+                 <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+               ) : (
+                 user.name.substring(0, 2).toUpperCase()
+               )}
+            </div>
+            <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+               <span className="text-xs text-white font-medium">Alterar Foto</span>
+            </div>
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
+          </div>
+          <p className="text-slate-400 text-xs mt-2">Clique para alterar a foto</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+             <label className="block text-sm font-medium text-slate-400 mb-1">Nome Completo</label>
+             <input 
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+             />
+          </div>
+          
+          <div>
+             <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
+             <input 
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+             />
+          </div>
+
+          <div className="pt-4 border-t border-slate-700 mt-4">
+             <h4 className="text-lg font-medium text-white mb-4">Alterar Senha</h4>
+             <div className="space-y-4">
+                <div>
+                   <label className="block text-sm font-medium text-slate-400 mb-1">Nova Senha (deixe em branco para manter)</label>
+                   <input 
+                      type="password"
+                      value={formData.newPassword}
+                      onChange={(e) => setFormData({...formData, newPassword: e.target.value})}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      placeholder="Nova senha"
+                   />
+                </div>
+             </div>
+          </div>
+
+          <div className="flex justify-end mt-6">
+             <Button type="submit" variant="primary" className="w-full md:w-auto">Salvar Alterações</Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
 };
 
 // --- Gantt View ---
@@ -326,7 +433,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
-                  label={({ value }) => `${value}`} // NUMBERS ADDED HERE
+                  label={({ value }) => `${value}`} 
                 >
                   <Cell fill="#f43f5e" />
                   <Cell fill="#10b981" />
@@ -358,7 +465,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
           <div className="space-y-4 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
               {capacityData.map((dev, idx) => {
                   const max = Math.max(...capacityData.map(d => d.tasks), 10); 
-                  let barColor = 'bg-emerald-500'; // Default Safe/Available
+                  let barColor = 'bg-emerald-500'; 
                   let loadText = 'Livre';
                   let textColor = 'text-emerald-400';
 
@@ -407,10 +514,9 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setT
     const taskId = e.dataTransfer.getData("taskId");
     const updatedTasks = tasks.map(t => {
       if (t.id === taskId) {
-        // Logic: Dropping to "Concluído" changes status. Dropping to Dev column changes assignee but keeps status unless it was Concluído (then reset to something active or keep previous?)
         let status = t.status;
         if (newStatus === 'Concluído') status = 'Resolvido';
-        else if (t.status === 'Resolvido' || t.status === 'Concluído') status = 'Em Atendimento'; // Reopen if moved back
+        else if (t.status === 'Resolvido' || t.status === 'Concluído') status = 'Em Atendimento'; 
 
         return { ...t, status: status, assignee: newAssignee };
       }
@@ -424,7 +530,6 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setT
     e.dataTransfer.setData("taskId", taskId);
   };
 
-  // Filter Tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
         const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
@@ -437,7 +542,6 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setT
     });
   }, [tasks, filters]);
 
-  // Columns: Unassigned, Devs, Done
   const columns = [
     { id: 'unassigned', title: 'Sem Atribuição', assignee: null, status: 'Backlog', isDone: false },
     ...devs.map(d => ({ id: d.id, title: d.name, assignee: d.name, status: 'In Progress', isDone: false })),
@@ -483,7 +587,6 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setT
                       onClick={() => onEditTask(task)}
                       className="bg-slate-700 p-4 rounded-lg border border-slate-600 hover:border-indigo-500 hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all"
                     >
-                      {/* Left Colored Strip based on Type */}
                       <div className={`absolute left-0 top-0 bottom-0 w-1 ${
                           task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'
                       }`}></div>
@@ -563,7 +666,6 @@ const ListView = ({ tasks, setTasks, devs, onEditTask }: { tasks: Task[], setTas
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      {/* Robust Filters from FilterBar */}
       <FilterBar filters={filters} setFilters={setFilters} />
 
       <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
@@ -669,9 +771,16 @@ const Layout = ({ children, user, onLogout }: any) => {
           ))}
         </nav>
         <div className="p-4 border-t border-slate-700 bg-slate-900/30">
-            <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600">
-                    {user.name.substring(0, 2).toUpperCase()}
+            <div 
+              onClick={() => navigate('/profile')}
+              className="flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors"
+            >
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden">
+                    {user.avatar ? (
+                        <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
+                    ) : (
+                        user.name.substring(0, 2).toUpperCase()
+                    )}
                 </div>
                 <div className="overflow-hidden">
                     <p className="text-sm font-medium text-white truncate">{user.name}</p>
@@ -691,13 +800,44 @@ const Layout = ({ children, user, onLogout }: any) => {
   );
 };
 
-const Login = ({ onLogin }: { onLogin: (email: string) => void }) => {
-    const [email, setEmail] = useState('');
-    const [isRegister, setIsRegister] = useState(false);
+// --- Authentication Page ---
 
-    const handleSubmit = () => {
-        if(!email) return;
-        onLogin(email);
+const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
+    const [isRegister, setIsRegister] = useState(false);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+
+        if (isRegister) {
+            if (!email || !password || !name) {
+                setError('Todos os campos são obrigatórios');
+                return;
+            }
+            const newUser: User = { id: Date.now().toString(), email, name, password };
+            const success = StorageService.registerUser(newUser);
+            if (success) {
+                alert('Conta criada com sucesso! Faça login.');
+                setIsRegister(false);
+            } else {
+                setError('Email já cadastrado.');
+            }
+        } else {
+            if (!email || !password) {
+                 setError('Preencha email e senha');
+                 return;
+            }
+            const user = StorageService.authenticateUser(email, password);
+            if (user) {
+                onLogin(user);
+            } else {
+                setError('Credenciais inválidas.');
+            }
+        }
     };
 
     return (
@@ -713,9 +853,21 @@ const Login = ({ onLogin }: { onLogin: (email: string) => void }) => {
                     </div>
                 </div>
                 <h2 className="text-3xl font-bold text-center mb-2 text-white">Nexus Project</h2>
-                <p className="text-center text-slate-400 mb-8 text-sm">Gerencie suas demandas com eficiência</p>
+                <p className="text-center text-slate-400 mb-8 text-sm">{isRegister ? 'Crie sua conta para começar' : 'Acesse sua conta'}</p>
                 
-                <div className="space-y-5">
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    {isRegister && (
+                         <div>
+                            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Nome Completo</label>
+                            <input 
+                                type="text" 
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                                placeholder="Seu nome"
+                            />
+                        </div>
+                    )}
                     <div>
                         <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Email Corporativo</label>
                         <input 
@@ -726,15 +878,28 @@ const Login = ({ onLogin }: { onLogin: (email: string) => void }) => {
                             placeholder="nome@empresa.com"
                         />
                     </div>
-                    <Button onClick={handleSubmit} className="w-full justify-center py-3 text-lg shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60">
-                        {isRegister ? 'Registrar' : 'Acessar Sistema'}
+                    <div>
+                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Senha</label>
+                        <input 
+                            type="password" 
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                            placeholder="••••••••"
+                        />
+                    </div>
+                    
+                    {error && <p className="text-rose-500 text-sm text-center">{error}</p>}
+
+                    <Button type="submit" className="w-full justify-center py-3 text-lg shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60">
+                        {isRegister ? 'Cadastrar' : 'Entrar'}
                     </Button>
                     <div className="text-center">
-                        <button onClick={() => setIsRegister(!isRegister)} className="text-sm text-slate-500 hover:text-indigo-400 transition-colors">
+                        <button type="button" onClick={() => { setIsRegister(!isRegister); setError(''); }} className="text-sm text-slate-500 hover:text-indigo-400 transition-colors">
                             {isRegister ? 'Já tem conta? Entrar' : 'Criar nova conta'}
                         </button>
                     </div>
-                </div>
+                </form>
             </div>
         </div>
     );
@@ -855,10 +1020,8 @@ export default function App() {
       'Nova Automação': null
   });
 
-  const handleLogin = (email: string) => {
-    if (!email) return;
-    const u = StorageService.login(email);
-    setUser(u);
+  const handleLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
   };
 
   const handleLogout = () => {
@@ -883,11 +1046,9 @@ export default function App() {
             allNewTasks = [...allNewTasks, ...t];
         }
 
-        // 1. Merge tasks preserving local manual data
         const merged = StorageService.mergeTasks(allNewTasks);
         setTasks(merged);
 
-        // 2. Auto-discover developers from the uploaded data
         const uniqueAssignees = new Set(allNewTasks.map(t => t.assignee).filter(Boolean));
         const currentDevNames = new Set(devs.map(d => d.name));
         const newDevsToAdd: Developer[] = [];
@@ -905,7 +1066,7 @@ export default function App() {
         }
 
         setIsUploadModalOpen(false);
-        alert(`${allNewTasks.length} demandas processadas. ${newDevsToAdd.length} novos desenvolvedores identificados.`);
+        alert(`${allNewTasks.length} demandas processadas.`);
      } catch (e) {
          console.error(e);
          alert("Erro ao processar arquivos.");
@@ -942,15 +1103,17 @@ export default function App() {
     }
   };
 
-  if (!user) return <Login onLogin={handleLogin} />;
+  if (!user) return <AuthPage onLogin={handleLogin} />;
 
   return (
     <HashRouter>
       <Layout user={user} onLogout={handleLogout}>
-        {/* Header Actions */}
-        <div className="absolute top-6 right-10 flex gap-3 z-20">
-            <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5"><IconUsers /> Devs</Button>
-            <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload /> Upload</Button>
+        {/* Header Actions - Only visible on dashboard pages */}
+        <div className="absolute top-6 right-10 flex gap-3 z-20 pointer-events-none">
+            <div className="pointer-events-auto flex gap-3">
+                <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5"><IconUsers /> Devs</Button>
+                <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload /> Upload</Button>
+            </div>
         </div>
 
         {/* Modals */}
@@ -983,7 +1146,7 @@ export default function App() {
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
                 <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full">
                     <h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3>
-                    <ul className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                    <ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">
                         {devs.map(d => (
                             <li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700">
                                 <span className="text-sm text-white">{d.name}</span>
@@ -1021,6 +1184,7 @@ export default function App() {
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} />} />
+          <Route path="/profile" element={<UserProfile user={user} setUser={setUser} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>
