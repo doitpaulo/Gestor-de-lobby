@@ -3,18 +3,18 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell 
+  PieChart, Pie, Cell, LabelList 
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus } from './components/Icons';
 
 // --- Components Helpers ---
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title='' }: any) => {
   const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md justify-center text-sm";
   const variants: any = {
     primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30",
@@ -23,7 +23,7 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
     success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30"
   };
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`${baseClass} ${variants[variant]} ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} title={title} className={`${baseClass} ${variants[variant]} ${className}`}>
       {children}
     </button>
   );
@@ -162,7 +162,7 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
 
 // --- User Profile View ---
 
-const UserProfile = ({ user, setUser }: { user: User, setUser: (u: User) => void }) => {
+const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
   const [formData, setFormData] = useState({
     name: user.name,
     email: user.email,
@@ -199,8 +199,14 @@ const UserProfile = ({ user, setUser }: { user: User, setUser: (u: User) => void
     alert('Perfil atualizado com sucesso!');
   };
 
+  const handleReset = () => {
+      if (window.confirm("ATENÇÃO: Isso apagará TODAS as demandas cadastradas (incidentes, melhorias, automações). Essa ação é irreversível. Deseja continuar?")) {
+          onResetData();
+      }
+  };
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in pb-10">
       <h2 className="text-2xl font-bold text-white mb-6">Gerenciar Perfil</h2>
       
       <Card>
@@ -262,6 +268,14 @@ const UserProfile = ({ user, setUser }: { user: User, setUser: (u: User) => void
              <Button type="submit" variant="primary" className="w-full md:w-auto">Salvar Alterações</Button>
           </div>
         </form>
+      </Card>
+
+      <Card className="border-rose-900/50 bg-rose-950/10">
+          <h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3>
+          <p className="text-sm text-slate-400 mb-4">Ações irreversíveis que afetam os dados da aplicação.</p>
+          <div className="flex justify-start">
+               <Button variant="danger" onClick={handleReset}>Resetar Todas as Demandas</Button>
+          </div>
       </Card>
     </div>
   );
@@ -364,6 +378,18 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     return data.sort((a, b) => a.tasks - b.tasks);
   }, [tasks, devs]);
 
+  const devTypeData = useMemo(() => {
+    return devs.map(dev => {
+        const devTasks = tasks.filter(t => t.assignee === dev.name);
+        return {
+            name: dev.name,
+            Incidente: devTasks.filter(t => t.type === 'Incidente').length,
+            Melhoria: devTasks.filter(t => t.type === 'Melhoria').length,
+            'Nova Automação': devTasks.filter(t => t.type === 'Nova Automação').length,
+        };
+    }).filter(d => (d.Incidente + d.Melhoria + d['Nova Automação']) > 0);
+  }, [tasks, devs]);
+
   const exportPPT = () => {
     const pres = new pptxgen();
     pres.layout = 'LAYOUT_WIDE';
@@ -444,7 +470,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         </Card>
       </div>
 
-      {/* Charts */}
+      {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <h3 className="text-lg font-semibold mb-6 text-slate-200">Demandas por Prioridade</h3>
@@ -492,10 +518,36 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         </Card>
       </div>
 
+       {/* New Chart: Dev Type Distribution */}
+       <Card>
+           <h3 className="text-lg font-semibold mb-6 text-slate-200">Tipos de Demanda por Desenvolvedor</h3>
+           <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={true} vertical={false} />
+                    <XAxis type="number" stroke="#94a3b8" />
+                    <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12}} width={100} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
+                    <Legend />
+                    <Bar dataKey="Incidente" stackId="a" fill="#f43f5e">
+                         <LabelList dataKey="Incidente" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
+                    </Bar>
+                    <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
+                         <LabelList dataKey="Melhoria" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
+                    </Bar>
+                    <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1">
+                         <LabelList dataKey="Nova Automação" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
+                    </Bar>
+                </BarChart>
+            </ResponsiveContainer>
+           </div>
+       </Card>
+
+       {/* Capacity Chart */}
        <Card>
           <div className="flex justify-between items-start mb-6">
             <div>
-                <h3 className="text-lg font-bold text-slate-200">Capacidade & Disponibilidade</h3>
+                <h3 className="text-lg font-bold text-slate-200">Capacidade & Disponibilidade (Total)</h3>
                 <p className="text-sm text-slate-400">Ranking do menos ocupado para o mais ocupado</p>
             </div>
             {capacityData.length > 0 && (
@@ -1014,7 +1066,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
 const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
     const [formData, setFormData] = useState<Task>(task || {
-        id: `TASK-${Date.now()}`,
+        id: '',
         type: 'Incidente',
         summary: '',
         description: '',
@@ -1032,18 +1084,39 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    const isNewTask = !task.createdAt || task.id === '';
+
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
                 <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl">
-                    <h3 className="text-xl font-bold text-white">Editar Demanda</h3>
+                    <h3 className="text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3>
                     <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
                 </div>
                 <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
-                    <div>
-                        <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Título / Resumo</label>
-                        <input name="summary" value={formData.summary} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                    <div className="grid grid-cols-1 gap-4">
+                        <div>
+                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label>
+                            <input 
+                                name="id" 
+                                value={formData.id} 
+                                onChange={handleChange} 
+                                placeholder="Ex: INC0012345"
+                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label>
+                            <textarea 
+                                name="summary" 
+                                value={formData.summary} 
+                                onChange={handleChange} 
+                                rows={3}
+                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" 
+                            />
+                        </div>
                     </div>
+                    
                     <div className="grid grid-cols-2 gap-4">
                          <div>
                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label>
@@ -1159,7 +1232,28 @@ export default function App() {
     setUser(null);
   };
 
-  const handleProcessUpload = async () => {
+  const processNewTasks = (newTasks: Task[], typeName: string) => {
+      const merged = StorageService.mergeTasks(newTasks);
+      setTasks(merged);
+
+      const uniqueAssignees = new Set(newTasks.map(t => t.assignee).filter(Boolean));
+      const currentDevNames = new Set(devs.map(d => d.name));
+      const newDevsToAdd: Developer[] = [];
+
+      uniqueAssignees.forEach(name => {
+          if (name && !currentDevNames.has(name as string)) {
+              newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string });
+          }
+      });
+
+      if (newDevsToAdd.length > 0) {
+          const updatedDevs = [...devs, ...newDevsToAdd];
+          setDevs(updatedDevs);
+          StorageService.saveDevs(updatedDevs);
+      }
+  };
+
+  const handleProcessAllUploads = async () => {
      let allNewTasks: Task[] = [];
      
      try {
@@ -1176,25 +1270,7 @@ export default function App() {
             allNewTasks = [...allNewTasks, ...t];
         }
 
-        const merged = StorageService.mergeTasks(allNewTasks);
-        setTasks(merged);
-
-        const uniqueAssignees = new Set(allNewTasks.map(t => t.assignee).filter(Boolean));
-        const currentDevNames = new Set(devs.map(d => d.name));
-        const newDevsToAdd: Developer[] = [];
-
-        uniqueAssignees.forEach(name => {
-            if (name && !currentDevNames.has(name as string)) {
-                newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string });
-            }
-        });
-
-        if (newDevsToAdd.length > 0) {
-            const updatedDevs = [...devs, ...newDevsToAdd];
-            setDevs(updatedDevs);
-            StorageService.saveDevs(updatedDevs);
-        }
-
+        processNewTasks(allNewTasks, 'Todas');
         setIsUploadModalOpen(false);
         alert(`${allNewTasks.length} demandas processadas.`);
      } catch (e) {
@@ -1202,6 +1278,21 @@ export default function App() {
          alert("Erro ao processar arquivos.");
      }
   };
+
+  const handleProcessSingleUpload = async (type: TaskType) => {
+      const file = uploadFiles[type];
+      if (!file) return;
+
+      try {
+           const newTasks = await ExcelService.parseFile(file, type);
+           processNewTasks(newTasks, type);
+           alert(`${newTasks.length} demandas de ${type} processadas.`);
+           setUploadFiles(prev => ({ ...prev, [type]: null }));
+      } catch (e) {
+          console.error(e);
+          alert(`Erro ao processar ${type}.`);
+      }
+  }
 
   const handleAddDev = (name: string) => {
       if (name && !devs.find(d => d.name === name)) {
@@ -1217,20 +1308,59 @@ export default function App() {
       StorageService.saveDevs(newDevs);
   };
 
+  const handleCreateTask = () => {
+      setEditingTask({
+        id: '', // Empty to force manual input
+        type: 'Incidente',
+        summary: '',
+        description: '',
+        priority: '3 - Moderada',
+        status: 'Novo',
+        assignee: null,
+        estimatedTime: '',
+        actualTime: '',
+        startDate: '',
+        endDate: '',
+        createdAt: new Date().toISOString(),
+        requester: user?.name || 'Manual'
+      });
+  };
+
   const handleTaskUpdate = (updatedTask: Task) => {
       if (!user) return;
-
-      const oldTask = tasks.find(t => t.id === updatedTask.id);
-      if (oldTask) {
-          const history = detectChanges(oldTask, updatedTask, user);
-          if (history.length > 0) {
-              updatedTask.history = [...(oldTask.history || []), ...history];
-          }
+      
+      if (!updatedTask.id) {
+          alert("O número do chamado é obrigatório.");
+          return;
       }
 
-      const newTasks = tasks.map(t => t.id === updatedTask.id ? updatedTask : t);
-      setTasks(newTasks);
-      StorageService.saveTasks(newTasks);
+      const taskExists = tasks.some(t => t.id === updatedTask.id);
+
+      if (taskExists) {
+          const oldTask = tasks.find(t => t.id === updatedTask.id);
+          if (oldTask) {
+              const history = detectChanges(oldTask, updatedTask, user);
+              if (history.length > 0) {
+                  updatedTask.history = [...(oldTask.history || []), ...history];
+              }
+          }
+          const newTasks = tasks.map(t => t.id === updatedTask.id ? updatedTask : t);
+          setTasks(newTasks);
+          StorageService.saveTasks(newTasks);
+      } else {
+          // Create new task
+          const creationEntry: HistoryEntry = {
+              id: Math.random().toString(36).substr(2, 9),
+              date: new Date().toISOString(),
+              user: user.name,
+              action: 'Tarefa criada manualmente'
+          };
+          updatedTask.history = [creationEntry];
+          const newTasks = [...tasks, updatedTask];
+          setTasks(newTasks);
+          StorageService.saveTasks(newTasks);
+      }
+      
       setEditingTask(null);
   };
 
@@ -1242,14 +1372,20 @@ export default function App() {
         setEditingTask(null);
     }
   };
+  
+  const handleResetData = () => {
+      StorageService.clearTasks();
+      setTasks([]);
+      alert("Todas as demandas foram apagadas.");
+  };
 
   if (!user) return <AuthPage onLogin={handleLogin} />;
 
-  // Define the Header Content here (Buttons)
   const headerActions = (
     <div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700">
-        <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button>
+        <Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button>
         <div className="w-px bg-slate-700 h-6 self-center"></div>
+        <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button>
         <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button>
     </div>
   );
@@ -1261,24 +1397,34 @@ export default function App() {
         {/* Modals */}
         {isUploadModalOpen && (
              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-                 <div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-lg w-full shadow-2xl">
+                 <div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl">
                      <h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3>
-                     <div className="space-y-4">
+                     <div className="space-y-6">
                          {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
-                             <div key={type}>
-                                 <label className="block text-sm text-slate-400 mb-1">{type}</label>
-                                 <input 
-                                    type="file" 
-                                    accept=".xlsx, .xls"
-                                    onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} 
-                                    className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg"
-                                 />
+                             <div key={type} className="flex items-end gap-3">
+                                 <div className="flex-1">
+                                     <label className="block text-sm text-slate-400 mb-1">{type}</label>
+                                     <input 
+                                        type="file" 
+                                        accept=".xlsx, .xls"
+                                        onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} 
+                                        className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg"
+                                     />
+                                 </div>
+                                 <Button 
+                                    onClick={() => handleProcessSingleUpload(type as TaskType)} 
+                                    disabled={!uploadFiles[type]} 
+                                    className="h-10 text-xs"
+                                    variant="secondary"
+                                 >
+                                     Processar
+                                 </Button>
                              </div>
                          ))}
                      </div>
-                     <div className="mt-8 flex justify-end gap-3">
+                     <div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4">
                          <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button>
-                         <Button onClick={handleProcessUpload}>Processar Tudo</Button>
+                         <Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button>
                      </div>
                  </div>
              </div>
@@ -1326,7 +1472,7 @@ export default function App() {
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} />} />
-          <Route path="/profile" element={<UserProfile user={user} setUser={setUser} />} />
+          <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>

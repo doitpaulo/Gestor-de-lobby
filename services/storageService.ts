@@ -26,6 +26,14 @@ export const StorageService = {
       console.error("Error saving tasks", e);
     }
   },
+  
+  clearTasks: () => {
+    try {
+        localStorage.removeItem(KEYS.TASKS);
+    } catch (e) {
+        console.error("Error clearing tasks", e);
+    }
+  },
 
   getDevs: (): Developer[] => {
     try {
