@@ -12,6 +12,36 @@ import { ExcelService } from './services/excelService';
 import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus } from './components/Icons';
 
+// --- Helper: Time Parser ---
+const parseDuration = (durationStr: string | undefined): number => {
+    if (!durationStr) return 0;
+    const str = durationStr.toLowerCase().replace(/\s/g, '');
+    
+    // Handle '2h 30m' format if simple concatenation
+    if (str.includes('h') && str.includes('m')) {
+        const parts = str.split('h');
+        const h = parseFloat(parts[0]) || 0;
+        const m = parseFloat(parts[1].replace('m', '')) || 0;
+        return h + (m / 60);
+    }
+
+    if (str.includes('h')) return parseFloat(str.replace('h', '')) || 0;
+    if (str.includes('m')) return (parseFloat(str.replace('m', '')) || 0) / 60;
+    
+    // Default assume hours if just a number
+    const val = parseFloat(str);
+    return isNaN(val) ? 0 : val;
+};
+
+const formatDuration = (hours: number): string => {
+    if (hours === 0) return "0h";
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+};
+
 // --- Components Helpers ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title='' }: any) => {
@@ -50,7 +80,7 @@ const Badge = ({ type, className='' }: { type: string, className?: string }) => 
 
 // --- Filter Component ---
 
-const FilterBar = ({ filters, setFilters }: { filters: any, setFilters: any }) => {
+const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: any, devs?: Developer[] }) => {
   const handleChange = (key: string, value: string) => {
     setFilters((prev: any) => ({ ...prev, [key]: value }));
   };
@@ -104,6 +134,17 @@ const FilterBar = ({ filters, setFilters }: { filters: any, setFilters: any }) =
           <option value="Resolvido">Resolvido</option>
           <option value="Fechado">Fechado</option>
        </select>
+       {devs && (
+           <select 
+              className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+              value={filters.assignee || 'All'}
+              onChange={(e) => handleChange('assignee', e.target.value)}
+           >
+              <option value="All">Todos Devs</option>
+              {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+              <option value="Unassigned">Não Atribuído</option>
+           </select>
+       )}
     </div>
   )
 };
@@ -348,15 +389,41 @@ const GanttView = ({ tasks }: { tasks: Task[] }) => {
   );
 };
 
-// --- Dashboard View ---
+// --- Dashboard Widget System ---
+
+interface Widget {
+    id: string;
+    type: 'cards' | 'priority' | 'status' | 'devType' | 'capacity';
+    title: string;
+    size: 'half' | 'full';
+    visible: boolean;
+}
+
+const DEFAULT_WIDGETS: Widget[] = [
+    { id: 'w1', type: 'cards', title: 'KPIs Gerais', size: 'full', visible: true },
+    { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true },
+    { id: 'w3', type: 'status', title: 'Distribuição por Status', size: 'half', visible: true },
+    { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true },
+    { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
+];
 
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+  const [widgets, setWidgets] = useState<Widget[]>(() => {
+      const saved = localStorage.getItem('nexus_dashboard_widgets');
+      return saved ? JSON.parse(saved) : DEFAULT_WIDGETS;
+  });
+  const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string>('All');
+
+  useEffect(() => {
+      localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets));
+  }, [widgets]);
 
   const filteredTasks = useMemo(() => {
     return filterDev === 'All' ? tasks : tasks.filter(t => t.assignee === filterDev);
   }, [tasks, filterDev]);
 
+  // --- Metrics Calculation ---
   const metrics = useMemo(() => ({
     incidents: filteredTasks.filter(t => t.type === 'Incidente').length,
     features: filteredTasks.filter(t => t.type === 'Melhoria').length,
@@ -369,14 +436,12 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     filteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [filteredTasks]);
-
-  const capacityData = useMemo(() => {
-    const data = devs.map(dev => ({
-        name: dev.name,
-        tasks: tasks.filter(t => t.assignee === dev.name && t.status !== 'Concluído' && t.status !== 'Resolvido').length
-    }));
-    return data.sort((a, b) => a.tasks - b.tasks);
-  }, [tasks, devs]);
+  
+  const statusData = useMemo(() => {
+      const counts: any = {};
+      filteredTasks.forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1; });
+      return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [filteredTasks]);
 
   const devTypeData = useMemo(() => {
     return devs.map(dev => {
@@ -390,18 +455,68 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     }).filter(d => (d.Incidente + d.Melhoria + d['Nova Automação']) > 0);
   }, [tasks, devs]);
 
+  // --- Capacity Logic (Time Based & Availability) ---
+  const capacityData = useMemo(() => {
+    const data = devs.map(dev => {
+        // Filter tasks that are NOT done/resolved/closed
+        const activeTasks = tasks.filter(t => 
+            t.assignee === dev.name && 
+            !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)
+        );
+        
+        // Sum estimated time (Calculate workload time)
+        const totalHours = activeTasks.reduce((acc, t) => {
+            return acc + parseDuration(t.estimatedTime);
+        }, 0);
+
+        return {
+            name: dev.name,
+            activeTasksCount: activeTasks.length,
+            totalHours: totalHours
+        };
+    });
+    
+    // Sort by totalHours Ascending (Least busy first -> Available First)
+    return data.sort((a, b) => a.totalHours - b.totalHours);
+  }, [tasks, devs]);
+
+  // --- Widget Actions ---
+  const toggleSize = (id: string) => {
+      setWidgets(prev => prev.map(w => w.id === id ? { ...w, size: w.size === 'full' ? 'half' : 'full' } : w));
+  };
+
+  const moveWidget = (index: number, direction: 'up' | 'down') => {
+      const newWidgets = [...widgets];
+      if (direction === 'up' && index > 0) {
+          [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]];
+      } else if (direction === 'down' && index < newWidgets.length - 1) {
+          [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]];
+      }
+      setWidgets(newWidgets);
+  };
+  
+  const toggleVisibility = (id: string) => {
+      setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
+  };
+
   const exportPPT = () => {
     const pres = new pptxgen();
     pres.layout = 'LAYOUT_WIDE';
+    pres.author = 'Nexus Project';
+    pres.company = 'Nexus';
+    pres.subject = 'Relatório de Projetos';
+    pres.title = 'One Page Project Report';
     
+    // Slide 1: Title
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
-    slide.addText("Relatório Nexus Project", { x: 1, y: 2, fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
-    slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 3, fontSize: 18, color: '94a3b8', align: 'center' });
+    slide.addText("Relatório One Page Project", { x: 1, y: 2, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
 
+    // Slide 2: KPIs (Text Based)
     slide = pres.addSlide();
     slide.background = { color: "0f172a" };
-    slide.addText("Métricas Gerais", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+    slide.addText("Métricas Gerais (KPIs)", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
     
     const stats = [
       { label: "Total", val: metrics.total, color: "FFFFFF" },
@@ -409,193 +524,286 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
       { label: "Melhorias", val: metrics.features, color: "10B981" },
       { label: "Automações", val: metrics.automations, color: "6366F1" }
     ];
-    
     stats.forEach((stat, i) => {
-        slide.addText(`${stat.label}\n${stat.val}`, { 
-            x: 1 + (i * 2.5), y: 2, w: 2, h: 1.5, 
-            fill: "1e293b", color: stat.color, align: 'center', fontSize: 20, bold: true 
-        });
+        slide.addShape(pres.ShapeType.rect, { x: 1 + (i * 2.5), y: 2, w: 2.2, h: 2, fill: { color: "1e293b" }, line: { color: "334155", width: 1 } });
+        slide.addText(stat.label, { x: 1 + (i * 2.5), y: 2.2, w: 2.2, h: 0.5, color: '94a3b8', align: 'center', fontSize: 14 });
+        slide.addText(String(stat.val), { x: 1 + (i * 2.5), y: 2.8, w: 2.2, h: 1, color: stat.color, align: 'center', fontSize: 32, bold: true });
     });
 
-    pres.writeFile({ fileName: "Nexus_Report.pptx" });
+    // Helper for Chart Slides
+    const addChartSlide = (title: string, type: any, data: any, opts: any) => {
+        const s = pres.addSlide();
+        s.background = { color: "0f172a" };
+        s.addText(title, { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
+        s.addChart(type, data, { x: 1, y: 1.5, w: '80%', h: '70%', ...opts });
+        return s;
+    };
+
+    // Slide 3: Priority (Bar)
+    addChartSlide("Demandas por Prioridade", pres.ChartType.bar, priorityData.map(p => ({
+        name: p.name,
+        labels: [p.name],
+        values: [p.value]
+    })), { barDir: 'col', chartColors: ['8b5cf6'], valAxisMinVal: 0, valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
+
+    // Slide 4: Status (Pie)
+    addChartSlide("Distribuição por Status", pres.ChartType.pie, statusData.map(s => ({
+        name: s.name,
+        labels: [s.name],
+        values: [s.value]
+    })), { showLegend: true, legendPos: 'r', legendColor: 'FFFFFF' });
+
+    // Slide 5: Dev Workload (Stacked Bar) - New Slide requested implicitly by "all charts"
+    if (devTypeData.length > 0) {
+        const devNames = devTypeData.map(d => d.name);
+        const incData = devTypeData.map(d => d.Incidente);
+        const featData = devTypeData.map(d => d.Melhoria);
+        const autoData = devTypeData.map(d => d['Nova Automação']);
+
+        addChartSlide("Demandas por Desenvolvedor (Tipo)", pres.ChartType.bar, [
+            { name: 'Incidentes', labels: devNames, values: incData },
+            { name: 'Melhorias', labels: devNames, values: featData },
+            { name: 'Automações', labels: devNames, values: autoData }
+        ], { barDir: 'col', showLegend: true, legendPos: 'b', valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8', chartColors: ['f43f5e', '10b981', '6366f1'] });
+    }
+
+    // Slide 6: Capacity (Bar) - Time Based
+    // Sorted by availability (least hours first)
+    const capLabels = capacityData.map(d => d.name);
+    const capValues = capacityData.map(d => d.totalHours);
+    const s = addChartSlide("Capacidade & Disponibilidade (Horas Estimadas)", pres.ChartType.bar, [
+        {
+            name: 'Horas Estimadas Pendentes',
+            labels: capLabels,
+            values: capValues
+        }
+    ], { 
+        barDir: 'bar', 
+        chartColors: ['10b981'], 
+        valAxisLabelColor: '94a3b8', 
+        catAxisLabelColor: '94a3b8',
+        valAxisTitle: 'Horas'
+    });
+    
+    // Add suggestion text to slide
+    if (capacityData.length > 0) {
+        const bestDev = capacityData[0];
+        s.addText(`Sugestão de Atribuição: ${bestDev.name} (Livre em ~${formatDuration(bestDev.totalHours)})`, { 
+            x: 1, y: 1, w: '80%', h: 0.5, color: '10b981', fontSize: 14, bold: true 
+        });
+    }
+
+    pres.writeFile({ fileName: "Nexus_OnePageReport.pptx" });
   };
 
+  const renderWidget = (widget: Widget) => {
+      return (
+          <div className="h-full flex flex-col">
+             {/* Widget Header */}
+             <div className="flex justify-between items-center mb-4">
+                 <h3 className="text-lg font-semibold text-slate-200">{widget.title}</h3>
+                 {isEditMode && (
+                     <div className="flex items-center gap-1 bg-slate-900 rounded p-1">
+                         <button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400" title="Alterar Tamanho">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                 {widget.size === 'full' ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" /> : <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />}
+                             </svg>
+                         </button>
+                         <button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400" title="Ocultar">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                         </button>
+                     </div>
+                 )}
+             </div>
+             
+             {/* Widget Content */}
+             <div className="flex-1 min-h-[250px]">
+                 {widget.type === 'cards' && (
+                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-slate-500 flex flex-col justify-between">
+                            <span className="text-slate-400 text-xs uppercase font-bold">Total</span>
+                            <span className="text-3xl font-bold text-white">{metrics.total}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-500 flex flex-col justify-between">
+                            <span className="text-rose-400 text-xs uppercase font-bold">Incidentes</span>
+                            <span className="text-3xl font-bold text-white">{metrics.incidents}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-500 flex flex-col justify-between">
+                            <span className="text-emerald-400 text-xs uppercase font-bold">Melhorias</span>
+                            <span className="text-3xl font-bold text-white">{metrics.features}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between">
+                            <span className="text-indigo-400 text-xs uppercase font-bold">Automações</span>
+                            <span className="text-3xl font-bold text-white">{metrics.automations}</span>
+                        </div>
+                     </div>
+                 )}
+                 {widget.type === 'priority' && (
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={priorityData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                            <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
+                            <YAxis stroke="#94a3b8" />
+                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
+                            <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                 )}
+                 {widget.type === 'status' && (
+                     <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <Pie
+                                data={statusData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={80}
+                                paddingAngle={5}
+                                dataKey="value"
+                                label={({ name, value }) => `${name}: ${value}`} 
+                            >
+                                {statusData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={['#f43f5e', '#10b981', '#6366f1', '#eab308', '#0ea5e9', '#8b5cf6', '#64748b'][index % 7]} />
+                                ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} />
+                            <Legend />
+                        </PieChart>
+                     </ResponsiveContainer>
+                 )}
+                 {widget.type === 'devType' && (
+                     <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={true} vertical={false} />
+                            <XAxis type="number" stroke="#94a3b8" />
+                            <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12}} width={100} />
+                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
+                            <Legend />
+                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" />
+                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981" />
+                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                 )}
+                 {widget.type === 'capacity' && (
+                     <div className="h-full flex flex-col">
+                        {capacityData.length > 0 && (
+                            <div className="bg-emerald-900/20 border border-emerald-700/50 px-4 py-4 rounded-lg mb-4 flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                                    <IconClock className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <p className="text-[11px] text-emerald-400 font-bold uppercase tracking-widest mb-1">Sugestão (Disponível 1º)</p>
+                                    <p className="text-xl text-white font-bold leading-none">{capacityData[0].name}</p>
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Livre em aprox. <span className="text-white font-mono">{formatDuration(capacityData[0].totalHours)}</span>
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
+                             {capacityData.map((dev, idx) => {
+                                 const maxHours = Math.max(...capacityData.map(d => d.totalHours), 8); 
+                                 // Color scale based on workload
+                                 let barColor = 'bg-emerald-500'; 
+                                 if (dev.totalHours >= 15) barColor = 'bg-yellow-500'; 
+                                 if (dev.totalHours >= 30) barColor = 'bg-rose-500';
+
+                                 return (
+                                    <div key={dev.name} className="flex flex-col gap-1.5 group">
+                                        <div className="flex justify-between text-xs items-end">
+                                            <span className="font-medium text-slate-300">{dev.name}</span>
+                                            <span className="text-slate-400 font-mono">{formatDuration(dev.totalHours)} <span className="text-slate-600">/ {dev.activeTasksCount} tasks</span></span>
+                                        </div>
+                                        <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
+                                            <div 
+                                                className={`h-full rounded-full transition-all duration-1000 ${barColor} relative`}
+                                                style={{ width: `${Math.min((dev.totalHours / maxHours) * 100, 100)}%` }}
+                                            >
+                                            </div>
+                                        </div>
+                                    </div>
+                                 )
+                             })}
+                        </div>
+                     </div>
+                 )}
+             </div>
+          </div>
+      )
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-20">
       {/* Top Bar */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-             <h2 className="text-2xl font-bold text-white">Dashboard</h2>
-             <p className="text-slate-400 text-sm">Visão geral de performance e demandas</p>
+             <h2 className="text-2xl font-bold text-white">One Page Report</h2>
+             <p className="text-slate-400 text-sm">Visão executiva e operacional do projeto</p>
         </div>
-        <div className="flex gap-4 w-full md:w-auto">
+        <div className="flex flex-wrap gap-4 w-full md:w-auto items-center">
+          {/* Filter for just the dashboard view */}
           <select 
             className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto"
             value={filterDev}
             onChange={(e) => setFilterDev(e.target.value)}
           >
-            <option value="All">Todos Desenvolvedores</option>
+            <option value="All">Filtrar: Todos</option>
             {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
           </select>
-          <Button onClick={exportPPT} variant="secondary" className="whitespace-nowrap"><IconDownload /> PPT</Button>
+          
+          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"} className="whitespace-nowrap">
+              {isEditMode ? 'Salvar Layout' : 'Editar Layout'}
+          </Button>
+          
+          <Button onClick={exportPPT} variant="primary" className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700">
+              <IconDownload /> Exportar PPT
+          </Button>
         </div>
       </div>
-
-      {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="border-t-4 border-t-slate-500">
-          <h3 className="text-slate-400 text-xs uppercase font-bold tracking-wider">Total</h3>
-          <div className="flex justify-between items-end mt-2">
-            <p className="text-4xl font-bold text-white">{metrics.total}</p>
-            <IconList />
+      
+      {/* Hidden Widgets Menu */}
+      {isEditMode && widgets.some(w => !w.visible) && (
+          <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 flex gap-4 items-center overflow-x-auto animate-slide-in">
+              <span className="text-sm text-slate-400 font-medium whitespace-nowrap">Widgets Disponíveis:</span>
+              {widgets.filter(w => !w.visible).map(w => (
+                  <button key={w.id} onClick={() => toggleVisibility(w.id)} className="bg-slate-700 hover:bg-indigo-600 px-3 py-1 rounded text-xs text-white transition-colors border border-slate-600 flex items-center gap-2">
+                      <IconPlus className="w-3 h-3" /> {w.title}
+                  </button>
+              ))}
           </div>
-        </Card>
-        <Card className="border-t-4 border-t-rose-500 bg-gradient-to-br from-slate-800 to-rose-900/20">
-          <h3 className="text-rose-400 text-xs uppercase font-bold tracking-wider">Incidentes</h3>
-           <div className="flex justify-between items-end mt-2">
-             <p className="text-4xl font-bold text-white">{metrics.incidents}</p>
-           </div>
-        </Card>
-        <Card className="border-t-4 border-t-emerald-500 bg-gradient-to-br from-slate-800 to-emerald-900/20">
-          <h3 className="text-emerald-400 text-xs uppercase font-bold tracking-wider">Melhorias</h3>
-           <div className="flex justify-between items-end mt-2">
-              <p className="text-4xl font-bold text-white">{metrics.features}</p>
-           </div>
-        </Card>
-        <Card className="border-t-4 border-t-indigo-500 bg-gradient-to-br from-slate-800 to-indigo-900/20">
-          <h3 className="text-indigo-400 text-xs uppercase font-bold tracking-wider">Automações</h3>
-           <div className="flex justify-between items-end mt-2">
-             <p className="text-4xl font-bold text-white">{metrics.automations}</p>
-           </div>
-        </Card>
+      )}
+
+      {/* Dynamic Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+         {widgets.filter(w => w.visible).map((widget, index) => (
+             <div 
+                key={widget.id} 
+                className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300`}
+             >
+                 <Card className="h-full min-h-[340px] flex flex-col">
+                     {renderWidget(widget)}
+                 </Card>
+                 
+                 {/* Floating Move Buttons for Edit Mode */}
+                 {isEditMode && (
+                     <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 p-1.5 rounded border border-slate-700 shadow-xl z-20">
+                         {index > 0 && (
+                            <button onClick={() => moveWidget(index, 'up')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Cima/Esquerda">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                            </button>
+                         )}
+                         {index < widgets.filter(w => w.visible).length - 1 && (
+                            <button onClick={() => moveWidget(index, 'down')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Baixo/Direita">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                            </button>
+                         )}
+                     </div>
+                 )}
+             </div>
+         ))}
       </div>
 
-      {/* Charts Row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <h3 className="text-lg font-semibold mb-6 text-slate-200">Demandas por Prioridade</h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={priorityData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 12}} />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
-                <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={50} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card>
-          <h3 className="text-lg font-semibold mb-6 text-slate-200">Distribuição de Tipos</h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[
-                      { name: 'Incidente', value: metrics.incidents },
-                      { name: 'Melhoria', value: metrics.features },
-                      { name: 'Automação', value: metrics.automations }
-                  ]}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  label={({ value }) => `${value}`} 
-                >
-                  <Cell fill="#f43f5e" />
-                  <Cell fill="#10b981" />
-                  <Cell fill="#6366f1" />
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-       {/* New Chart: Dev Type Distribution */}
-       <Card>
-           <h3 className="text-lg font-semibold mb-6 text-slate-200">Tipos de Demanda por Desenvolvedor</h3>
-           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={true} vertical={false} />
-                    <XAxis type="number" stroke="#94a3b8" />
-                    <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12}} width={100} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
-                    <Legend />
-                    <Bar dataKey="Incidente" stackId="a" fill="#f43f5e">
-                         <LabelList dataKey="Incidente" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
-                    </Bar>
-                    <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
-                         <LabelList dataKey="Melhoria" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
-                    </Bar>
-                    <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1">
-                         <LabelList dataKey="Nova Automação" position="center" style={{ fill: 'white', fontSize: '10px', fontWeight: 'bold' }} formatter={(val: any) => val > 0 ? val : ''} />
-                    </Bar>
-                </BarChart>
-            </ResponsiveContainer>
-           </div>
-       </Card>
-
-       {/* Capacity Chart */}
-       <Card>
-          <div className="flex justify-between items-start mb-6">
-            <div>
-                <h3 className="text-lg font-bold text-slate-200">Capacidade & Disponibilidade (Total)</h3>
-                <p className="text-sm text-slate-400">Ranking do menos ocupado para o mais ocupado</p>
-            </div>
-            {capacityData.length > 0 && (
-                <div className="bg-emerald-900/30 border border-emerald-700/50 px-3 py-2 rounded-lg">
-                     <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-0.5">Sugestão de Atribuição</p>
-                     <p className="text-sm text-white font-semibold">{capacityData[0].name}</p>
-                </div>
-            )}
-          </div>
-          
-          <div className="space-y-4 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-              {capacityData.map((dev, idx) => {
-                  const max = Math.max(...capacityData.map(d => d.tasks), 10); 
-                  let barColor = 'bg-emerald-500'; 
-                  let loadText = 'Livre';
-                  let textColor = 'text-emerald-400';
-
-                  if (dev.tasks >= 5) {
-                      barColor = 'bg-yellow-500';
-                      loadText = 'Moderado';
-                      textColor = 'text-yellow-400';
-                  }
-                  if (dev.tasks > 8) {
-                      barColor = 'bg-rose-500';
-                      loadText = 'Crítico';
-                      textColor = 'text-rose-500';
-                  }
-
-                  return (
-                    <div key={dev.name} className="flex items-center gap-4 group">
-                        <div className="w-8 text-slate-500 text-xs font-mono">#{idx + 1}</div>
-                        <div className="w-32 text-sm text-slate-300 truncate font-medium">{dev.name}</div>
-                        <div className="flex-1 h-3 bg-slate-700 rounded-full overflow-hidden relative">
-                            <div 
-                                className={`h-full rounded-full transition-all duration-1000 ${barColor}`} 
-                                style={{ width: `${(dev.tasks / max) * 100}%`, minWidth: '4px' }}
-                            ></div>
-                        </div>
-                        <div className="text-right w-20">
-                            <span className={`text-sm font-bold ${textColor} mr-2`}>{dev.tasks}</span>
-                            <span className="text-[10px] text-slate-500 uppercase">{loadText}</span>
-                        </div>
-                    </div>
-                  );
-              })}
-              {capacityData.length === 0 && <p className="text-sm text-slate-500 text-center">Nenhum desenvolvedor encontrado.</p>}
-          </div>
-       </Card>
     </div>
   );
 };
@@ -603,7 +811,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 // --- Kanban View ---
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All' });
+  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
 
   const onDrop = (e: React.DragEvent, newStatus: string, newAssignee: string | null) => {
     e.preventDefault();
@@ -642,7 +850,9 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
         const matchesType = filters.type === 'All' || t.type === filters.type;
         const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
         const matchesStatus = filters.status === 'All' || t.status === filters.status;
-        return matchesSearch && matchesType && matchesPriority && matchesStatus;
+        const matchesAssignee = filters.assignee === 'All' || 
+                                (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+        return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
     });
   }, [tasks, filters]);
 
@@ -654,7 +864,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 
   return (
     <div className="h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} />
+      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
       
       <div className="flex-1 overflow-x-auto pb-2">
         <div className="flex gap-4 h-full min-w-max px-2">
@@ -724,7 +934,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 // --- List View ---
 
 const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All' });
+  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   
   const filtered = tasks.filter(t => {
@@ -734,7 +944,9 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       const matchesType = filters.type === 'All' || t.type === filters.type;
       const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
       const matchesStatus = filters.status === 'All' || t.status === filters.status;
-      return matchesSearch && matchesType && matchesPriority && matchesStatus;
+      const matchesAssignee = filters.assignee === 'All' || 
+                              (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+      return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
   });
 
   const toggleSelect = (id: string) => {
@@ -795,7 +1007,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} />
+      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
 
       <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
         <div className="flex gap-2 items-center w-full">
