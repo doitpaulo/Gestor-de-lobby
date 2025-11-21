@@ -324,68 +324,163 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 
 // --- Gantt View ---
 
-const GanttView = ({ tasks }: { tasks: Task[] }) => {
+const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
+
+  const filteredTasks = useMemo(() => {
+      return tasks.filter(t => {
+          const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+          const matchesType = filters.type === 'All' || t.type === filters.type;
+          const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
+          const matchesStatus = filters.status === 'All' || t.status === filters.status;
+          const matchesAssignee = filters.assignee === 'All' || 
+                                  (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+          // Must have dates to show in Gantt
+          return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee && t.startDate && t.endDate;
+      });
+  }, [tasks, filters]);
+
   const timelineData = useMemo(() => {
-    return tasks
-      .filter(t => t.startDate && t.endDate)
+    return filteredTasks
       .map(t => ({
         ...t,
         start: new Date(t.startDate!).getTime(),
         end: new Date(t.endDate!).getTime()
       }))
       .sort((a, b) => a.start - b.start);
-  }, [tasks]);
+  }, [filteredTasks]);
 
   if (timelineData.length === 0) {
-    return <div className="flex items-center justify-center h-96 text-slate-500">Adicione datas de início e fim às tarefas para visualizar o Gantt.</div>;
+    return (
+        <div className="h-full flex flex-col">
+             <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+             <div className="flex-1 flex items-center justify-center text-slate-500 bg-slate-800/30 rounded-xl border border-slate-700/50">
+                 Adicione datas de início e fim às tarefas e verifique os filtros para visualizar o cronograma.
+             </div>
+        </div>
+    );
   }
 
   const minDate = Math.min(...timelineData.map(t => t.start));
   const maxDate = Math.max(...timelineData.map(t => t.end));
   const dayMs = 86400000;
-  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 5;
+  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 10; // Padding
+  const cellWidth = 50; // Width per day
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+  const isTodayVisible = todayMs >= minDate && todayMs <= (minDate + (totalDays * dayMs));
+  const todayOffset = Math.floor((todayMs - minDate) / dayMs);
 
   return (
-    <Card className="overflow-hidden">
-      <h3 className="text-lg font-bold text-white mb-4">Linha do Tempo</h3>
-      <div className="overflow-x-auto pb-4">
-        <div className="relative min-w-[800px]" style={{ width: `${totalDays * 40}px` }}>
-          <div className="flex border-b border-slate-700 mb-2">
-             {Array.from({ length: totalDays }).map((_, i) => {
-                 const d = new Date(minDate + i * dayMs);
-                 return (
-                     <div key={i} className="w-10 text-[10px] text-slate-500 text-center border-l border-slate-800 py-1">
-                         {d.getDate()}/{d.getMonth() + 1}
-                     </div>
-                 )
-             })}
-          </div>
-          <div className="space-y-2">
-            {timelineData.map(task => {
-               const duration = Math.ceil((task.end - task.start) / dayMs) + 1;
-               const offset = Math.ceil((task.start - minDate) / dayMs);
-               let colorClass = "bg-slate-600";
-               if (task.type === 'Incidente') colorClass = "bg-rose-500";
-               if (task.type === 'Melhoria') colorClass = "bg-emerald-500";
-               if (task.type === 'Nova Automação') colorClass = "bg-indigo-500";
+    <div className="h-full flex flex-col space-y-4">
+      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+      
+      <Card className="flex-1 p-0 overflow-hidden flex flex-col bg-slate-900 border-slate-700">
+         {/* Header + Scroll Area */}
+         <div className="flex-1 flex overflow-hidden">
+             
+             {/* Fixed Left Column (Task Info) */}
+             <div className="w-80 flex-shrink-0 bg-slate-800/80 border-r border-slate-700 z-20 shadow-lg">
+                 <div className="h-12 bg-slate-800 border-b border-slate-700 flex items-center px-4 font-bold text-slate-300 text-sm">
+                     Tarefas
+                 </div>
+                 <div className="overflow-y-hidden">
+                     {timelineData.map((task, idx) => (
+                         <div key={task.id} className="h-12 border-b border-slate-700/50 flex flex-col justify-center px-4 group hover:bg-slate-700/30">
+                             <div className="flex justify-between items-center">
+                                 <span className="text-sm font-medium text-slate-200 truncate w-48" title={task.summary}>{task.summary}</span>
+                                 <Badge type={task.status} className="text-[9px] px-1" />
+                             </div>
+                             <span className="text-xs text-slate-500 truncate">{task.assignee || 'Sem atribuição'}</span>
+                         </div>
+                     ))}
+                 </div>
+             </div>
 
-               return (
-                   <div key={task.id} className="relative h-8 hover:bg-slate-700/30 rounded flex items-center group">
-                       <div 
-                          className={`absolute h-5 rounded shadow-lg ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center px-2 overflow-hidden whitespace-nowrap text-xs text-white font-medium`}
-                          style={{ left: `${offset * 40}px`, width: `${duration * 40}px` }}
-                          title={`${task.summary} (${new Date(task.start).toLocaleDateString()} - ${new Date(task.end).toLocaleDateString()})`}
-                       >
-                           {task.assignee && <span className="mr-2 opacity-75">[{task.assignee}]</span>}
-                           {task.summary}
-                       </div>
-                   </div>
-               )
-            })}
-          </div>
-        </div>
-      </div>
-    </Card>
+             {/* Scrollable Timeline */}
+             <div className="flex-1 overflow-auto custom-scrollbar relative bg-slate-900/50">
+                 <div style={{ width: `${totalDays * cellWidth}px` }}>
+                     {/* Calendar Header */}
+                     <div className="h-12 bg-slate-800 border-b border-slate-700 flex sticky top-0 z-10">
+                         {Array.from({ length: totalDays }).map((_, i) => {
+                             const d = new Date(minDate + i * dayMs);
+                             const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                             const isToday = d.getTime() === todayMs;
+                             return (
+                                 <div key={i} className={`flex-shrink-0 text-center border-r border-slate-700 py-2 text-[10px] ${isWeekend ? 'bg-slate-800/50' : ''} ${isToday ? 'bg-indigo-900/30' : ''}`} style={{ width: `${cellWidth}px` }}>
+                                     <div className="font-bold text-slate-400">{d.getDate()}</div>
+                                     <div className="text-slate-600">{d.toLocaleDateString('pt-BR', { weekday: 'narrow' })}</div>
+                                 </div>
+                             )
+                         })}
+                     </div>
+
+                     {/* Grid Lines & Today Line */}
+                     <div className="absolute inset-0 top-12 z-0 pointer-events-none flex">
+                         {Array.from({ length: totalDays }).map((_, i) => {
+                             const d = new Date(minDate + i * dayMs);
+                             const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                             return (
+                                 <div key={i} className={`h-full border-r border-slate-700/30 flex-shrink-0 ${isWeekend ? 'bg-black/20' : ''}`} style={{ width: `${cellWidth}px` }}></div>
+                             )
+                         })}
+                         {isTodayVisible && (
+                            <div 
+                                className="absolute top-0 bottom-0 w-px bg-rose-500 z-10 shadow-[0_0_10px_rgba(244,63,94,0.5)]" 
+                                style={{ left: `${todayOffset * cellWidth + (cellWidth/2)}px` }}
+                            >
+                                <div className="absolute -top-1 -left-1 w-2 h-2 bg-rose-500 rounded-full"></div>
+                            </div>
+                         )}
+                     </div>
+
+                     {/* Bars */}
+                     <div className="relative z-10">
+                        {timelineData.map((task, idx) => {
+                           const durationMs = task.end - task.start;
+                           const durationDays = Math.floor(durationMs / dayMs) + 1; // +1 to include start day
+                           const offsetDays = Math.floor((task.start - minDate) / dayMs);
+                           
+                           let colorClass = "bg-slate-600";
+                           if (task.type === 'Incidente') colorClass = "bg-rose-500";
+                           if (task.type === 'Melhoria') colorClass = "bg-emerald-500";
+                           if (task.type === 'Nova Automação') colorClass = "bg-indigo-500";
+
+                           const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
+
+                           return (
+                               <div key={task.id} className="h-12 flex items-center relative border-b border-transparent">
+                                   <div 
+                                      className={`absolute h-7 rounded-lg shadow-lg ${colorClass} ${isDone ? 'opacity-60 saturate-0' : 'opacity-90'} hover:opacity-100 transition-all cursor-pointer flex items-center px-2 overflow-hidden whitespace-nowrap text-xs text-white font-medium group border border-white/10`}
+                                      style={{ 
+                                          left: `${offsetDays * cellWidth + 2}px`, 
+                                          width: `${Math.max(durationDays * cellWidth - 4, 40)}px` 
+                                      }}
+                                      title={`${task.summary} (${new Date(task.start).toLocaleDateString()} - ${new Date(task.end).toLocaleDateString()})`}
+                                   >
+                                       {/* Striped pattern overlay */}
+                                       <div className="absolute inset-0 opacity-10 bg-[linear-gradient(45deg,rgba(255,255,255,.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,.15)_50%,rgba(255,255,255,.15)_75%,transparent_75%,transparent)] bg-[length:10px_10px]"></div>
+                                       
+                                       <span className="relative z-10 drop-shadow-md flex justify-between w-full items-center">
+                                           <span className="truncate mr-2">{task.summary}</span>
+                                           {task.estimatedTime && (
+                                               <span className="bg-black/30 px-1 rounded text-[9px]">{Math.ceil(parseDuration(task.estimatedTime)/8)}d</span>
+                                           )}
+                                       </span>
+                                   </div>
+                               </div>
+                           )
+                        })}
+                     </div>
+                 </div>
+             </div>
+         </div>
+      </Card>
+    </div>
   );
 };
 
@@ -449,22 +544,32 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   });
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string>('All');
+  const [filterType, setFilterType] = useState<string>('All');
 
   useEffect(() => {
       localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets));
   }, [widgets]);
 
+  // Tasks filtered by UI controls (Dev & Type)
   const filteredTasks = useMemo(() => {
-    return filterDev === 'All' ? tasks : tasks.filter(t => t.assignee === filterDev);
-  }, [tasks, filterDev]);
+    return tasks.filter(t => {
+        const matchesDev = filterDev === 'All' ? true : t.assignee === filterDev;
+        const matchesType = filterType === 'All' ? true : t.type === filterType;
+        return matchesDev && matchesType;
+    });
+  }, [tasks, filterDev, filterType]);
 
-  // --- Metrics Calculation ---
-  const metrics = useMemo(() => ({
-    incidents: filteredTasks.filter(t => t.type === 'Incidente').length,
-    features: filteredTasks.filter(t => t.type === 'Melhoria').length,
-    automations: filteredTasks.filter(t => t.type === 'Nova Automação').length,
-    total: filteredTasks.length
-  }), [filteredTasks]);
+  // --- Metrics Calculation (KPIs ONLY: Exclude Completed) ---
+  const metrics = useMemo(() => {
+    const activeTasks = filteredTasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+    
+    return {
+        incidents: activeTasks.filter(t => t.type === 'Incidente').length,
+        features: activeTasks.filter(t => t.type === 'Melhoria').length,
+        automations: activeTasks.filter(t => t.type === 'Nova Automação').length,
+        total: activeTasks.length
+    };
+  }, [filteredTasks]);
 
   const priorityData = useMemo(() => {
     const counts: any = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 };
@@ -555,10 +660,10 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     // Slide 2: KPIs (Text Based)
     slide = pres.addSlide();
     slide.background = { color: "0f172a" };
-    slide.addText("Métricas Gerais (KPIs)", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+    slide.addText("Métricas Gerais (KPIs - Projetos Ativos)", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
     
     const stats = [
-      { label: "Total", val: metrics.total, color: "FFFFFF" },
+      { label: "Total Ativo", val: metrics.total, color: "FFFFFF" },
       { label: "Incidentes", val: metrics.incidents, color: "F43F5E" },
       { label: "Melhorias", val: metrics.features, color: "10B981" },
       { label: "Automações", val: metrics.automations, color: "6366F1" }
@@ -660,7 +765,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                  {widget.type === 'cards' && (
                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
                         <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-slate-500 flex flex-col justify-between">
-                            <span className="text-slate-400 text-xs uppercase font-bold">Total</span>
+                            <span className="text-slate-400 text-xs uppercase font-bold">Total (Ativos)</span>
                             <span className="text-3xl font-bold text-white">{metrics.total}</span>
                         </div>
                         <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-500 flex flex-col justify-between">
@@ -840,11 +945,22 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         <div className="flex flex-wrap gap-4 w-full md:w-auto items-center">
           {/* Filter for just the dashboard view */}
           <select 
-            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto"
+            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto md:w-40"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+          >
+             <option value="All">Tipo: Todos</option>
+             <option value="Incidente">Incidente</option>
+             <option value="Melhoria">Melhoria</option>
+             <option value="Nova Automação">Automação</option>
+          </select>
+
+          <select 
+            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto md:w-40"
             value={filterDev}
             onChange={(e) => setFilterDev(e.target.value)}
           >
-            <option value="All">Filtrar: Todos</option>
+            <option value="All">Dev: Todos</option>
             {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
           </select>
           
@@ -1812,7 +1928,7 @@ export default function App() {
           <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
-          <Route path="/gantt" element={<GanttView tasks={tasks} />} />
+          <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
           <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
