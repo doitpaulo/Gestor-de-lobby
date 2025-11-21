@@ -497,7 +497,7 @@ interface Widget {
 const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w1', type: 'cards', title: 'KPIs Gerais', size: 'full', visible: true },
     { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true },
-    { id: 'w3', type: 'status', title: 'Distribuição por Status', size: 'half', visible: true },
+    { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true },
     { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true },
     { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
 ];
@@ -572,15 +572,42 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   }, [filteredTasks]);
 
   const priorityData = useMemo(() => {
-    const counts: any = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 };
+    const counts: Record<string, number> = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 };
     filteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [filteredTasks]);
   
-  const statusData = useMemo(() => {
-      const counts: any = {};
-      filteredTasks.forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1; });
-      return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  // Improved Status Data: Status vs Type Breakdown
+  const statusByTypeData = useMemo(() => {
+      const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Resolvido', 'Fechado', 'Concluído', 'Backlog'];
+      
+      const data: { name: string; Incidente: number; Melhoria: number; 'Nova Automação': number; total: number }[] = STATUS_ORDER.map(status => {
+          const tasksInStatus = filteredTasks.filter(t => t.status === status);
+          return {
+              name: status,
+              Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length,
+              Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length,
+              'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length,
+              total: tasksInStatus.length
+          };
+      }).filter(d => d.total > 0); // Only show statuses that have tasks
+
+      // Handle statuses not in the list
+      const otherStatuses = [...new Set(filteredTasks.map(t => t.status))].filter(s => !STATUS_ORDER.includes(s));
+      otherStatuses.forEach(status => {
+           const tasksInStatus = filteredTasks.filter(t => t.status === status);
+           if (tasksInStatus.length > 0) {
+                data.push({
+                    name: status,
+                    Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length,
+                    Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length,
+                    'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length,
+                    total: tasksInStatus.length
+                });
+           }
+      });
+
+      return data;
   }, [filteredTasks]);
 
   const devTypeData = useMemo(() => {
@@ -690,12 +717,27 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         values: [p.value]
     })), { barDir: 'col', chartColors: ['8b5cf6'], valAxisMinVal: 0, valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
 
-    // Slide 4: Status (Pie)
-    addChartSlide("Distribuição por Status", pres.ChartType.pie, statusData.map(s => ({
-        name: s.name,
-        labels: [s.name],
-        values: [s.value]
-    })), { showLegend: true, legendPos: 'r', legendColor: 'FFFFFF' });
+    // Slide 4: Status (Stacked Bar by Type)
+    if (statusByTypeData.length > 0) {
+        const statusLabels = statusByTypeData.map(s => s.name);
+        const incData = statusByTypeData.map(s => s.Incidente);
+        const featData = statusByTypeData.map(s => s.Melhoria);
+        const autoData = statusByTypeData.map(s => s['Nova Automação']);
+
+        addChartSlide("Distribuição de Status por Tipo", pres.ChartType.bar, [
+            { name: 'Incidentes', labels: statusLabels, values: incData },
+            { name: 'Melhorias', labels: statusLabels, values: featData },
+            { name: 'Automações', labels: statusLabels, values: autoData }
+        ], { 
+            barDir: 'col', 
+            barGrouping: 'stacked', 
+            showLegend: true, 
+            legendPos: 'b', 
+            valAxisLabelColor: '94a3b8', 
+            catAxisLabelColor: '94a3b8', 
+            chartColors: ['f43f5e', '10b981', '6366f1'] 
+        });
+    }
 
     // Slide 5: Dev Workload (Stacked Bar) - New Slide requested implicitly by "all charts"
     if (devTypeData.length > 0) {
@@ -795,24 +837,21 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                  )}
                  {widget.type === 'status' && (
                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={statusData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                                label={({ name, value }) => `${name}: ${value}`} 
-                            >
-                                {statusData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={['#f43f5e', '#10b981', '#6366f1', '#eab308', '#0ea5e9', '#8b5cf6', '#64748b'][index % 7]} />
-                                ))}
-                            </Pie>
-                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} />
-                            <Legend />
-                        </PieChart>
+                         <BarChart 
+                            data={statusByTypeData} 
+                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }} 
+                            barSize={40}
+                         >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                            <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
+                            <YAxis stroke="#94a3b8" />
+                            <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
+                            <Legend wrapperStyle={{paddingTop: '10px'}} />
+                            
+                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" />
+                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981" />
+                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                        </BarChart>
                      </ResponsiveContainer>
                  )}
                  {widget.type === 'devType' && (
@@ -830,7 +869,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                                 type="category" 
                                 stroke="#94a3b8" 
                                 tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} 
-                                width={85} 
+                                width={150} 
+                                interval={0}
                                 tickLine={false}
                                 axisLine={false}
                             />
