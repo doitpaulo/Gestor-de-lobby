@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell, LabelList 
+  PieChart, Pie, Cell, LabelList, ComposedChart, Line 
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
@@ -407,6 +407,41 @@ const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
 ];
 
+const renderCustomBarLabel = ({ x, y, width, height, value }: any) => {
+    if (!value || value === 0 || width < 15) return null;
+    return (
+        <text x={x + width / 2} y={y + height / 2 + 3} fill="#ffffff" textAnchor="middle" fontSize="10" fontWeight="bold">
+            {value}
+        </text>
+    );
+};
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const total = payload.reduce((acc: number, p: any) => {
+        return p.dataKey !== 'total' ? acc + p.value : acc;
+    }, 0);
+
+    return (
+      <div className="bg-slate-800 border border-slate-600 p-3 rounded shadow-xl z-50">
+        <p className="text-slate-200 font-bold mb-2">{label}</p>
+        {payload.filter((p:any) => p.dataKey !== 'total').map((p: any) => (
+          <div key={p.name} className="flex items-center gap-2 text-xs mb-1">
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }}></div>
+            <span className="text-slate-400">{p.name}:</span>
+            <span className="text-white font-mono">{p.value}</span>
+          </div>
+        ))}
+        <div className="border-t border-slate-700 mt-2 pt-1 flex justify-between items-center">
+             <span className="text-slate-400 text-xs">Total</span>
+             <span className="text-white font-bold">{total}</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       const saved = localStorage.getItem('nexus_dashboard_widgets');
@@ -444,15 +479,19 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   }, [filteredTasks]);
 
   const devTypeData = useMemo(() => {
-    return devs.map(dev => {
+    const data = devs.map(dev => {
         const devTasks = tasks.filter(t => t.assignee === dev.name);
         return {
             name: dev.name,
             Incidente: devTasks.filter(t => t.type === 'Incidente').length,
             Melhoria: devTasks.filter(t => t.type === 'Melhoria').length,
             'Nova Automação': devTasks.filter(t => t.type === 'Nova Automação').length,
+            total: devTasks.length
         };
-    }).filter(d => (d.Incidente + d.Melhoria + d['Nova Automação']) > 0);
+    }).filter(d => d.total > 0);
+    
+    // Sort by Total Descending for better visualization ("Bater o olho")
+    return data.sort((a, b) => b.total - a.total);
   }, [tasks, devs]);
 
   // --- Capacity Logic (Time Based & Availability) ---
@@ -564,7 +603,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
             { name: 'Incidentes', labels: devNames, values: incData },
             { name: 'Melhorias', labels: devNames, values: featData },
             { name: 'Automações', labels: devNames, values: autoData }
-        ], { barDir: 'col', showLegend: true, legendPos: 'b', valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8', chartColors: ['f43f5e', '10b981', '6366f1'] });
+        ], { barDir: 'bar', showLegend: true, legendPos: 'b', valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8', chartColors: ['f43f5e', '10b981', '6366f1'] });
     }
 
     // Slide 6: Capacity (Bar) - Time Based
@@ -673,16 +712,46 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                  )}
                  {widget.type === 'devType' && (
                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={true} vertical={false} />
-                            <XAxis type="number" stroke="#94a3b8" />
-                            <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12}} width={100} />
-                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
-                            <Legend />
-                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" />
-                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981" />
-                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" />
-                        </BarChart>
+                        <ComposedChart 
+                            data={devTypeData} 
+                            layout="vertical" 
+                            margin={{ top: 5, right: 60, left: 10, bottom: 5 }} 
+                            barSize={32}
+                        >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} />
+                            <XAxis type="number" stroke="#64748b" tick={{fontSize: 10}} hide />
+                            <YAxis 
+                                dataKey="name" 
+                                type="category" 
+                                stroke="#94a3b8" 
+                                tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} 
+                                width={85} 
+                                tickLine={false}
+                                axisLine={false}
+                            />
+                            <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
+                            <Legend wrapperStyle={{paddingTop: '10px'}} />
+                            
+                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" radius={[4, 0, 0, 4]}>
+                                <LabelList dataKey="Incidente" content={renderCustomBarLabel} />
+                            </Bar>
+                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
+                                <LabelList dataKey="Melhoria" content={renderCustomBarLabel} />
+                            </Bar>
+                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]}>
+                                <LabelList dataKey="Nova Automação" content={renderCustomBarLabel} />
+                            </Bar>
+
+                            {/* Invisible Line to Anchor the Total Label at the end of the bars */}
+                            <Line dataKey="total" stroke="none" isAnimationActive={false}>
+                                <LabelList 
+                                    dataKey="total" 
+                                    position="right" 
+                                    style={{ fill: "#94a3b8", fontSize: "12px", fontWeight: "bold" }}
+                                    formatter={(val: any) => `Total: ${val}`} 
+                                />
+                            </Line>
+                        </ComposedChart>
                     </ResponsiveContainer>
                  )}
                  {widget.type === 'capacity' && (
