@@ -701,30 +701,57 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                                 </div>
                             </div>
                         )}
-                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
-                             {capacityData.map((dev, idx) => {
-                                 const maxHours = Math.max(...capacityData.map(d => d.totalHours), 8); 
-                                 // Color scale based on workload
-                                 let barColor = 'bg-emerald-500'; 
-                                 if (dev.totalHours >= 15) barColor = 'bg-yellow-500'; 
-                                 if (dev.totalHours >= 30) barColor = 'bg-rose-500';
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                             <table className="w-full text-sm">
+                                 <thead className="text-xs text-slate-400 uppercase bg-slate-900/50">
+                                     <tr>
+                                         <th className="text-left p-2 rounded-l">Dev</th>
+                                         <th className="text-center p-2">Backlog</th>
+                                         <th className="text-center p-2">Dias Est.</th>
+                                         <th className="text-center p-2 rounded-r">Saúde</th>
+                                     </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-slate-700/50">
+                                     {capacityData.map((dev, idx) => {
+                                         const estimatedDays = Math.ceil(dev.totalHours / 8);
+                                         let statusColor = 'bg-emerald-500 text-white';
+                                         let statusText = 'Livre';
+                                         let barColor = 'bg-emerald-500';
 
-                                 return (
-                                    <div key={dev.name} className="flex flex-col gap-1.5 group">
-                                        <div className="flex justify-between text-xs items-end">
-                                            <span className="font-medium text-slate-300">{dev.name}</span>
-                                            <span className="text-slate-400 font-mono">{formatDuration(dev.totalHours)} <span className="text-slate-600">/ {dev.activeTasksCount} tasks</span></span>
-                                        </div>
-                                        <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50">
-                                            <div 
-                                                className={`h-full rounded-full transition-all duration-1000 ${barColor} relative`}
-                                                style={{ width: `${Math.min((dev.totalHours / maxHours) * 100, 100)}%` }}
-                                            >
-                                            </div>
-                                        </div>
-                                    </div>
-                                 )
-                             })}
+                                         if (dev.totalHours > 40) {
+                                             statusColor = 'bg-rose-500 text-white';
+                                             statusText = 'Sobrecarga';
+                                             barColor = 'bg-rose-500';
+                                         } else if (dev.totalHours > 24) {
+                                             statusColor = 'bg-orange-500 text-white';
+                                             statusText = 'Ocupado';
+                                             barColor = 'bg-orange-500';
+                                         } else if (dev.totalHours > 8) {
+                                             statusColor = 'bg-yellow-500 text-black';
+                                             statusText = 'Moderado';
+                                             barColor = 'bg-yellow-500';
+                                         }
+
+                                         return (
+                                            <tr key={dev.name} className="group hover:bg-slate-700/30">
+                                                <td className="p-2">
+                                                    <div className="font-medium text-slate-200">{dev.name}</div>
+                                                    <div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                                                        <div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td>
+                                                <td className="p-2 text-center text-slate-400">{estimatedDays}d</td>
+                                                <td className="p-2 text-center">
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusColor}`}>
+                                                        {statusText}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                         )
+                                     })}
+                                 </tbody>
+                             </table>
                         </div>
                      </div>
                  )}
@@ -1291,6 +1318,34 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
         endDate: ''
     });
 
+    // --- Auto-Calculate End Date Logic ---
+    useEffect(() => {
+        // Only auto-calc if we have both StartDate and EstimatedTime
+        // and assume 8 hours work day for calculation
+        if (formData.startDate && formData.estimatedTime) {
+            const hours = parseDuration(formData.estimatedTime);
+            if (hours > 0) {
+                // e.g., 4h -> 0.5 days -> same day
+                // e.g., 8h -> 1 day -> same day
+                // e.g., 9h -> 1.125 days -> next day
+                // Formula: (Hours - 0.1) / 8 gives completed full days to add
+                const daysToAdd = Math.floor((hours - 0.1) / 8);
+                
+                const start = new Date(formData.startDate);
+                // Avoid timezone issues by using setDate
+                const end = new Date(start);
+                end.setDate(start.getDate() + daysToAdd);
+                
+                const endDateStr = end.toISOString().split('T')[0];
+                
+                // Only update if different to avoid loops
+                if (endDateStr !== formData.endDate) {
+                    setFormData(prev => ({ ...prev, endDate: endDateStr }));
+                }
+            }
+        }
+    }, [formData.startDate, formData.estimatedTime]);
+
     const handleChange = (e: any) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
@@ -1370,21 +1425,26 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                        <div className="col-span-2 flex items-center gap-2 mb-2">
+                             <IconClock className="w-4 h-4 text-indigo-400" />
+                             <span className="text-xs text-indigo-300 font-bold">Planejamento Automático</span>
+                             <span className="text-[10px] text-slate-500">(Data Fim calculada baseada no tempo estimado)</span>
+                        </div>
                         <div>
                              <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label>
                              <input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                          <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim</label>
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label>
                              <input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                         <div>
                              <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label>
-                             <input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 2h" />
+                             <input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 8h, 16h, 2d" />
                         </div>
                         <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Real</label>
-                             <input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 2h" />
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label>
+                             <input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} className="w-full bg-slate-800 border-emerald-500/50 border rounded p-2 text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="ex: 2h" />
                         </div>
                     </div>
 
