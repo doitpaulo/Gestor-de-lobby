@@ -10,6 +10,13 @@ export interface HistoryEntry {
   action: string;
 }
 
+export interface Comment {
+  id: string;
+  text: string;
+  user: string;
+  createdAt: string;
+}
+
 export interface Task {
   id: string;
   type: TaskType;
@@ -30,8 +37,9 @@ export interface Task {
   actualTime?: string;
   manualFields?: string[];
   
-  // Audit Log
+  // Audit Log & Collaboration
   history?: HistoryEntry[];
+  comments?: Comment[];
 }
 
 export interface Developer {

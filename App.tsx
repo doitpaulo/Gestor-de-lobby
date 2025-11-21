@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry, Comment } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus } from './components/Icons';
 
 // --- Helper: Time Parser ---
@@ -337,47 +337,90 @@ const GanttView = ({ tasks }: { tasks: Task[] }) => {
   }, [tasks]);
 
   if (timelineData.length === 0) {
-    return <div className="flex items-center justify-center h-96 text-slate-500">Adicione datas de início e fim às tarefas para visualizar o Gantt.</div>;
+    return (
+        <div className="flex flex-col items-center justify-center h-96 text-slate-500 gap-4">
+            <IconClock className="w-12 h-12 opacity-20" />
+            <p>Adicione datas de início e fim às tarefas para visualizar o Gantt.</p>
+        </div>
+    );
   }
 
   const minDate = Math.min(...timelineData.map(t => t.start));
   const maxDate = Math.max(...timelineData.map(t => t.end));
   const dayMs = 86400000;
-  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 5;
+  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 7; // +7 buffer
 
   return (
-    <Card className="overflow-hidden">
-      <h3 className="text-lg font-bold text-white mb-4">Linha do Tempo</h3>
-      <div className="overflow-x-auto pb-4">
-        <div className="relative min-w-[800px]" style={{ width: `${totalDays * 40}px` }}>
-          <div className="flex border-b border-slate-700 mb-2">
+    <Card className="overflow-hidden h-full flex flex-col bg-slate-800/90">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+            <h3 className="text-xl font-bold text-white">Cronograma (Gantt)</h3>
+            <p className="text-xs text-slate-400 mt-1">Visualização temporal das demandas. (1d = 8h de esforço)</p>
+        </div>
+        <div className="flex gap-2 text-xs">
+             <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-500"></span> Incidente</div>
+             <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500"></span> Melhoria</div>
+             <div className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-indigo-500"></span> Automação</div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto pb-4 custom-scrollbar flex-1 border border-slate-700 rounded-lg bg-slate-900/50">
+        <div className="relative min-w-[800px]" style={{ width: `${Math.max(totalDays * 48, 800)}px` }}>
+          {/* Header Dates */}
+          <div className="flex border-b border-slate-700 mb-2 sticky top-0 bg-slate-800 z-20 shadow-md">
              {Array.from({ length: totalDays }).map((_, i) => {
                  const d = new Date(minDate + i * dayMs);
+                 const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                  return (
-                     <div key={i} className="w-10 text-[10px] text-slate-500 text-center border-l border-slate-800 py-1">
-                         {d.getDate()}/{d.getMonth() + 1}
+                     <div key={i} className={`w-12 flex flex-col items-center justify-center border-l border-slate-700/50 py-2 ${isWeekend ? 'bg-slate-900/40' : ''}`}>
+                         <span className="text-[10px] text-slate-500 font-bold">{d.getDate()}</span>
+                         <span className="text-[9px] text-slate-600 uppercase">{d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.','')}</span>
                      </div>
                  )
              })}
           </div>
-          <div className="space-y-2">
-            {timelineData.map(task => {
-               const duration = Math.ceil((task.end - task.start) / dayMs) + 1;
-               const offset = Math.ceil((task.start - minDate) / dayMs);
+          
+          {/* Task Bars */}
+          <div className="space-y-3 px-0 pb-10">
+            {timelineData.map((task, index) => {
+               const durationDays = Math.floor((task.end - task.start) / dayMs) + 1; // Calendar duration
+               const offsetDays = Math.floor((task.start - minDate) / dayMs);
+               
+               // Calculate Effort in Days (8h base)
+               const hours = parseDuration(task.estimatedTime);
+               const effortDays = hours > 0 ? (hours / 8) : 0;
+               const effortDisplay = effortDays > 0 
+                   ? (Number.isInteger(effortDays) ? `${effortDays}d` : `${effortDays.toFixed(1)}d`) 
+                   : '';
+
                let colorClass = "bg-slate-600";
-               if (task.type === 'Incidente') colorClass = "bg-rose-500";
-               if (task.type === 'Melhoria') colorClass = "bg-emerald-500";
-               if (task.type === 'Nova Automação') colorClass = "bg-indigo-500";
+               if (task.type === 'Incidente') colorClass = "bg-rose-600";
+               if (task.type === 'Melhoria') colorClass = "bg-emerald-600";
+               if (task.type === 'Nova Automação') colorClass = "bg-indigo-600";
 
                return (
-                   <div key={task.id} className="relative h-8 hover:bg-slate-700/30 rounded flex items-center group">
+                   <div key={task.id} className="relative h-10 hover:bg-white/5 flex items-center group transition-colors">
+                       {/* Full width row line */}
+                       <div className="absolute inset-0 border-b border-slate-800/30 pointer-events-none"></div>
+                       
                        <div 
-                          className={`absolute h-5 rounded shadow-lg ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center px-2 overflow-hidden whitespace-nowrap text-xs text-white font-medium`}
-                          style={{ left: `${offset * 40}px`, width: `${duration * 40}px` }}
-                          title={`${task.summary} (${new Date(task.start).toLocaleDateString()} - ${new Date(task.end).toLocaleDateString()})`}
+                          className={`absolute h-7 rounded-md shadow-lg ${colorClass} hover:brightness-110 border border-white/10 cursor-pointer flex items-center px-3 overflow-hidden whitespace-nowrap text-xs text-white font-medium transition-all z-10`}
+                          style={{ left: `${offsetDays * 48}px`, width: `${Math.max(durationDays * 48, 48)}px` }}
+                          title={`Tarefa: ${task.summary}
+Dev: ${task.assignee || 'N/A'}
+Início: ${new Date(task.start).toLocaleDateString()}
+Fim: ${new Date(task.end).toLocaleDateString()}
+Duração (Cal): ${durationDays} dias
+Esforço Est.: ${task.estimatedTime || '-'} (${effortDisplay || '-'})`}
                        >
-                           {task.assignee && <span className="mr-2 opacity-75">[{task.assignee}]</span>}
-                           {task.summary}
+                           <div className="flex justify-between items-center w-full gap-2">
+                               <span className="truncate drop-shadow-md">{task.summary}</span>
+                               {effortDisplay && (
+                                   <span className="bg-black/30 px-1.5 py-0.5 rounded text-[10px] font-mono border border-white/10 shadow-sm flex-shrink-0 text-emerald-200">
+                                       {effortDisplay}
+                                   </span>
+                               )}
+                           </div>
                        </div>
                    </div>
                )
@@ -715,7 +758,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                         <ComposedChart 
                             data={devTypeData} 
                             layout="vertical" 
-                            margin={{ top: 5, right: 60, left: 10, bottom: 5 }} 
+                            margin={{ top: 5, right: 60, left: 30, bottom: 5 }} 
                             barSize={32}
                         >
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} />
@@ -725,9 +768,10 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                                 type="category" 
                                 stroke="#94a3b8" 
                                 tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} 
-                                width={85} 
+                                width={150} 
                                 tickLine={false}
                                 axisLine={false}
+                                interval={0}
                             />
                             <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
                             <Legend wrapperStyle={{paddingTop: '10px'}} />
@@ -905,371 +949,153 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 };
 
 // --- Kanban View ---
-
-const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
-
-  const onDrop = (e: React.DragEvent, newStatus: string, newAssignee: string | null) => {
-    e.preventDefault();
-    const taskId = e.dataTransfer.getData("taskId");
-    
-    const updatedTasks = tasks.map(t => {
-      if (t.id === taskId) {
-        let status = t.status;
-        if (newStatus === 'Concluído') status = 'Resolvido';
-        else if (t.status === 'Resolvido' || t.status === 'Concluído') status = 'Em Atendimento'; 
-        
-        const updatedTask = { ...t, status: status, assignee: newAssignee };
-        
-        const history = detectChanges(t, updatedTask, user);
-        if(history.length > 0) {
-             updatedTask.history = [...(t.history || []), ...history];
-        }
-        
-        return updatedTask;
-      }
-      return t;
-    });
-    setTasks(updatedTasks);
-    StorageService.saveTasks(updatedTasks);
-  };
-
-  const onDragStart = (e: React.DragEvent, taskId: string) => {
-    e.dataTransfer.setData("taskId", taskId);
-  };
-
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
-        const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
-                              t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
-                              (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-        const matchesType = filters.type === 'All' || t.type === filters.type;
-        const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-        const matchesStatus = filters.status === 'All' || t.status === filters.status;
-        const matchesAssignee = filters.assignee === 'All' || 
-                                (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
-        return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
-    });
-  }, [tasks, filters]);
-
-  const columns = [
-    { id: 'unassigned', title: 'Sem Atribuição', assignee: null, status: 'Backlog', isDone: false },
-    ...devs.map(d => ({ id: d.id, title: d.name, assignee: d.name, status: 'In Progress', isDone: false })),
-    { id: 'done', title: 'Concluído', assignee: null, status: 'Concluído', isDone: true }
-  ];
-
-  return (
-    <div className="h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-      
-      <div className="flex-1 overflow-x-auto pb-2">
-        <div className="flex gap-4 h-full min-w-max px-2">
-          {columns.map(col => (
-            <div 
-              key={col.id}
-              className={`flex-1 min-w-[320px] rounded-xl border flex flex-col ${col.isDone ? 'bg-emerald-900/20 border-emerald-800' : 'bg-slate-800/50 border-slate-700'}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDrop(e, col.status, col.assignee)}
-            >
-              <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${col.isDone ? 'bg-emerald-900/50 border-emerald-800' : 'bg-slate-800/80 border-slate-700'}`}>
-                <h3 className="font-semibold text-white">{col.title}</h3>
-                <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">
-                  {filteredTasks.filter(t => {
-                      if (col.isDone) return t.status === 'Resolvido' || t.status === 'Concluído';
-                      if (col.id === 'unassigned') return !t.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                      return t.assignee === col.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                  }).length}
-                </span>
-              </div>
-              
-              <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar">
-                {filteredTasks
-                  .filter(t => {
-                      if (col.isDone) return t.status === 'Resolvido' || t.status === 'Concluído';
-                      if (col.id === 'unassigned') return !t.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                      return t.assignee === col.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                  })
-                  .map(task => (
-                    <div
-                      key={task.id}
-                      draggable
-                      onDragStart={(e) => onDragStart(e, task.id)}
-                      onClick={() => onEditTask(task)}
-                      className="bg-slate-700 p-4 rounded-lg border border-slate-600 hover:border-indigo-500 hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all"
-                    >
-                      <div className={`absolute left-0 top-0 bottom-0 w-1 ${
-                          task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'
-                      }`}></div>
-
-                      <div className="flex justify-between items-start mb-2 pl-2">
-                        <span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span>
-                        <Badge type={task.priority} />
-                      </div>
-                      
-                      <h4 className="text-sm font-medium text-slate-100 mb-3 pl-2 line-clamp-3">{task.summary}</h4>
-                      
-                      <div className="flex justify-between items-center pl-2 mt-auto">
-                          <Badge type={task.type} />
-                          {task.estimatedTime && (
-                              <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded">
-                                  <IconClock /> {task.estimatedTime}
-                              </div>
-                          )}
-                      </div>
-                    </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- List View ---
-
-const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+const KanbanView = ({ tasks, onUpdateStatus }: { tasks: Task[], onUpdateStatus: (t: Task, s: string) => void }) => {
+  const columns = ['Novo', 'Pendente', 'Em Progresso', 'Resolvido', 'Fechado'];
   
-  const filtered = tasks.filter(t => {
-      const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
-                            t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
-                            (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-      const matchesType = filters.type === 'All' || t.type === filters.type;
-      const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-      const matchesStatus = filters.status === 'All' || t.status === filters.status;
-      const matchesAssignee = filters.assignee === 'All' || 
-                              (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
-      return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
-  });
-
-  const toggleSelect = (id: string) => {
-      const newSelected = new Set(selected);
-      if (newSelected.has(id)) newSelected.delete(id);
-      else newSelected.add(id);
-      setSelected(newSelected);
-  };
-
-  const handleBulkAction = (action: string, payload?: any) => {
-      if (selected.size === 0) return;
-      const updated = tasks.map(t => {
-          if (selected.has(t.id)) {
-              if (action === 'delete') return null;
-              
-              let updatedTask = { ...t };
-              let actionName = '';
-
-              if (action === 'status') {
-                   updatedTask.status = payload;
-                   actionName = `Alterou Status (Em massa) para ${payload}`;
-              }
-              if (action === 'priority') {
-                  updatedTask.priority = payload;
-                  actionName = `Alterou Prioridade (Em massa) para ${payload}`;
-              }
-              if (action === 'assign') {
-                   updatedTask.assignee = payload;
-                   actionName = `Atribuiu (Em massa) para ${payload}`;
-              }
-              
-              if (actionName) {
-                  const entry: HistoryEntry = {
-                      id: Math.random().toString(36).substr(2, 9),
-                      date: new Date().toISOString(),
-                      user: user.name,
-                      action: actionName
-                  };
-                  updatedTask.history = [...(t.history || []), entry];
-              }
-
-              return updatedTask;
-          }
-          return t;
-      }).filter(Boolean) as Task[];
-      
-      setTasks(updated);
-      StorageService.saveTasks(updated);
-      setSelected(new Set());
-  };
-
-  const exportToExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(filtered);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Demandas");
-    XLSX.writeFile(wb, "Nexus_Demandas.xlsx");
-  };
-
   return (
-    <div className="space-y-4 h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
-        <div className="flex gap-2 items-center w-full">
-             {selected.size > 0 ? (
-                 <>
-                    <span className="text-sm text-slate-300 mr-2">{selected.size} selecionados</span>
-                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('status', e.target.value)}>
-                        <option value="">Mudar Status</option>
-                        <option value="Novo">Novo</option>
-                        <option value="Em Atendimento">Em Atendimento</option>
-                        <option value="Resolvido">Resolvido</option>
-                    </select>
-                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('assign', e.target.value)}>
-                        <option value="">Atribuir Dev</option>
-                        {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                    </select>
-                    <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-2 px-3">Excluir</Button>
-                 </>
-             ) : <div className="text-sm text-slate-500">Selecione itens para ações em massa</div>}
-             <div className="flex-1"></div>
-             <Button onClick={exportToExcel} variant="success" className="text-sm py-2"><IconDownload /> Excel</Button>
-        </div>
-      </div>
-
-      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden flex-1">
-        <div className="overflow-auto h-full">
-            <table className="w-full text-left text-sm">
-            <thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md">
-                <tr>
-                <th className="p-4 w-10 bg-slate-900"><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
-                <th className="p-4 bg-slate-900">ID</th>
-                <th className="p-4 bg-slate-900">Tipo</th>
-                <th className="p-4 w-1/3 bg-slate-900">Título</th>
-                <th className="p-4 bg-slate-900">Prioridade</th>
-                <th className="p-4 bg-slate-900">Status</th>
-                <th className="p-4 bg-slate-900">Atribuído</th>
-                <th className="p-4 text-right bg-slate-900">Ações</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700">
-                {filtered.map(task => (
-                <tr key={task.id} className="hover:bg-slate-700/30 transition-colors group">
-                    <td className="p-4"><input type="checkbox" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
-                    <td className="p-4 font-mono text-slate-500 group-hover:text-slate-300">{task.id}</td>
-                    <td className="p-4"><Badge type={task.type} /></td>
-                    <td className="p-4 font-medium text-slate-200">{task.summary}</td>
-                    <td className="p-4"><Badge type={task.priority} /></td>
-                    <td className="p-4 text-slate-300">{task.status}</td>
-                    <td className="p-4 text-slate-400">{task.assignee || '-'}</td>
-                    <td className="p-4 text-right">
-                         <button 
-                            onClick={() => onEditTask(task)} 
-                            className="text-indigo-400 hover:text-indigo-300 text-xs font-medium px-2 py-1 rounded border border-indigo-900/50 hover:bg-indigo-900/20"
-                         >
-                             Editar
-                         </button>
-                    </td>
-                </tr>
-                ))}
-            </tbody>
-            </table>
-        </div>
-      </div>
+    <div className="h-full flex gap-4 overflow-x-auto pb-4">
+      {columns.map(col => {
+        const colTasks = tasks.filter(t => t.status === col);
+        return (
+          <div key={col} className="min-w-[280px] w-80 bg-slate-800/50 rounded-xl border border-slate-700 flex flex-col max-h-full">
+             <div className={`p-3 border-b border-slate-700 font-bold text-sm flex justify-between items-center sticky top-0 bg-slate-800/90 backdrop-blur rounded-t-xl z-10
+                ${col === 'Novo' ? 'text-blue-400' : ''}
+                ${col === 'Em Progresso' ? 'text-indigo-400' : ''}
+                ${col === 'Resolvido' ? 'text-emerald-400' : ''}
+             `}>
+               {col}
+               <span className="bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full">{colTasks.length}</span>
+             </div>
+             <div className="p-3 space-y-3 overflow-y-auto custom-scrollbar flex-1">
+               {colTasks.map(task => (
+                 <div key={task.id} className="bg-slate-700/40 p-3 rounded-lg border border-slate-600/50 hover:bg-slate-700 transition-colors shadow-sm group cursor-pointer">
+                    <div className="flex justify-between items-start mb-2">
+                       <span className="text-xs font-mono text-slate-500">{task.id}</span>
+                       <Badge type={task.type} />
+                    </div>
+                    <p className="text-sm text-slate-200 font-medium mb-3 line-clamp-2">{task.summary}</p>
+                    <div className="flex justify-between items-center text-xs text-slate-400">
+                       <div className="flex items-center gap-1">
+                          <IconUsers className="w-3 h-3" /> {task.assignee?.split(' ')[0] || 'N/A'}
+                       </div>
+                       <Badge type={task.priority} className="scale-90 origin-right" />
+                    </div>
+                    
+                    {/* Quick Actions */}
+                    {col !== 'Fechado' && (
+                        <div className="mt-3 pt-2 border-t border-white/5 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                           {col !== 'Resolvido' && <button onClick={() => onUpdateStatus(task, 'Em Progresso')} className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded">Progresso</button>}
+                           {col !== 'Resolvido' && <button onClick={() => onUpdateStatus(task, 'Resolvido')} className="text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded">Resolver</button>}
+                        </div>
+                    )}
+                 </div>
+               ))}
+             </div>
+          </div>
+        )
+      })}
     </div>
-  );
+  )
 };
 
-// --- Layout ---
+// --- Task List View ---
+const TaskListView = ({ tasks, onImport }: { tasks: Task[], onImport: (f: File) => void }) => {
+    const fileRef = useRef<HTMLInputElement>(null);
 
-const Layout = ({ children, user, onLogout, headerContent }: any) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+    const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files?.[0]) onImport(e.target.files[0]);
+    };
 
-  const menuItems = [
-    { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' },
-    { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' },
-    { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' },
-    { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
-  ];
-
-  return (
-    <div className="flex h-screen bg-dark-900 text-slate-200 font-sans">
-      <aside 
-        className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}
-      >
-        <button 
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"
-        >
-            <IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
-        </button>
-
-        <div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}>
-          <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div>
-          <h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-2 mt-4">
-          {menuItems.map(item => (
-            <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              title={isCollapsed ? item.label : ''}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${
-                location.pathname === item.path 
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' 
-                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'
-              } ${isCollapsed ? 'justify-center px-0' : ''}`}
-            >
-              {item.icon}
-              <span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
-                  {item.label}
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t border-slate-700 bg-slate-900/30">
-            <div 
-              onClick={() => navigate('/profile')}
-              className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}
-            >
-                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">
-                    {user.avatar ? (
-                        <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
-                    ) : (
-                        user.name.substring(0, 2).toUpperCase()
-                    )}
-                </div>
-                <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
-                    <p className="text-sm font-medium text-white truncate">{user.name}</p>
-                    <p className="text-xs text-slate-500 truncate">{user.email}</p>
+    return (
+        <Card className="h-full flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-white">Lista de Demandas</h3>
+                <div className="flex gap-2">
+                    <input type="file" ref={fileRef} hidden accept=".xlsx,.xls" onChange={handleFile} />
+                    <Button onClick={() => fileRef.current?.click()} variant="primary">
+                        <IconUpload className="w-4 h-4" /> Importar Excel
+                    </Button>
                 </div>
             </div>
-            <Button 
-                variant="danger" 
-                onClick={onLogout} 
-                className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`}
-                title={isCollapsed ? 'Sair' : ''}
-            >
-                {isCollapsed ? (
-                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-                    </svg>
-                ) : 'Sair'}
-            </Button>
-        </div>
-      </aside>
-      <main className="flex-1 overflow-hidden relative flex flex-col">
-         <header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800">
-             <div className="pointer-events-auto">
-                 {headerContent}
-             </div>
-         </header>
-         
-         <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" />
-         <div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">
-             {children}
-         </div>
-      </main>
-    </div>
-  );
+            <div className="flex-1 overflow-auto custom-scrollbar border border-slate-700 rounded-lg">
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-900 text-slate-400 text-xs uppercase sticky top-0 z-10">
+                        <tr>
+                            <th className="p-3 font-medium border-b border-slate-700">ID</th>
+                            <th className="p-3 font-medium border-b border-slate-700">Tipo</th>
+                            <th className="p-3 font-medium border-b border-slate-700 w-1/3">Resumo</th>
+                            <th className="p-3 font-medium border-b border-slate-700">Prioridade</th>
+                            <th className="p-3 font-medium border-b border-slate-700">Status</th>
+                            <th className="p-3 font-medium border-b border-slate-700">Resp.</th>
+                            <th className="p-3 font-medium border-b border-slate-700">Criado Em</th>
+                        </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-700/50">
+                        {tasks.map(t => (
+                            <tr key={t.id} className="hover:bg-slate-700/30 transition-colors">
+                                <td className="p-3 font-mono text-slate-500 text-xs">{t.id}</td>
+                                <td className="p-3"><Badge type={t.type} /></td>
+                                <td className="p-3 text-slate-200 font-medium">{t.summary}</td>
+                                <td className="p-3"><Badge type={t.priority} /></td>
+                                <td className="p-3 text-slate-300">{t.status}</td>
+                                <td className="p-3 text-slate-400">{t.assignee || '-'}</td>
+                                <td className="p-3 text-slate-500 text-xs">{new Date(t.createdAt).toLocaleDateString()}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </Card>
+    )
 };
 
-const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
+// --- Layout Components ---
+
+const SidebarItem = ({ icon: Icon, label, to, active }: any) => (
+    <button 
+      onClick={() => window.location.hash = to}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${active ? 'bg-indigo-600 text-white shadow-indigo-500/25 shadow-lg' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+    >
+        <Icon className={`w-5 h-5 ${active ? 'text-white' : 'text-slate-500 group-hover:text-indigo-400'}`} />
+        <span className="font-medium">{label}</span>
+    </button>
+);
+
+const Sidebar = ({ currentPath, onLogout, user }: any) => {
+    return (
+        <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col p-4 hidden md:flex">
+            <div className="flex items-center gap-3 px-2 mb-10 mt-2">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">N</div>
+                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">Nexus</h1>
+            </div>
+
+            <nav className="space-y-2 flex-1">
+                <SidebarItem icon={IconHome} label="Dashboard" to="/" active={currentPath === '/'} />
+                <SidebarItem icon={IconKanban} label="Kanban" to="#/kanban" active={currentPath === '/kanban'} />
+                <SidebarItem icon={IconList} label="Lista" to="#/list" active={currentPath === '/list'} />
+                <SidebarItem icon={IconClock} label="Cronograma" to="#/gantt" active={currentPath === '/gantt'} />
+            </nav>
+
+            <div className="pt-6 border-t border-slate-800">
+                 <button onClick={() => window.location.hash = '#/profile'} className="flex items-center gap-3 px-2 py-2 w-full hover:bg-slate-800 rounded-lg transition-colors group text-left">
+                     <div className="w-8 h-8 rounded-full bg-slate-700 overflow-hidden border border-slate-600 group-hover:border-indigo-500">
+                         {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs">{user.name[0]}</div>}
+                     </div>
+                     <div className="flex-1 overflow-hidden">
+                         <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                         <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                     </div>
+                 </button>
+                 <button onClick={onLogout} className="mt-4 w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-rose-400 py-2">
+                    Sair do Sistema
+                 </button>
+            </div>
+        </aside>
+    );
+};
+
+// --- Login View ---
+const LoginView = ({ onLogin }: { onLogin: (u: User) => void }) => {
     const [isRegister, setIsRegister] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -1279,544 +1105,204 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
-
+        
         if (isRegister) {
-            if (!email || !password || !name) {
-                setError('Todos os campos são obrigatórios');
-                return;
-            }
-            const newUser: User = { id: Date.now().toString(), email, name, password };
-            const success = StorageService.registerUser(newUser);
+            const success = StorageService.registerUser({ id: Date.now().toString(), email, password, name });
             if (success) {
-                alert('Conta criada com sucesso! Faça login.');
+                alert("Conta criada! Faça login.");
                 setIsRegister(false);
             } else {
-                setError('Email já cadastrado.');
+                setError("Email já cadastrado.");
             }
         } else {
-            if (!email || !password) {
-                 setError('Preencha email e senha');
-                 return;
-            }
             const user = StorageService.authenticateUser(email, password);
-            if (user) {
-                onLogin(user);
-            } else {
-                setError('Credenciais inválidas.');
-            }
+            if (user) onLogin(user);
+            else setError("Credenciais inválidas.");
         }
     };
 
     return (
-        <div className="h-screen flex items-center justify-center bg-dark-900 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
-            <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px]"></div>
-            <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-[120px]"></div>
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+            {/* Background Effects */}
+            <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+                <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-indigo-900/20 blur-[120px] rounded-full" />
+                <div className="absolute top-[40%] right-[0%] w-[40%] h-[40%] bg-rose-900/10 blur-[100px] rounded-full" />
+            </div>
 
-            <div className="w-full max-w-md p-10 bg-slate-800/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl z-10 relative">
-                <div className="flex justify-center mb-6">
-                    <div className="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-2xl shadow-2xl shadow-indigo-500/40 flex items-center justify-center">
-                        <span className="text-3xl text-white font-bold">N</span>
-                    </div>
+            <div className="w-full max-w-md relative z-10">
+                <div className="text-center mb-8">
+                    <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl mx-auto mb-4 shadow-lg shadow-indigo-500/30">N</div>
+                    <h1 className="text-3xl font-bold text-white mb-2">Bem-vindo ao Nexus</h1>
+                    <p className="text-slate-400">Gerenciamento Inteligente de Projetos</p>
                 </div>
-                <h2 className="text-3xl font-bold text-center mb-2 text-white">Nexus Project</h2>
-                <p className="text-center text-slate-400 mb-8 text-sm">{isRegister ? 'Crie sua conta para começar' : 'Acesse sua conta'}</p>
-                
-                <form onSubmit={handleSubmit} className="space-y-5">
-                    {isRegister && (
-                         <div>
-                            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Nome Completo</label>
-                            <input 
-                                type="text" 
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                                placeholder="Seu nome"
-                            />
-                        </div>
-                    )}
-                    <div>
-                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Email Corporativo</label>
-                        <input 
-                            type="email" 
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                            placeholder="nome@empresa.com"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Senha</label>
-                        <input 
-                            type="password" 
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                            placeholder="••••••••"
-                        />
-                    </div>
-                    
-                    {error && <p className="text-rose-500 text-sm text-center">{error}</p>}
 
-                    <Button type="submit" className="w-full justify-center py-3 text-lg shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60">
-                        {isRegister ? 'Cadastrar' : 'Entrar'}
-                    </Button>
-                    <div className="text-center">
-                        <button type="button" onClick={() => { setIsRegister(!isRegister); setError(''); }} className="text-sm text-slate-500 hover:text-indigo-400 transition-colors">
-                            {isRegister ? 'Já tem conta? Entrar' : 'Criar nova conta'}
+                <Card className="bg-slate-900/90 backdrop-blur border-slate-800">
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        {isRegister && (
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Nome</label>
+                                <input type="text" required className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none" value={name} onChange={e => setName(e.target.value)} />
+                            </div>
+                        )}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
+                            <input type="email" required className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none" value={email} onChange={e => setEmail(e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Senha</label>
+                            <input type="password" required className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none" value={password} onChange={e => setPassword(e.target.value)} />
+                        </div>
+                        
+                        {error && <p className="text-rose-500 text-sm text-center">{error}</p>}
+
+                        <Button type="submit" className="w-full mt-2">{isRegister ? 'Criar Conta' : 'Entrar'}</Button>
+                    </form>
+
+                    <div className="mt-6 text-center text-sm">
+                        <button onClick={() => setIsRegister(!isRegister)} className="text-indigo-400 hover:text-indigo-300">
+                            {isRegister ? 'Já tem conta? Faça Login' : 'Não tem conta? Cadastre-se'}
                         </button>
                     </div>
-                </form>
+                </Card>
             </div>
         </div>
     );
 };
 
-const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
-    const [formData, setFormData] = useState<Task>(task || {
-        id: '',
-        type: 'Incidente',
-        summary: '',
-        description: '',
-        priority: '3 - Moderada',
-        status: 'Novo',
-        assignee: null,
-        estimatedTime: '',
-        actualTime: '',
-        startDate: '',
-        endDate: ''
-    });
+// --- Main Application ---
 
-    // --- Auto-Calculate End Date Logic ---
-    useEffect(() => {
-        // Only auto-calc if we have both StartDate and EstimatedTime
-        // and assume 8 hours work day for calculation
-        if (formData.startDate && formData.estimatedTime) {
-            const hours = parseDuration(formData.estimatedTime);
-            if (hours > 0) {
-                // e.g., 4h -> 0.5 days -> same day
-                // e.g., 8h -> 1 day -> same day
-                // e.g., 9h -> 1.125 days -> next day
-                // Formula: (Hours - 0.1) / 8 gives completed full days to add
-                const daysToAdd = Math.floor((hours - 0.1) / 8);
-                
-                const start = new Date(formData.startDate);
-                // Avoid timezone issues by using setDate
-                const end = new Date(start);
-                end.setDate(start.getDate() + daysToAdd);
-                
-                const endDateStr = end.toISOString().split('T')[0];
-                
-                // Only update if different to avoid loops
-                if (endDateStr !== formData.endDate) {
-                    setFormData(prev => ({ ...prev, endDate: endDateStr }));
-                }
-            }
-        }
-    }, [formData.startDate, formData.estimatedTime]);
+const App = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [devs, setDevs] = useState<Developer[]>([]);
+  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
 
-    const handleChange = (e: any) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
-    };
+  // Initial Load
+  useEffect(() => {
+      const session = StorageService.getUser();
+      if (session) {
+          setUser(session);
+          loadData();
+      }
+  }, []);
 
-    const isNewTask = !task.createdAt || task.id === '';
+  const loadData = () => {
+      setTasks(StorageService.getTasks());
+      setDevs(StorageService.getDevs());
+  };
 
-    return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
-                <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl">
-                    <h3 className="text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
-                </div>
-                <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
-                    <div className="grid grid-cols-1 gap-4">
-                        <div>
-                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label>
-                            <input 
-                                name="id" 
-                                value={formData.id} 
-                                onChange={handleChange} 
-                                placeholder="Ex: INC0012345"
-                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label>
-                            <textarea 
-                                name="summary" 
-                                value={formData.summary} 
-                                onChange={handleChange} 
-                                rows={3}
-                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" 
-                            />
-                        </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                         <div>
-                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label>
-                            <select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
-                                <option value="Incidente">Incidente</option>
-                                <option value="Melhoria">Melhoria</option>
-                                <option value="Nova Automação">Nova Automação</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label>
-                            <select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
-                                <option value="1 - Crítica">1 - Crítica</option>
-                                <option value="2 - Alta">2 - Alta</option>
-                                <option value="3 - Moderada">3 - Moderada</option>
-                                <option value="4 - Baixa">4 - Baixa</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label>
-                             <select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
-                                <option value="">Sem Atribuição</option>
-                                {developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}
-                            </select>
-                        </div>
-                        <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label>
-                             <select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500">
-                                <option value="Novo">Novo</option>
-                                <option value="Pendente">Pendente</option>
-                                <option value="Em Atendimento">Em Atendimento</option>
-                                <option value="Em Progresso">Em Progresso</option>
-                                <option value="Resolvido">Resolvido</option>
-                                <option value="Fechado">Fechado</option>
-                                <option value="Aguardando">Aguardando</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
-                        <div className="col-span-2 flex items-center gap-2 mb-2">
-                             <IconClock className="w-4 h-4 text-indigo-400" />
-                             <span className="text-xs text-indigo-300 font-bold">Planejamento Automático</span>
-                             <span className="text-[10px] text-slate-500">(Data Fim calculada baseada no tempo estimado)</span>
-                        </div>
-                        <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label>
-                             <input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                        </div>
-                         <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label>
-                             <input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                        </div>
-                        <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label>
-                             <input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="ex: 8h, 16h, 2d" />
-                        </div>
-                        <div>
-                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label>
-                             <input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} className="w-full bg-slate-800 border-emerald-500/50 border rounded p-2 text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="ex: 2h" />
-                        </div>
-                    </div>
-
-                    {/* History Section */}
-                    {formData.history && formData.history.length > 0 && (
-                        <div className="mt-6 border-t border-slate-700 pt-4">
-                            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                                <IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações
-                            </h4>
-                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                                {formData.history.slice().reverse().map((entry: HistoryEntry) => (
-                                    <div key={entry.id} className="text-xs bg-slate-900/60 p-3 rounded border border-slate-700/50 hover:border-slate-600 transition-colors">
-                                        <div className="flex justify-between text-slate-500 mb-1">
-                                            <span className="font-mono">{new Date(entry.date).toLocaleString()}</span>
-                                            <span className="font-medium text-indigo-400">{entry.user}</span>
-                                        </div>
-                                        <p className="text-slate-300">{entry.action}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-                <div className="p-6 border-t border-slate-700 flex justify-between bg-slate-900 rounded-b-2xl">
-                    <Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button>
-                    <div className="flex gap-3">
-                        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-                        <Button onClick={() => onSave(formData)}>Salvar Alterações</Button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-export default function App() {
-  const [user, setUser] = useState<User | null>(StorageService.getUser());
-  const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
-  const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
-  
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-
-  const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({
-      'Incidente': null,
-      'Melhoria': null,
-      'Nova Automação': null
-  });
-
-  const handleLogin = (loggedInUser: User) => {
-    setUser(loggedInUser);
+  const handleLogin = (u: User) => {
+      setUser(u);
+      loadData();
   };
 
   const handleLogout = () => {
-    StorageService.logout();
-    setUser(null);
-  };
-
-  const processNewTasks = (newTasks: Task[], typeName: string) => {
-      const merged = StorageService.mergeTasks(newTasks);
-      setTasks(merged);
-
-      const uniqueAssignees = new Set(newTasks.map(t => t.assignee).filter(Boolean));
-      const currentDevNames = new Set(devs.map(d => d.name));
-      const newDevsToAdd: Developer[] = [];
-
-      uniqueAssignees.forEach(name => {
-          if (name && !currentDevNames.has(name as string)) {
-              newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string });
-          }
-      });
-
-      if (newDevsToAdd.length > 0) {
-          const updatedDevs = [...devs, ...newDevsToAdd];
-          setDevs(updatedDevs);
-          StorageService.saveDevs(updatedDevs);
-      }
-  };
-
-  const handleProcessAllUploads = async () => {
-     let allNewTasks: Task[] = [];
-     
-     try {
-         if (uploadFiles['Incidente']) {
-             const t = await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente');
-             allNewTasks = [...allNewTasks, ...t];
-         }
-         if (uploadFiles['Melhoria']) {
-            const t = await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria');
-            allNewTasks = [...allNewTasks, ...t];
-        }
-        if (uploadFiles['Nova Automação']) {
-            const t = await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação');
-            allNewTasks = [...allNewTasks, ...t];
-        }
-
-        processNewTasks(allNewTasks, 'Todas');
-        setIsUploadModalOpen(false);
-        alert(`${allNewTasks.length} demandas processadas.`);
-     } catch (e) {
-         console.error(e);
-         alert("Erro ao processar arquivos.");
-     }
-  };
-
-  const handleProcessSingleUpload = async (type: TaskType) => {
-      const file = uploadFiles[type];
-      if (!file) return;
-
-      try {
-           const newTasks = await ExcelService.parseFile(file, type);
-           processNewTasks(newTasks, type);
-           alert(`${newTasks.length} demandas de ${type} processadas.`);
-           setUploadFiles(prev => ({ ...prev, [type]: null }));
-      } catch (e) {
-          console.error(e);
-          alert(`Erro ao processar ${type}.`);
-      }
-  }
-
-  const handleAddDev = (name: string) => {
-      if (name && !devs.find(d => d.name === name)) {
-          const newDevs = [...devs, { id: `dev-${Date.now()}`, name }];
-          setDevs(newDevs);
-          StorageService.saveDevs(newDevs);
-      }
-  };
-
-  const handleRemoveDev = (id: string) => {
-      const newDevs = devs.filter(d => d.id !== id);
-      setDevs(newDevs);
-      StorageService.saveDevs(newDevs);
-  };
-
-  const handleCreateTask = () => {
-      setEditingTask({
-        id: '', // Empty to force manual input
-        type: 'Incidente',
-        summary: '',
-        description: '',
-        priority: '3 - Moderada',
-        status: 'Novo',
-        assignee: null,
-        estimatedTime: '',
-        actualTime: '',
-        startDate: '',
-        endDate: '',
-        createdAt: new Date().toISOString(),
-        requester: user?.name || 'Manual'
-      });
-  };
-
-  const handleTaskUpdate = (updatedTask: Task) => {
-      if (!user) return;
-      
-      if (!updatedTask.id) {
-          alert("O número do chamado é obrigatório.");
-          return;
-      }
-
-      const taskExists = tasks.some(t => t.id === updatedTask.id);
-
-      if (taskExists) {
-          const oldTask = tasks.find(t => t.id === updatedTask.id);
-          if (oldTask) {
-              const history = detectChanges(oldTask, updatedTask, user);
-              if (history.length > 0) {
-                  updatedTask.history = [...(oldTask.history || []), ...history];
-              }
-          }
-          const newTasks = tasks.map(t => t.id === updatedTask.id ? updatedTask : t);
-          setTasks(newTasks);
-          StorageService.saveTasks(newTasks);
-      } else {
-          // Create new task
-          const creationEntry: HistoryEntry = {
-              id: Math.random().toString(36).substr(2, 9),
-              date: new Date().toISOString(),
-              user: user.name,
-              action: 'Tarefa criada manualmente'
-          };
-          updatedTask.history = [creationEntry];
-          const newTasks = [...tasks, updatedTask];
-          setTasks(newTasks);
-          StorageService.saveTasks(newTasks);
-      }
-      
-      setEditingTask(null);
-  };
-
-  const handleTaskDelete = (id: string) => {
-    if (window.confirm("Tem certeza?")) {
-        const newTasks = tasks.filter(t => t.id !== id);
-        setTasks(newTasks);
-        StorageService.saveTasks(newTasks);
-        setEditingTask(null);
-    }
+      StorageService.logout();
+      setUser(null);
+      setTasks([]);
   };
   
-  const handleResetData = () => {
-      StorageService.clearTasks();
-      setTasks([]);
-      alert("Todas as demandas foram apagadas.");
+  const handleImport = async (file: File) => {
+      try {
+          const newTasks = await ExcelService.parseFile(file);
+          const merged = StorageService.mergeTasks(newTasks);
+          setTasks(merged);
+          alert(`${newTasks.length} tarefas importadas/atualizadas com sucesso!`);
+      } catch (e) {
+          alert("Erro ao importar arquivo.");
+          console.error(e);
+      }
   };
 
-  if (!user) return <AuthPage onLogin={handleLogin} />;
+  const handleStatusUpdate = (task: Task, newStatus: string) => {
+      const updated = { ...task, status: newStatus };
+      // In a real app, we would update history here
+      const merged = StorageService.mergeTasks([updated]);
+      setTasks(merged);
+  };
 
-  const headerActions = (
-    <div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700">
-        <Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button>
-        <div className="w-px bg-slate-700 h-6 self-center"></div>
-        <Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button>
-        <Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button>
-    </div>
-  );
+  const handleReset = () => {
+      StorageService.clearTasks();
+      setTasks([]);
+  };
+
+  // Filtering Logic
+  const filteredTasks = useMemo(() => {
+      return tasks.filter(t => {
+          const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase());
+          const matchesType = filters.type === 'All' || t.type === filters.type;
+          const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
+          const matchesStatus = filters.status === 'All' || t.status === filters.status;
+          const matchesAssignee = filters.assignee === 'All' || (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+          return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
+      });
+  }, [tasks, filters]);
+
+  if (!user) return <LoginView onLogin={handleLogin} />;
 
   return (
     <HashRouter>
-      <Layout user={user} onLogout={handleLogout} headerContent={headerActions}>
+      <div className="flex h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500 selection:text-white overflow-hidden">
+        <RouteRenderWrapper> 
+            {(path) => <Sidebar currentPath={path} onLogout={handleLogout} user={user} />}
+        </RouteRenderWrapper>
         
-        {/* Modals */}
-        {isUploadModalOpen && (
-             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-                 <div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl">
-                     <h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3>
-                     <div className="space-y-6">
-                         {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
-                             <div key={type} className="flex items-end gap-3">
-                                 <div className="flex-1">
-                                     <label className="block text-sm text-slate-400 mb-1">{type}</label>
-                                     <input 
-                                        type="file" 
-                                        accept=".xlsx, .xls"
-                                        onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} 
-                                        className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg"
-                                     />
-                                 </div>
-                                 <Button 
-                                    onClick={() => handleProcessSingleUpload(type as TaskType)} 
-                                    disabled={!uploadFiles[type]} 
-                                    className="h-10 text-xs"
-                                    variant="secondary"
-                                 >
-                                     Processar
-                                 </Button>
-                             </div>
-                         ))}
-                     </div>
-                     <div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4">
-                         <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button>
-                         <Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button>
-                     </div>
-                 </div>
-             </div>
-        )}
-
-        {isManageDevsOpen && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-                <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full">
-                    <h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3>
-                    <ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">
-                        {devs.map(d => (
-                            <li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700">
-                                <span className="text-sm text-white">{d.name}</span>
-                                <button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button>
-                            </li>
-                        ))}
-                    </ul>
-                    <div className="flex gap-2">
-                        <input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" />
-                        <Button onClick={() => {
-                            const input = document.getElementById('newDevInput') as HTMLInputElement;
-                            handleAddDev(input.value);
-                            input.value = '';
-                        }} variant="success" className="py-1">+</Button>
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                         <Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button>
-                    </div>
-                </div>
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+            {/* Mobile Header */}
+            <div className="md:hidden h-14 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-900">
+                <span className="font-bold text-white">Nexus</span>
+                <button onClick={handleLogout} className="text-xs text-rose-400">Sair</button>
             </div>
-        )}
 
-        {editingTask && (
-            <TaskModal 
-                task={editingTask} 
-                developers={devs} 
-                onClose={() => setEditingTask(null)} 
-                onSave={handleTaskUpdate} 
-                onDelete={handleTaskDelete} 
-            />
-        )}
-
-        <Routes>
-          <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
-          <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
-          <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
-          <Route path="/gantt" element={<GanttView tasks={tasks} />} />
-          <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </Layout>
+            <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 scroll-smooth">
+               <div className="max-w-[1600px] mx-auto h-full flex flex-col">
+                   <Routes>
+                       <Route path="/" element={
+                           <div className="animate-fade-in">
+                               <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+                               <DashboardView tasks={filteredTasks} devs={devs} />
+                           </div>
+                       } />
+                       <Route path="/kanban" element={
+                           <div className="h-[calc(100vh-140px)] animate-fade-in flex flex-col">
+                               <div className="mb-4">
+                                   <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+                               </div>
+                               <div className="flex-1 min-h-0">
+                                   <KanbanView tasks={filteredTasks} onUpdateStatus={handleStatusUpdate} />
+                               </div>
+                           </div>
+                       } />
+                       <Route path="/list" element={
+                           <div className="h-[calc(100vh-140px)] animate-fade-in flex flex-col">
+                               <div className="mb-4">
+                                   <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+                               </div>
+                               <div className="flex-1 min-h-0">
+                                   <TaskListView tasks={filteredTasks} onImport={handleImport} />
+                               </div>
+                           </div>
+                       } />
+                       <Route path="/gantt" element={
+                           <div className="h-[calc(100vh-140px)] animate-fade-in">
+                               <GanttView tasks={filteredTasks} />
+                           </div>
+                       } />
+                       <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleReset} />} />
+                       <Route path="*" element={<Navigate to="/" />} />
+                   </Routes>
+               </div>
+            </main>
+        </div>
+      </div>
     </HashRouter>
   );
-}
+};
+
+// Wrapper to get current path for sidebar highlighting
+const RouteRenderWrapper = ({ children }: { children: (path: string) => React.ReactNode }) => {
+    const location = useLocation();
+    return <>{children(location.pathname)}</>;
+};
+
+export default App;
