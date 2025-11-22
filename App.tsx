@@ -495,7 +495,7 @@ interface Widget {
 }
 
 const DEFAULT_WIDGETS: Widget[] = [
-    { id: 'w1', type: 'cards', title: 'KPIs Gerais', size: 'full', visible: true },
+    { id: 'w1', type: 'cards', title: 'KPIs Gerais (Ativos)', size: 'full', visible: true },
     { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true },
     { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true },
     { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true },
@@ -550,39 +550,41 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
       localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets));
   }, [widgets]);
 
-  // Tasks filtered by UI controls (Dev & Type)
-  const filteredTasks = useMemo(() => {
+  // Tasks filtered by UI controls (Dev & Type) AND EXCLUDING COMPLETED
+  const activeFilteredTasks = useMemo(() => {
     return tasks.filter(t => {
+        // Global Dashboard Rule: Don't count completed tasks
+        if (['Concluído', 'Resolvido', 'Fechado'].includes(t.status)) return false;
+
         const matchesDev = filterDev === 'All' ? true : t.assignee === filterDev;
         const matchesType = filterType === 'All' ? true : t.type === filterType;
         return matchesDev && matchesType;
     });
   }, [tasks, filterDev, filterType]);
 
-  // --- Metrics Calculation (KPIs ONLY: Exclude Completed) ---
+  // --- Metrics Calculation (KPIs) ---
   const metrics = useMemo(() => {
-    const activeTasks = filteredTasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
-    
+    // activeFilteredTasks already excludes completed
     return {
-        incidents: activeTasks.filter(t => t.type === 'Incidente').length,
-        features: activeTasks.filter(t => t.type === 'Melhoria').length,
-        automations: activeTasks.filter(t => t.type === 'Nova Automação').length,
-        total: activeTasks.length
+        incidents: activeFilteredTasks.filter(t => t.type === 'Incidente').length,
+        features: activeFilteredTasks.filter(t => t.type === 'Melhoria').length,
+        automations: activeFilteredTasks.filter(t => t.type === 'Nova Automação').length,
+        total: activeFilteredTasks.length
     };
-  }, [filteredTasks]);
+  }, [activeFilteredTasks]);
 
   const priorityData = useMemo(() => {
     const counts: Record<string, number> = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 };
-    filteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; });
+    activeFilteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [filteredTasks]);
+  }, [activeFilteredTasks]);
   
   // Improved Status Data: Status vs Type Breakdown
   const statusByTypeData = useMemo(() => {
-      const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Resolvido', 'Fechado', 'Concluído', 'Backlog'];
+      const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Backlog'];
       
       const data: { name: string; Incidente: number; Melhoria: number; 'Nova Automação': number; total: number }[] = STATUS_ORDER.map(status => {
-          const tasksInStatus = filteredTasks.filter(t => t.status === status);
+          const tasksInStatus = activeFilteredTasks.filter(t => t.status === status);
           return {
               name: status,
               Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length,
@@ -592,27 +594,12 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
           };
       }).filter(d => d.total > 0); // Only show statuses that have tasks
 
-      // Handle statuses not in the list
-      const otherStatuses = [...new Set(filteredTasks.map(t => t.status))].filter(s => !STATUS_ORDER.includes(s));
-      otherStatuses.forEach(status => {
-           const tasksInStatus = filteredTasks.filter(t => t.status === status);
-           if (tasksInStatus.length > 0) {
-                data.push({
-                    name: status,
-                    Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length,
-                    Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length,
-                    'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length,
-                    total: tasksInStatus.length
-                });
-           }
-      });
-
       return data;
-  }, [filteredTasks]);
+  }, [activeFilteredTasks]);
 
   const devTypeData = useMemo(() => {
     const data = devs.map(dev => {
-        const devTasks = tasks.filter(t => t.assignee === dev.name);
+        const devTasks = activeFilteredTasks.filter(t => t.assignee === dev.name);
         return {
             name: dev.name,
             Incidente: devTasks.filter(t => t.type === 'Incidente').length,
@@ -624,32 +611,30 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     
     // Sort by Total Descending for better visualization ("Bater o olho")
     return data.sort((a, b) => b.total - a.total);
-  }, [tasks, devs]);
+  }, [activeFilteredTasks, devs]);
 
   // --- Capacity Logic (Time Based & Availability) ---
   const capacityData = useMemo(() => {
     const data = devs.map(dev => {
-        // Filter tasks that are NOT done/resolved/closed
-        const activeTasks = tasks.filter(t => 
-            t.assignee === dev.name && 
-            !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)
-        );
+        // Filter active tasks for this specific dev from the already filtered list
+        // This means if "Type: Incident" is selected on dashboard, we calculate capacity based on incidents only.
+        const myTasks = activeFilteredTasks.filter(t => t.assignee === dev.name);
         
         // Sum estimated time (Calculate workload time)
-        const totalHours = activeTasks.reduce((acc, t) => {
+        const totalHours = myTasks.reduce((acc, t) => {
             return acc + parseDuration(t.estimatedTime);
         }, 0);
 
         return {
             name: dev.name,
-            activeTasksCount: activeTasks.length,
+            activeTasksCount: myTasks.length,
             totalHours: totalHours
         };
     });
     
     // Sort by totalHours Ascending (Least busy first -> Available First)
     return data.sort((a, b) => a.totalHours - b.totalHours);
-  }, [tasks, devs]);
+  }, [activeFilteredTasks, devs]);
 
   // --- Widget Actions ---
   const toggleSize = (id: string) => {
@@ -682,7 +667,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Relatório One Page Project", { x: 1, y: 2, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
-    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral (Projetos Ativos)`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
 
     // Slide 2: KPIs (Text Based)
     slide = pres.addSlide();
@@ -739,7 +724,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         });
     }
 
-    // Slide 5: Dev Workload (Stacked Bar) - New Slide requested implicitly by "all charts"
+    // Slide 5: Dev Workload (Stacked Bar)
     if (devTypeData.length > 0) {
         const devNames = devTypeData.map(d => d.name);
         const incData = devTypeData.map(d => d.Incidente);
