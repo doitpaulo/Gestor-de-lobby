@@ -30,6 +30,9 @@ export interface Task {
   actualTime?: string;
   manualFields?: string[];
   
+  // Kanban Ordering
+  boardPosition?: number;
+  
   // Audit Log
   history?: HistoryEntry[];
 }

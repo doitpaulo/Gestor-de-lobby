@@ -42,6 +42,18 @@ const formatDuration = (hours: number): string => {
     return `${m}m`;
 };
 
+// --- Helper: Dev Workload Calculator ---
+const getDevWorkload = (devName: string, tasks: Task[], excludeTaskId?: string): number => {
+    if (!devName) return 0;
+    return tasks
+        .filter(t => 
+            t.assignee === devName && 
+            t.id !== excludeTaskId && 
+            !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)
+        )
+        .reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
+};
+
 // --- Components Helpers ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title='' }: any) => {
@@ -120,20 +132,7 @@ const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: an
           <option value="3 - Moderada">3 - Moderada</option>
           <option value="4 - Baixa">4 - Baixa</option>
        </select>
-       <select 
-          className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-          value={filters.status}
-          onChange={(e) => handleChange('status', e.target.value)}
-       >
-          <option value="All">Todos Status</option>
-          <option value="Novo">Novo</option>
-          <option value="Pendente">Pendente</option>
-          <option value="Em Atendimento">Em Atendimento</option>
-          <option value="Em Progresso">Em Progresso</option>
-          <option value="Aguardando">Aguardando</option>
-          <option value="Resolvido">Resolvido</option>
-          <option value="Fechado">Fechado</option>
-       </select>
+       
        {devs && (
            <select 
               className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
@@ -141,8 +140,8 @@ const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: an
               onChange={(e) => handleChange('assignee', e.target.value)}
            >
               <option value="All">Todos Devs</option>
-              {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
               <option value="Unassigned">Não Atribuído</option>
+              {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
            </select>
        )}
     </div>
@@ -359,7 +358,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
              <div className="flex-1 flex items-center justify-center text-slate-500 bg-slate-800/30 rounded-xl border border-slate-700/50">
                  Adicione datas de início e fim às tarefas e verifique os filtros para visualizar o cronograma.
              </div>
-        </div>
+         </div>
     );
   }
 
@@ -691,7 +690,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         const s = pres.addSlide();
         s.background = { color: "0f172a" };
         s.addText(title, { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
-        s.addChart(type, data, { x: 1, y: 1.5, w: '80%', h: '70%', ...opts });
+        s.addChart(type as any, data, { x: 1, y: 1.5, w: '80%', h: '70%', ...opts });
         return s;
     };
 
@@ -759,7 +758,9 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     // Add suggestion text to slide
     if (capacityData.length > 0) {
         const bestDev = capacityData[0];
-        s.addText(`Sugestão de Atribuição: ${bestDev.name} (Livre em ~${formatDuration(bestDev.totalHours)})`, { 
+        const bestDevName = bestDev ? bestDev.name : "";
+        const bestDevHours = bestDev ? bestDev.totalHours : 0;
+        s.addText(`Sugestão de Atribuição: ${bestDevName} (Livre em ~${formatDuration(bestDevHours)})`, { 
             x: 1, y: 1, w: '80%', h: 0.5, color: '10b981', fontSize: 14, bold: true 
         });
     }
@@ -1045,40 +1046,107 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   );
 };
 
-// --- Kanban View ---
+// --- Kanban View (Updated: Developer Based) ---
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
+  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', assignee: 'All' });
 
-  const onDrop = (e: React.DragEvent, newStatus: string, newAssignee: string | null) => {
-    e.preventDefault();
-    const taskId = e.dataTransfer.getData("taskId");
-    
-    const updatedTasks = tasks.map(t => {
-      if (t.id === taskId) {
-        let status = t.status;
-        if (newStatus === 'Concluído') status = 'Resolvido';
-        else if (t.status === 'Resolvido' || t.status === 'Concluído') status = 'Em Atendimento'; 
-        
-        const updatedTask = { ...t, status: status, assignee: newAssignee };
-        
-        const history = detectChanges(t, updatedTask, user);
-        if(history.length > 0) {
-             updatedTask.history = [...(t.history || []), ...history];
-        }
-        
-        return updatedTask;
+  // --- Columns Definition ---
+  // 1. Unassigned
+  // 2. Developer Columns
+  // 3. Completed Column
+  const columns = useMemo(() => {
+      let cols = [
+          { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' },
+          ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })),
+          { id: 'completed', title: 'Concluídos', type: 'completed' }
+      ];
+
+      // Filter columns if specific dev is selected
+      if (filters.assignee !== 'All') {
+           if (filters.assignee === 'Unassigned') {
+               cols = cols.filter(c => c.type === 'unassigned' || c.type === 'completed');
+           } else {
+               cols = cols.filter(c => c.id === filters.assignee || c.type === 'completed');
+           }
       }
-      return t;
-    });
-    setTasks(updatedTasks);
-    StorageService.saveTasks(updatedTasks);
-  };
+      return cols;
+  }, [devs, filters.assignee]);
 
   const onDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData("taskId", taskId);
   };
 
+  const onDrop = (e: React.DragEvent, colId: string, colType: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const taskId = e.dataTransfer.getData("taskId");
+
+    const updatedTasks = tasks.map(t => t); // shallow copy
+    const taskIndex = updatedTasks.findIndex(t => t.id === taskId);
+    if (taskIndex === -1) return;
+    const task = updatedTasks[taskIndex];
+    let historyAction = '';
+    
+    // --- Logic for Different Column Types ---
+
+    if (colType === 'unassigned') {
+        if (task.assignee) {
+            historyAction = `Removeu atribuição (Estava com ${task.assignee})`;
+            task.assignee = null;
+        }
+        // If moving from completed back to active, reset status
+        if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) {
+            task.status = 'Pendente';
+            historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Pendente)";
+        }
+    } 
+    else if (colType === 'dev') {
+        // Target Developer Name is the colId
+        const targetDev = colId;
+        
+        // Check Overload
+        const currentWorkload = getDevWorkload(targetDev, tasks, task.id);
+        if (currentWorkload > 40) {
+             if(!window.confirm(`ALERTA: ${targetDev} já tem ${formatDuration(currentWorkload)} de carga. Deseja atribuir mesmo assim?`)) {
+                 return;
+             }
+        }
+
+        if (task.assignee !== targetDev) {
+            historyAction = `Atribuiu para ${targetDev}`;
+            task.assignee = targetDev;
+        }
+
+        // If moving from completed back to active
+        if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) {
+            task.status = 'Em Progresso'; // Reactive
+            historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)";
+        } else if (task.status === 'Novo' || task.status === 'Backlog') {
+             task.status = 'Em Atendimento'; // Auto-start
+        }
+    }
+    else if (colType === 'completed') {
+        if (!['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) {
+            task.status = 'Concluído';
+            historyAction = `Concluiu tarefa`;
+        }
+    }
+
+    if (historyAction) {
+        const entry: HistoryEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            date: new Date().toISOString(),
+            user: user.name,
+            action: historyAction
+        };
+        task.history = [...(task.history || []), entry];
+        setTasks([...updatedTasks]);
+        StorageService.saveTasks(updatedTasks);
+    }
+  };
+  
+  // --- Filtering ---
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
         const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
@@ -1086,82 +1154,116 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
                               (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
         const matchesType = filters.type === 'All' || t.type === filters.type;
         const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-        const matchesStatus = filters.status === 'All' || t.status === filters.status;
         const matchesAssignee = filters.assignee === 'All' || 
                                 (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
-        return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
+        return matchesSearch && matchesType && matchesPriority && matchesAssignee;
     });
   }, [tasks, filters]);
 
-  const columns = [
-    { id: 'unassigned', title: 'Sem Atribuição', assignee: null, status: 'Backlog', isDone: false },
-    ...devs.map(d => ({ id: d.id, title: d.name, assignee: d.name, status: 'In Progress', isDone: false })),
-    { id: 'done', title: 'Concluído', assignee: null, status: 'Concluído', isDone: true }
-  ];
+  // Helper to get tasks for a specific column
+  const getTasksForColumn = (colId: string, colType: string) => {
+      return filteredTasks.filter(t => {
+          const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+          
+          if (colType === 'completed') {
+              return isCompleted;
+          }
+          
+          // For Unassigned and Dev columns, we ONLY show active tasks
+          if (isCompleted) return false;
+
+          if (colType === 'unassigned') {
+              return !t.assignee;
+          }
+          
+          if (colType === 'dev') {
+              return t.assignee === colId;
+          }
+          
+          return false;
+      }).sort((a, b) => (a.boardPosition || 0) - (b.boardPosition || 0));
+  };
 
   return (
     <div className="h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+      <div className="flex justify-between items-center">
+          <FilterBar filters={filters} setFilters={setFilters} devs={devs} /> 
+      </div>
       
       <div className="flex-1 overflow-x-auto pb-2">
-        <div className="flex gap-4 h-full min-w-max px-2">
-          {columns.map(col => (
-            <div 
-              key={col.id}
-              className={`flex-1 min-w-[320px] rounded-xl border flex flex-col ${col.isDone ? 'bg-emerald-900/20 border-emerald-800' : 'bg-slate-800/50 border-slate-700'}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => onDrop(e, col.status, col.assignee)}
-            >
-              <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${col.isDone ? 'bg-emerald-900/50 border-emerald-800' : 'bg-slate-800/80 border-slate-700'}`}>
-                <h3 className="font-semibold text-white">{col.title}</h3>
-                <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">
-                  {filteredTasks.filter(t => {
-                      if (col.isDone) return t.status === 'Resolvido' || t.status === 'Concluído';
-                      if (col.id === 'unassigned') return !t.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                      return t.assignee === col.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                  }).length}
-                </span>
-              </div>
-              
-              <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar">
-                {filteredTasks
-                  .filter(t => {
-                      if (col.isDone) return t.status === 'Resolvido' || t.status === 'Concluído';
-                      if (col.id === 'unassigned') return !t.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                      return t.assignee === col.assignee && t.status !== 'Resolvido' && t.status !== 'Concluído';
-                  })
-                  .map(task => (
-                    <div
-                      key={task.id}
-                      draggable
-                      onDragStart={(e) => onDragStart(e, task.id)}
-                      onClick={() => onEditTask(task)}
-                      className="bg-slate-700 p-4 rounded-lg border border-slate-600 hover:border-indigo-500 hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all"
-                    >
-                      <div className={`absolute left-0 top-0 bottom-0 w-1 ${
-                          task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'
-                      }`}></div>
+        <div className="flex gap-4 h-full min-w-max px-2 items-start">
+          {columns.map(col => {
+            const colTasks = getTasksForColumn(col.id, col.type);
+            const isCompletedCol = col.type === 'completed';
+            const isUnassignedCol = col.type === 'unassigned';
 
-                      <div className="flex justify-between items-start mb-2 pl-2">
-                        <span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span>
-                        <Badge type={task.priority} />
-                      </div>
-                      
-                      <h4 className="text-sm font-medium text-slate-100 mb-3 pl-2 line-clamp-3">{task.summary}</h4>
-                      
-                      <div className="flex justify-between items-center pl-2 mt-auto">
-                          <Badge type={task.type} />
-                          {task.estimatedTime && (
-                              <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded">
-                                  <IconClock /> {task.estimatedTime}
-                              </div>
-                          )}
-                      </div>
+            let headerColor = "border-slate-700 bg-slate-800/80";
+            if (isCompletedCol) headerColor = "border-emerald-900/50 bg-emerald-900/20";
+            if (isUnassignedCol) headerColor = "border-slate-700 bg-slate-800/50 dashed";
+
+            return (
+                <div 
+                key={col.id}
+                className={`flex-1 min-w-[320px] w-[320px] rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => onDrop(e, col.id, col.type)}
+                >
+                <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${headerColor}`}>
+                    <div className="flex items-center gap-2">
+                         {col.type === 'dev' && <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-xs text-white font-bold">{col.title.substring(0,2).toUpperCase()}</div>}
+                         {col.type === 'unassigned' && <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-xs text-white font-bold">?</div>}
+                         {col.type === 'completed' && <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs text-white font-bold">✓</div>}
+                        <h3 className="font-semibold text-white truncate max-w-[200px]">{col.title}</h3>
                     </div>
-                ))}
-              </div>
-            </div>
-          ))}
+                    <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">
+                        {colTasks.length}
+                    </span>
+                </div>
+                
+                <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar h-full min-h-[100px]">
+                    {colTasks.map(task => (
+                        <div
+                        key={task.id}
+                        draggable
+                        onDragStart={(e) => onDragStart(e, task.id)}
+                        onClick={() => onEditTask(task)}
+                        className={`p-4 rounded-lg border hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all 
+                            ${isCompletedCol ? 'bg-slate-800/50 border-slate-700 opacity-70 hover:opacity-100' : 'bg-slate-700 border-slate-600 hover:border-indigo-500'}
+                        `}
+                        >
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${
+                            task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'
+                        }`}></div>
+
+                        <div className="flex justify-between items-start mb-2 pl-2">
+                            <span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span>
+                            <Badge type={task.priority} />
+                        </div>
+                        
+                        <h4 className={`text-sm font-medium mb-3 pl-2 line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.summary}</h4>
+                        
+                        <div className="flex justify-between items-end pl-2 mt-auto">
+                            <div className="flex flex-col gap-1">
+                                <Badge type={task.type} />
+                                <span className="text-[10px] text-slate-500 mt-1">{task.status}</span>
+                            </div>
+                            {task.estimatedTime && (
+                                <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded">
+                                    <IconClock className="w-3 h-3" /> {task.estimatedTime}
+                                </div>
+                            )}
+                        </div>
+                        </div>
+                    ))}
+                    {colTasks.length === 0 && (
+                        <div className="h-20 flex items-center justify-center text-slate-600 text-xs italic border-2 border-dashed border-slate-700/50 rounded-lg">
+                            Arraste tarefas aqui
+                        </div>
+                    )}
+                </div>
+                </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -1195,6 +1297,17 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
 
   const handleBulkAction = (action: string, payload?: any) => {
       if (selected.size === 0) return;
+
+      // --- Overload Check for Bulk Assign ---
+      if (action === 'assign' && payload) {
+          const currentHours = getDevWorkload(payload, tasks);
+          if (currentHours > 40) {
+               if (!window.confirm(`ALERTA DE SOBRECARGA: ${payload} já possui ${formatDuration(currentHours)} em tarefas pendentes. \n\nDeseja atribuir mais ${selected.size} tarefas mesmo assim?`)) {
+                   return;
+               }
+          }
+      }
+
       const updated = tasks.map(t => {
           if (selected.has(t.id)) {
               if (action === 'delete') return null;
@@ -1513,7 +1626,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     );
 };
 
-const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
+const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete }: any) => {
     const [formData, setFormData] = useState<Task>(task || {
         id: '',
         type: 'Incidente',
@@ -1558,6 +1671,15 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
 
     const handleChange = (e: any) => {
         const { name, value } = e.target;
+        
+        // --- Overload Check in Modal ---
+        if (name === 'assignee' && value && allTasks) {
+            const currentHours = getDevWorkload(value, allTasks, task.id);
+            if (currentHours > 40) {
+                alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`);
+            }
+        }
+
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
@@ -1571,16 +1693,28 @@ const TaskModal = ({ task, developers, onClose, onSave, onDelete }: any) => {
                     <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
                 </div>
                 <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar">
-                    <div className="grid grid-cols-1 gap-4">
-                        <div>
-                            <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label>
-                            <input 
-                                name="id" 
-                                value={formData.id} 
-                                onChange={handleChange} 
-                                placeholder="Ex: INC0012345"
-                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono"
-                            />
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                             <div>
+                                <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label>
+                                <input 
+                                    name="id" 
+                                    value={formData.id} 
+                                    onChange={handleChange} 
+                                    placeholder="Ex: INC0012345"
+                                    className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label>
+                                <input 
+                                    name="requester" 
+                                    value={formData.requester || ''} 
+                                    onChange={handleChange} 
+                                    placeholder="Nome do Solicitante"
+                                    className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                            </div>
                         </div>
                         <div>
                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label>
@@ -1943,6 +2077,7 @@ export default function App() {
             <TaskModal 
                 task={editingTask} 
                 developers={devs} 
+                allTasks={tasks}
                 onClose={() => setEditingTask(null)} 
                 onSave={handleTaskUpdate} 
                 onDelete={handleTaskDelete} 
