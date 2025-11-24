@@ -12,6 +12,11 @@ import { ExcelService } from './services/excelService';
 import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus } from './components/Icons';
 
+// --- Constants ---
+const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
+const PRIORITIES = ['1 - Crítica', '2 - Alta', '3 - Moderada', '4 - Baixa'];
+const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog'];
+
 // --- Helper: Time Parser ---
 const parseDuration = (durationStr: string | undefined): number => {
     if (!durationStr) return 0;
@@ -90,16 +95,91 @@ const Badge = ({ type, className='' }: { type: string, className?: string }) => 
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${color} ${className}`}>{type}</span>;
 };
 
+// --- MultiSelect Component ---
+
+const MultiSelect = ({ label, options, selected, onChange, placeholder }: { label?: string, options: string[], selected: string[], onChange: (val: string[]) => void, placeholder: string }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const toggleOption = (option: string) => {
+        if (selected.includes(option)) {
+            onChange(selected.filter(s => s !== option));
+        } else {
+            onChange([...selected, option]);
+        }
+    };
+
+    const toggleAll = () => {
+        if (selected.length === options.length) {
+            onChange([]);
+        } else {
+            onChange([...options]);
+        }
+    };
+
+    return (
+        <div className="relative w-full md:w-auto min-w-[160px]" ref={containerRef}>
+            {label && <label className="block text-xs text-slate-400 mb-1">{label}</label>}
+            <div 
+                onClick={() => setIsOpen(!isOpen)} 
+                className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 cursor-pointer flex justify-between items-center hover:border-slate-500 transition-colors"
+            >
+                <span className="truncate max-w-[140px]">
+                    {selected.length === 0 ? placeholder : selected.length === options.length ? `Todos (${options.length})` : `${selected.length} selecionados`}
+                </span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+            </div>
+            {isOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2">
+                    <div 
+                        onClick={toggleAll}
+                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-700 rounded cursor-pointer border-b border-slate-700 mb-1 pb-2"
+                    >
+                         <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.length === options.length ? 'bg-indigo-600 border-indigo-600' : 'border-slate-500'}`}>
+                             {selected.length === options.length && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                         </div>
+                         <span className="text-xs font-bold text-slate-300">Selecionar Todos</span>
+                    </div>
+                    {options.map(opt => (
+                        <div 
+                            key={opt} 
+                            onClick={() => toggleOption(opt)}
+                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-700 rounded cursor-pointer"
+                        >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.includes(opt) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-500'}`}>
+                                {selected.includes(opt) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                            </div>
+                            <span className="text-sm text-slate-300">{opt}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+};
+
 // --- Filter Component ---
 
 const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: any, devs?: Developer[] }) => {
-  const handleChange = (key: string, value: string) => {
+  const handleChange = (key: string, value: any) => {
     setFilters((prev: any) => ({ ...prev, [key]: value }));
   };
 
   return (
-    <div className="flex flex-col md:flex-row gap-3 bg-slate-800 p-3 rounded-xl border border-slate-700 mb-4 items-center">
-       <div className="flex-1 w-full md:w-auto relative">
+    <div className="flex flex-col xl:flex-row gap-3 bg-slate-800 p-3 rounded-xl border border-slate-700 mb-4 items-start xl:items-center">
+       <div className="flex-1 w-full xl:w-auto relative">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
@@ -111,39 +191,40 @@ const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: an
             onChange={(e) => handleChange('search', e.target.value)}
           />
        </div>
-       <select 
-          className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-          value={filters.type}
-          onChange={(e) => handleChange('type', e.target.value)}
-       >
-          <option value="All">Todos Tipos</option>
-          <option value="Incidente">Incidente</option>
-          <option value="Melhoria">Melhoria</option>
-          <option value="Nova Automação">Nova Automação</option>
-       </select>
-       <select 
-          className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-          value={filters.priority}
-          onChange={(e) => handleChange('priority', e.target.value)}
-       >
-          <option value="All">Todas Prioridades</option>
-          <option value="1 - Crítica">1 - Crítica</option>
-          <option value="2 - Alta">2 - Alta</option>
-          <option value="3 - Moderada">3 - Moderada</option>
-          <option value="4 - Baixa">4 - Baixa</option>
-       </select>
        
-       {devs && (
-           <select 
-              className="w-full md:w-auto bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
-              value={filters.assignee || 'All'}
-              onChange={(e) => handleChange('assignee', e.target.value)}
-           >
-              <option value="All">Todos Devs</option>
-              <option value="Unassigned">Não Atribuído</option>
-              {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-           </select>
-       )}
+       <div className="flex flex-wrap gap-2 w-full xl:w-auto">
+           <MultiSelect 
+               placeholder="Tipos"
+               options={TASK_TYPES}
+               selected={filters.type}
+               onChange={(val) => handleChange('type', val)}
+           />
+           
+           <MultiSelect 
+               placeholder="Prioridades"
+               options={PRIORITIES}
+               selected={filters.priority}
+               onChange={(val) => handleChange('priority', val)}
+           />
+
+           {filters.status !== undefined && (
+               <MultiSelect 
+                   placeholder="Status"
+                   options={STATUSES}
+                   selected={filters.status}
+                   onChange={(val) => handleChange('status', val)}
+               />
+           )}
+           
+           {devs && (
+               <MultiSelect 
+                   placeholder="Desenvolvedores"
+                   options={['Não Atribuído', ...devs.map(d => d.name)]}
+                   selected={filters.assignee}
+                   onChange={(val) => handleChange('assignee', val)}
+               />
+           )}
+       </div>
     </div>
   )
 };
@@ -324,18 +405,34 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 // --- Gantt View ---
 
 const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
+  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
+      search: '', 
+      type: [], 
+      priority: [], 
+      status: [], 
+      assignee: [] 
+  });
 
   const filteredTasks = useMemo(() => {
       return tasks.filter(t => {
           const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
                                 t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
                                 (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-          const matchesType = filters.type === 'All' || t.type === filters.type;
-          const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-          const matchesStatus = filters.status === 'All' || t.status === filters.status;
-          const matchesAssignee = filters.assignee === 'All' || 
-                                  (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+          
+          const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+          const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+          const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
+          
+          let matchesAssignee = true;
+          if (filters.assignee.length > 0) {
+              const hasUnassigned = filters.assignee.includes('Não Atribuído');
+              if (hasUnassigned) {
+                  matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+              } else {
+                  matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+              }
+          }
+
           // Must have dates to show in Gantt
           return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee && t.startDate && t.endDate;
       });
@@ -542,8 +639,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
       return saved ? JSON.parse(saved) : DEFAULT_WIDGETS;
   });
   const [isEditMode, setIsEditMode] = useState(false);
-  const [filterDev, setFilterDev] = useState<string>('All');
-  const [filterType, setFilterType] = useState<string>('All');
+  const [filterDev, setFilterDev] = useState<string[]>([]);
+  const [filterType, setFilterType] = useState<string[]>([]);
 
   useEffect(() => {
       localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets));
@@ -555,8 +652,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         // Global Dashboard Rule: Don't count completed tasks
         if (['Concluído', 'Resolvido', 'Fechado'].includes(t.status)) return false;
 
-        const matchesDev = filterDev === 'All' ? true : t.assignee === filterDev;
-        const matchesType = filterType === 'All' ? true : t.type === filterType;
+        const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || '');
+        const matchesType = filterType.length === 0 || filterType.includes(t.type);
         return matchesDev && matchesType;
     });
   }, [tasks, filterDev, filterType]);
@@ -834,9 +931,15 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                             <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
                             <Legend wrapperStyle={{paddingTop: '10px'}} />
                             
-                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" />
-                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981" />
-                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e">
+                                <LabelList dataKey="Incidente" content={renderCustomBarLabel} />
+                            </Bar>
+                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
+                                <LabelList dataKey="Melhoria" content={renderCustomBarLabel} />
+                            </Bar>
+                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]}>
+                                <LabelList dataKey="Nova Automação" content={renderCustomBarLabel} />
+                            </Bar>
                         </BarChart>
                      </ResponsiveContainer>
                  )}
@@ -906,6 +1009,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                                  <thead className="text-xs text-slate-400 uppercase bg-slate-900/50">
                                      <tr>
                                          <th className="text-left p-2 rounded-l">Dev</th>
+                                         <th className="text-center p-2">Qtd</th>
                                          <th className="text-center p-2">Backlog</th>
                                          <th className="text-center p-2">Dias Est.</th>
                                          <th className="text-center p-2 rounded-r">Saúde</th>
@@ -940,6 +1044,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                                                         <div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div>
                                                     </div>
                                                 </td>
+                                                <td className="p-2 text-center text-slate-300 font-bold">{dev.activeTasksCount}</td>
                                                 <td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td>
                                                 <td className="p-2 text-center text-slate-400">{estimatedDays}d</td>
                                                 <td className="p-2 text-center">
@@ -970,26 +1075,21 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         </div>
         <div className="flex flex-wrap gap-4 w-full md:w-auto items-center">
           {/* Filter for just the dashboard view */}
-          <select 
-            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto md:w-40"
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          >
-             <option value="All">Tipo: Todos</option>
-             <option value="Incidente">Incidente</option>
-             <option value="Melhoria">Melhoria</option>
-             <option value="Nova Automação">Automação</option>
-          </select>
+          <div className="flex gap-2 w-full md:w-auto">
+              <MultiSelect 
+                options={TASK_TYPES}
+                selected={filterType}
+                onChange={setFilterType}
+                placeholder="Tipos: Todos"
+              />
+              <MultiSelect 
+                options={devs.map(d => d.name)}
+                selected={filterDev}
+                onChange={setFilterDev}
+                placeholder="Devs: Todos"
+              />
+          </div>
 
-          <select 
-            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none w-full md:w-auto md:w-40"
-            value={filterDev}
-            onChange={(e) => setFilterDev(e.target.value)}
-          >
-            <option value="All">Dev: Todos</option>
-            {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-          </select>
-          
           <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"} className="whitespace-nowrap">
               {isEditMode ? 'Salvar Layout' : 'Editar Layout'}
           </Button>
@@ -1049,7 +1149,12 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 // --- Kanban View (Updated: Developer Based) ---
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', assignee: 'All' });
+  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], assignee: string[]}>({ 
+      search: '', 
+      type: [], 
+      priority: [], 
+      assignee: [] 
+  });
 
   // --- Columns Definition ---
   // 1. Unassigned
@@ -1063,12 +1168,15 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
       ];
 
       // Filter columns if specific dev is selected
-      if (filters.assignee !== 'All') {
-           if (filters.assignee === 'Unassigned') {
-               cols = cols.filter(c => c.type === 'unassigned' || c.type === 'completed');
-           } else {
-               cols = cols.filter(c => c.id === filters.assignee || c.type === 'completed');
-           }
+      if (filters.assignee.length > 0) {
+           // If 'Não Atribuído' is selected, show unassigned column
+           const showUnassigned = filters.assignee.includes('Não Atribuído');
+           
+           cols = cols.filter(c => {
+               if (c.type === 'completed') return true;
+               if (c.type === 'unassigned') return showUnassigned;
+               return filters.assignee.includes(c.id);
+           });
       }
       return cols;
   }, [devs, filters.assignee]);
@@ -1152,10 +1260,21 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
         const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
                               t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
                               (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-        const matchesType = filters.type === 'All' || t.type === filters.type;
-        const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-        const matchesAssignee = filters.assignee === 'All' || 
-                                (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+        
+        const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+        const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+        
+        // Assignee matching is handled by columns visualization generally, but for search/count consistency:
+        let matchesAssignee = true;
+        if (filters.assignee.length > 0) {
+            const hasUnassigned = filters.assignee.includes('Não Atribuído');
+            if (hasUnassigned) {
+                matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+            } else {
+                matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+            }
+        }
+
         return matchesSearch && matchesType && matchesPriority && matchesAssignee;
     });
   }, [tasks, filters]);
@@ -1273,18 +1392,34 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 // --- List View ---
 
 const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState({ search: '', type: 'All', priority: 'All', status: 'All', assignee: 'All' });
+  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
+      search: '', 
+      type: [], 
+      priority: [], 
+      status: [], 
+      assignee: [] 
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   
   const filtered = tasks.filter(t => {
       const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
                             t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
                             (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-      const matchesType = filters.type === 'All' || t.type === filters.type;
-      const matchesPriority = filters.priority === 'All' || t.priority === filters.priority;
-      const matchesStatus = filters.status === 'All' || t.status === filters.status;
-      const matchesAssignee = filters.assignee === 'All' || 
-                              (filters.assignee === 'Unassigned' ? !t.assignee : t.assignee === filters.assignee);
+      
+      const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+      const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+      const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
+      
+      let matchesAssignee = true;
+      if (filters.assignee.length > 0) {
+          const hasUnassigned = filters.assignee.includes('Não Atribuído');
+          if (hasUnassigned) {
+              matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+          } else {
+              matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+          }
+      }
+
       return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
   });
 
