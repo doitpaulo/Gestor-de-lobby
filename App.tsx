@@ -10,7 +10,7 @@ import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -363,6 +363,179 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     return changes;
 };
 
+// --- Project Report View ---
+
+const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowConfig: WorkflowPhase[] }) => {
+    
+    // 1. Filter only Projects (Improvements / Automations)
+    const projects = useMemo(() => {
+        return tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
+    }, [tasks]);
+
+    // 2. Metrics Calculation
+    const metrics = useMemo(() => {
+        const total = projects.length;
+        
+        // Helper to calculate progress
+        const getProgress = (task: Task) => {
+            const currentId = task.projectData?.currentPhaseId;
+            let index = workflowConfig.findIndex(w => w.id === currentId);
+            if (index === -1) index = 0;
+            const status = task.projectData?.phaseStatus?.toLowerCase() || '';
+            const isCompleted = status.includes('concluído') || status.includes('concluido') || status.includes('finalizado');
+            const completedPhases = index + (isCompleted ? 1 : 0);
+            return Math.min(100, Math.round((completedPhases / workflowConfig.length) * 100));
+        };
+
+        const completedProjects = projects.filter(p => p.status === 'Concluído' || p.status === 'Resolvido').length;
+        const totalProgress = projects.reduce((acc, p) => acc + getProgress(p), 0);
+        const avgProgress = total > 0 ? Math.round(totalProgress / total) : 0;
+
+        // "Stuck" projects (Waiting or Deprioritized in Phase Status)
+        const stuckProjects = projects.filter(p => {
+             const s = (p.projectData?.phaseStatus || '').toLowerCase();
+             return s.includes('aguardando') || s.includes('despriorizado') || s.includes('cancelado');
+        }).length;
+
+        // Active (Not stuck, not completed fully)
+        const activeProjects = total - completedProjects - stuckProjects;
+
+        return { total, avgProgress, stuckProjects, activeProjects, completedProjects };
+    }, [projects, workflowConfig]);
+
+    // 3. Chart Data: Phase Distribution
+    const phaseData = useMemo(() => {
+        return workflowConfig.map(phase => {
+            const count = projects.filter(p => {
+                // If the project is fully completed (status Concluído), we might count it in the last phase or exclude. 
+                // Let's count active projects in their phases.
+                const isProjectDone = ['Concluído', 'Resolvido', 'Fechado'].includes(p.status);
+                if (isProjectDone) return false; 
+                return (p.projectData?.currentPhaseId || '1') === phase.id;
+            }).length;
+            return { name: phase.name, value: count };
+        });
+    }, [projects, workflowConfig]);
+
+    // 4. Chart Data: Status Health
+    const healthData = useMemo(() => {
+        const data = [
+            { name: 'Em Andamento', value: metrics.activeProjects, color: '#10b981' }, // Emerald
+            { name: 'Travados / Aguardando', value: metrics.stuckProjects, color: '#f59e0b' }, // Amber
+            { name: 'Concluídos', value: metrics.completedProjects, color: '#6366f1' } // Indigo
+        ].filter(d => d.value > 0);
+        return data;
+    }, [metrics]);
+
+    const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+        const RADIAN = Math.PI / 180;
+        const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+        const x = cx + radius * Math.cos(-midAngle * RADIAN);
+        const y = cy + radius * Math.sin(-midAngle * RADIAN);
+        return percent > 0 ? (
+            <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={12} fontWeight="bold">
+                {`${(percent * 100).toFixed(0)}%`}
+            </text>
+        ) : null;
+    };
+
+    return (
+        <div className="space-y-6 animate-fade-in pb-10">
+            <div>
+                <h2 className="text-2xl font-bold text-white">Report de Fluxo de Projetos</h2>
+                <p className="text-sm text-slate-400">Visão consolidada de Melhorias e Automações</p>
+            </div>
+
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-indigo-500">
+                    <div className="p-3 bg-indigo-500/20 rounded-full text-indigo-400">
+                        <IconProject className="w-8 h-8" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-slate-400">Total Projetos</p>
+                        <p className="text-3xl font-bold text-white">{metrics.total}</p>
+                    </div>
+                </Card>
+                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-emerald-500">
+                    <div className="p-3 bg-emerald-500/20 rounded-full text-emerald-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+                    </div>
+                    <div>
+                        <p className="text-sm text-slate-400">Média de Avanço</p>
+                        <p className="text-3xl font-bold text-white">{metrics.avgProgress}%</p>
+                    </div>
+                </Card>
+                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-amber-500">
+                    <div className="p-3 bg-amber-500/20 rounded-full text-amber-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+                    </div>
+                    <div>
+                        <p className="text-sm text-slate-400">Travados / Espera</p>
+                        <p className="text-3xl font-bold text-white">{metrics.stuckProjects}</p>
+                    </div>
+                </Card>
+                 <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-rose-500">
+                    <div className="p-3 bg-rose-500/20 rounded-full text-rose-400">
+                         <IconChartBar className="w-8 h-8" />
+                    </div>
+                    <div>
+                        <p className="text-sm text-slate-400">Ativos em Fases</p>
+                        <p className="text-3xl font-bold text-white">{projects.length - metrics.completedProjects}</p>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Charts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Phase Distribution */}
+                <Card className="min-h-[400px]">
+                    <h3 className="text-lg font-bold text-white mb-4">Projetos Ativos por Fase</h3>
+                    <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={phaseData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
+                            <XAxis type="number" stroke="#94a3b8" />
+                            <YAxis type="category" dataKey="name" stroke="#94a3b8" width={120} tick={{ fontSize: 11 }} />
+                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{ fill: '#334155', opacity: 0.4 }} />
+                            <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={30}>
+                                <LabelList dataKey="value" position="right" fill="#cbd5e1" fontWeight="bold" />
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </Card>
+
+                {/* Project Health Pie */}
+                <Card className="min-h-[400px] flex flex-col">
+                    <h3 className="text-lg font-bold text-white mb-4">Saúde do Portfólio</h3>
+                     <div className="flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={healthData}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={100}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                    labelLine={false}
+                                    label={renderCustomLabel}
+                                >
+                                    {healthData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
+                                    ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} />
+                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                            </PieChart>
+                        </ResponsiveContainer>
+                     </div>
+                </Card>
+            </div>
+        </div>
+    );
+};
+
 // --- Project Lifecycle Flow View ---
 
 const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (t: Task) => void, user: User, workflowConfig: WorkflowPhase[], setWorkflowConfig: any }) => {
@@ -432,7 +605,11 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
         const updated = tasks.map(t => {
             if (t.id === taskId) {
                 const currentPhaseId = t.projectData?.currentPhaseId || '1';
-                const currentIndex = workflowConfig.findIndex(w => w.id === currentPhaseId);
+                let currentIndex = workflowConfig.findIndex(w => w.id === currentPhaseId);
+                
+                // Fallback to first if not found
+                if (currentIndex === -1) currentIndex = 0;
+
                 const newIndex = currentIndex + direction;
 
                 if (newIndex >= 0 && newIndex < workflowConfig.length) {
@@ -475,6 +652,26 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
         StorageService.saveWorkflowConfig(updated);
     }
 
+    // Helper to calculate progress accounting for completion
+    const getProgress = (task: Task) => {
+        const currentId = task.projectData?.currentPhaseId;
+        let index = workflowConfig.findIndex(w => w.id === currentId);
+        
+        // Fallback if phase ID not found (e.g. workflow config changed)
+        if (index === -1) index = 0;
+
+        const status = task.projectData?.phaseStatus?.toLowerCase() || '';
+        const isCompleted = status.includes('concluído') || status.includes('concluido') || status.includes('finalizado');
+
+        // If completed, we count this phase as done (index + 1)
+        // If not, we count up to previous phase (index)
+        const completedPhases = index + (isCompleted ? 1 : 0);
+        
+        // Cap at 100% just in case
+        const percentage = Math.min(100, Math.round((completedPhases / workflowConfig.length) * 100));
+        return percentage;
+    };
+
     const handleExportExcel = () => {
         const exportData = filteredTasks.map(t => {
             const row: any = {
@@ -485,16 +682,20 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                 'Status Global': t.status
             };
 
+            const progress = getProgress(t);
+            let currentTaskPhaseIndex = workflowConfig.findIndex(w => w.id === (t.projectData?.currentPhaseId || '1'));
+            if (currentTaskPhaseIndex === -1) currentTaskPhaseIndex = 0;
+
             // Add columns for each phase
-            workflowConfig.forEach(phase => {
+            workflowConfig.forEach((phase, idx) => {
                 const isActive = (t.projectData?.currentPhaseId || '1') === phase.id;
-                const phaseIndex = workflowConfig.findIndex(w => w.id === phase.id);
-                const currentTaskPhaseIndex = workflowConfig.findIndex(w => w.id === (t.projectData?.currentPhaseId || '1'));
-                
+                const isPast = idx < currentTaskPhaseIndex;
+                const isDone = progress === 100; // If 100%, all past phases + current are logically done
+
                 let val = '';
                 if (isActive) {
                     val = t.projectData?.phaseStatus || 'Não Iniciado';
-                } else if (phaseIndex < currentTaskPhaseIndex) {
+                } else if (isPast || isDone) {
                     val = 'Concluído';
                 } else {
                     val = 'Não Iniciado';
@@ -504,8 +705,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
             });
             
             // Add completion %
-            const currentIdx = workflowConfig.findIndex(w => w.id === (t.projectData?.currentPhaseId || '1'));
-            row['% Conclusão'] = `${Math.round(((currentIdx) / workflowConfig.length) * 100)}%`;
+            row['% Conclusão'] = `${progress}%`;
 
             return row;
         });
@@ -548,8 +748,11 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                     </thead>
                     <tbody>
                         {filteredTasks.map(task => {
-                             const currentPhaseIndex = workflowConfig.findIndex(w => w.id === (task.projectData?.currentPhaseId || '1'));
-                             const progress = Math.round(((currentPhaseIndex) / workflowConfig.length) * 100);
+                             // Robust Index finding
+                             let currentPhaseIndex = workflowConfig.findIndex(w => w.id === (task.projectData?.currentPhaseId || '1'));
+                             if (currentPhaseIndex === -1) currentPhaseIndex = 0; // fallback
+
+                             const progress = getProgress(task);
 
                              return (
                                  <tr key={task.id} className="bg-slate-800 hover:bg-slate-700/50 transition-colors group">
@@ -564,7 +767,9 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                                          </div>
                                      </td>
                                      {workflowConfig.map((phase, idx) => {
-                                         const isActive = (task.projectData?.currentPhaseId || '1') === phase.id;
+                                         const isCurrentPhase = (task.projectData?.currentPhaseId || '1') === phase.id || (task.projectData?.currentPhaseId === undefined && idx === 0);
+                                         
+                                         const isActive = isCurrentPhase; 
                                          const isPast = idx < currentPhaseIndex;
                                          const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não iniciado';
                                          
@@ -2060,6 +2265,7 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const menuItems = [
     { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' },
     { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' },
+    { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' },
     { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' },
     { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' },
     { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
@@ -2800,6 +3006,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
           <Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
+          <Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} />} />
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
