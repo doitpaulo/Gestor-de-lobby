@@ -20,33 +20,73 @@ const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvi
 const DEFAULT_WORKFLOW: WorkflowPhase[] = [
     {
         id: '1',
-        name: 'Avaliação',
-        statuses: ['Não Iniciado', 'Concluído', 'Aguardando Aprovação CoE', 'Em Andamento', 'Despriorizado pelo CoE', 'Cancelado'],
-        activities: ['Validar Business Case', 'Criar Business Case']
+        name: 'Assessment',
+        statuses: [
+            'Não iniciado', 
+            'Concluído', 
+            'Aguardando Aprovação CoE', 
+            'Em andamento', 
+            'Despriorizado CoE', 
+            'Cancelado',
+            'Validar Business Case',
+            'Elaborar Business Case'
+        ],
+        activities: ['Validar Business Case', 'Elaborar Business Case']
     },
     {
         id: '2',
-        name: 'Fluxograma',
-        statuses: ['Não Iniciado', 'Concluído', 'Em Andamento'],
-        activities: ['Criar Desenho AS-IS', 'Validar Desenho AS-IS', 'Criar Desenho TO-BE', 'Validar Desenho TO-BE']
+        name: 'Fluxograma do Processo',
+        statuses: [
+            'Não iniciado', 
+            'Concluído', 
+            'Em andamento',
+            'Elaborar desenho AS-IS',
+            'Validar desenho AS-IS',
+            'Elaborar desenho TO-BE',
+            'Validar desenho TO-BE'
+        ],
+        activities: ['Elaborar desenho AS-IS', 'Validar desenho AS-IS', 'Elaborar desenho TO-BE', 'Validar desenho TO-BE']
     },
     {
         id: '3',
-        name: 'Especificação',
-        statuses: ['Não Iniciado', 'Concluído'],
-        activities: ['Criar PDD/BA', 'Validar PDD/BA + DEV', 'Criar DoR/BA', 'Validar DoR/BA + DEV', 'Criar SDD/DEV', 'Validar SDD/DEV']
+        name: 'Especificação do Processo',
+        statuses: [
+            'Não iniciado', 
+            'Concluído',
+            'Elaborar PDD/BA',
+            'Validar PDD/BA + DEV',
+            'Elaborar DoR/BA',
+            'Validar DoR/BA + DEV',
+            'Elaborar SDD/DEV',
+            'Validar SDD/DEV'
+        ],
+        activities: ['Elaborar PDD/BA', 'Validar PDD/BA + DEV', 'Elaborar DoR/BA', 'Validar DoR/BA + DEV', 'Elaborar SDD/DEV', 'Validar SDD/DEV']
     },
     {
         id: '4',
         name: 'Desenvolvimento',
-        statuses: ['Não Iniciado', 'Concluído'],
-        activities: ['Criar DoD – BA', 'Validar DoD – BA / DEV / Senior DEV', 'Criar Plano de Teste QA/DEV']
+        statuses: [
+            'Não iniciado', 
+            'Concluído',
+            'Elaborar DoD – BA',
+            'Validar DoD – BA / DEV / DEV SR',
+            'Elaborar Plano de Teste QA/DEV'
+        ],
+        activities: ['Elaborar DoD – BA', 'Validar DoD – BA / DEV / DEV SR', 'Elaborar Plano de Teste QA/DEV']
     },
     {
         id: '5',
-        name: 'QA / Homolog / Prod',
-        statuses: ['Não Iniciado', 'Concluído'],
-        activities: ['Executar QA', 'Executar Homologação', 'Executar Produção', 'Monitorar Primeiras Execuções', 'Validar QA / Homologação / Produção']
+        name: 'QA | Homologação | Prod',
+        statuses: [
+            'Não iniciado', 
+            'Concluído',
+            'Executar QA',
+            'Executar Homologação',
+            'Executar Produção',
+            'Acompanhar Primeiras Execuções',
+            'Validar QA / Homologação / Produção'
+        ],
+        activities: ['Executar QA', 'Executar Homologação', 'Executar Produção', 'Acompanhar Primeiras Execuções', 'Validar QA / Homologação / Produção']
     }
 ];
 
@@ -421,7 +461,59 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
         const updated = [...workflowConfig, newPhase];
         setWorkflowConfig(updated);
         StorageService.saveWorkflowConfig(updated);
-        setIsConfigOpen(false);
+    }
+    
+    const handleUpdatePhase = (updatedPhase: WorkflowPhase) => {
+        const updated = workflowConfig.map(p => p.id === updatedPhase.id ? updatedPhase : p);
+        setWorkflowConfig(updated);
+        StorageService.saveWorkflowConfig(updated);
+    }
+
+    const handleDeletePhase = (phaseId: string) => {
+        const updated = workflowConfig.filter(p => p.id !== phaseId);
+        setWorkflowConfig(updated);
+        StorageService.saveWorkflowConfig(updated);
+    }
+
+    const handleExportExcel = () => {
+        const exportData = filteredTasks.map(t => {
+            const row: any = {
+                'ID': t.id,
+                'Projeto': t.summary,
+                'Tipo': t.type,
+                'Desenvolvedor': t.assignee || 'Não Atribuído',
+                'Status Global': t.status
+            };
+
+            // Add columns for each phase
+            workflowConfig.forEach(phase => {
+                const isActive = (t.projectData?.currentPhaseId || '1') === phase.id;
+                const phaseIndex = workflowConfig.findIndex(w => w.id === phase.id);
+                const currentTaskPhaseIndex = workflowConfig.findIndex(w => w.id === (t.projectData?.currentPhaseId || '1'));
+                
+                let val = '';
+                if (isActive) {
+                    val = t.projectData?.phaseStatus || 'Não Iniciado';
+                } else if (phaseIndex < currentTaskPhaseIndex) {
+                    val = 'Concluído';
+                } else {
+                    val = 'Não Iniciado';
+                }
+                
+                row[phase.name] = val;
+            });
+            
+            // Add completion %
+            const currentIdx = workflowConfig.findIndex(w => w.id === (t.projectData?.currentPhaseId || '1'));
+            row['% Conclusão'] = `${Math.round(((currentIdx) / workflowConfig.length) * 100)}%`;
+
+            return row;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Fluxo de Projetos");
+        XLSX.writeFile(wb, "Nexus_FluxoProjetos.xlsx");
     }
 
     return (
@@ -431,9 +523,14 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                      <h2 className="text-xl font-bold text-white">Fluxo de Projetos</h2>
                      <p className="text-sm text-slate-400">Acompanhamento detalhado das fases de Melhorias e Automações</p>
                 </div>
-                <Button variant="secondary" onClick={() => setIsConfigOpen(true)}>
-                    <IconPlus className="w-4 h-4" /> Configurar Fases
-                </Button>
+                <div className="flex gap-2">
+                    <Button onClick={handleExportExcel} variant="success">
+                        <IconDownload className="w-4 h-4" /> Excel
+                    </Button>
+                    <Button variant="secondary" onClick={() => setIsConfigOpen(true)}>
+                        <IconPlus className="w-4 h-4" /> Configurar Fases
+                    </Button>
+                </div>
             </div>
             
             <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
@@ -444,7 +541,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                         <tr className="text-slate-400 font-medium text-xs uppercase tracking-wider">
                             <th className="pb-2 pl-2">Projeto</th>
                             {workflowConfig.map(phase => (
-                                <th key={phase.id} className="pb-2 px-2 text-center">{phase.name}</th>
+                                <th key={phase.id} className="pb-2 px-2 text-center min-w-[140px]">{phase.name}</th>
                             ))}
                             <th className="pb-2 text-center">% Conclusão</th>
                         </tr>
@@ -469,7 +566,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                                      {workflowConfig.map((phase, idx) => {
                                          const isActive = (task.projectData?.currentPhaseId || '1') === phase.id;
                                          const isPast = idx < currentPhaseIndex;
-                                         const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não Iniciado';
+                                         const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não iniciado';
                                          
                                          let bgClass = "bg-slate-900/50 border-slate-700";
                                          let textClass = "text-slate-500";
@@ -484,19 +581,24 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
 
                                          // Determine status color
                                          let statusColor = "text-slate-400";
-                                         if (phaseStatus === 'Concluído' || phaseStatus === 'Completed') statusColor = "text-emerald-400";
-                                         if (phaseStatus === 'Em Andamento' || phaseStatus === 'In Progress') statusColor = "text-indigo-400";
-                                         if (phaseStatus === 'Cancelado' || phaseStatus === 'Canceled') statusColor = "text-rose-400";
-                                         if (phaseStatus.includes('Despriorizado')) statusColor = "text-orange-400";
+                                         const statusLower = phaseStatus.toLowerCase();
+
+                                         if (statusLower.includes('concluído') || statusLower.includes('concluido')) statusColor = "text-emerald-400";
+                                         else if (statusLower.includes('andamento') || statusLower.includes('progresso')) statusColor = "text-indigo-400";
+                                         else if (statusLower.includes('cancelado')) statusColor = "text-rose-400";
+                                         else if (statusLower.includes('despriorizado')) statusColor = "text-rose-400 font-bold";
+                                         else if (statusLower.includes('aguardando')) statusColor = "text-orange-400 font-bold";
+                                         else if (statusLower.includes('validar')) statusColor = "text-blue-400";
+                                         else if (statusLower.includes('elaborar') || statusLower.includes('executar')) statusColor = "text-yellow-400";
 
                                          return (
                                              <td key={phase.id} className={`p-2 border-y first:border-l last:border-r border-slate-700/50 text-center relative`}>
-                                                 <div className={`w-full h-full p-2 rounded flex flex-col items-center justify-center border ${bgClass} min-h-[80px]`}>
-                                                      <span className={`text-[10px] uppercase mb-1 ${statusColor}`}>{phaseStatus}</span>
+                                                 <div className={`w-full h-full p-2 rounded flex flex-col items-center justify-center border ${bgClass} min-h-[90px]`}>
+                                                      <span className={`text-[10px] uppercase mb-1 leading-tight ${statusColor}`}>{phaseStatus}</span>
                                                       {isActive && (
                                                           <>
                                                             <select 
-                                                                className="bg-slate-900 text-xs border border-slate-600 rounded px-1 py-0.5 max-w-[120px] outline-none mb-2"
+                                                                className="bg-slate-900 text-xs border border-slate-600 rounded px-1 py-0.5 max-w-[130px] outline-none mb-2"
                                                                 value={phaseStatus}
                                                                 onChange={(e) => handlePhaseUpdate(task.id, phase.id, e.target.value)}
                                                                 onClick={(e) => e.stopPropagation()}
@@ -525,10 +627,6 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                                                       )}
                                                       {isPast && <IconCheck className="w-4 h-4 text-emerald-500 mt-1" />}
                                                  </div>
-                                                 {/* Connector Line */}
-                                                 {idx < workflowConfig.length - 1 && (
-                                                     <div className="absolute top-1/2 right-0 w-full h-[1px] bg-slate-700 -z-10 translate-x-[50%] hidden"></div>
-                                                 )}
                                              </td>
                                          )
                                      })}
@@ -555,49 +653,119 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
             {/* Workflow Config Modal */}
             {isConfigOpen && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-                    <WorkflowEditor currentConfig={workflowConfig} onSave={handleAddPhase} onClose={() => setIsConfigOpen(false)} />
+                    <WorkflowEditor 
+                        currentConfig={workflowConfig} 
+                        onSave={handleAddPhase} 
+                        onUpdate={handleUpdatePhase}
+                        onDelete={handleDeletePhase}
+                        onClose={() => setIsConfigOpen(false)} 
+                    />
                 </div>
             )}
         </div>
     )
 };
 
-const WorkflowEditor = ({ currentConfig, onSave, onClose }: any) => {
+const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: any) => {
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [name, setName] = useState('');
-    const [statuses, setStatuses] = useState('Não Iniciado, Concluído');
+    const [statuses, setStatuses] = useState('');
     const [activities, setActivities] = useState('');
+
+    useEffect(() => {
+        if (editingId) {
+            const phase = currentConfig.find((p: WorkflowPhase) => p.id === editingId);
+            if (phase) {
+                setName(phase.name);
+                setStatuses(phase.statuses.join(', '));
+                setActivities(phase.activities.join(', '));
+            }
+        } else {
+            setName('');
+            setStatuses('Não Iniciado, Concluído');
+            setActivities('');
+        }
+    }, [editingId, currentConfig]);
 
     const handleSubmit = () => {
         if (!name) return;
-        const newPhase: WorkflowPhase = {
-            id: `ph-${Date.now()}`,
+        const phaseData: WorkflowPhase = {
+            id: editingId || `ph-${Date.now()}`,
             name,
             statuses: statuses.split(',').map(s => s.trim()).filter(Boolean),
             activities: activities.split(',').map(a => a.trim()).filter(Boolean)
         };
-        onSave(newPhase);
+        
+        if (editingId) {
+            onUpdate(phaseData);
+            setEditingId(null);
+        } else {
+            onSave(phaseData);
+            setName('');
+            setStatuses('Não Iniciado, Concluído');
+            setActivities('');
+        }
     };
 
+    const handleDelete = (id: string) => {
+        if (window.confirm('Tem certeza? Isso removerá a visualização desta fase de todos os projetos.')) {
+            onDelete(id);
+            if (editingId === id) setEditingId(null);
+        }
+    }
+
     return (
-        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full">
-            <h3 className="text-lg font-bold mb-4 text-white">Adicionar Nova Fase</h3>
-            <div className="space-y-4">
-                <div>
-                    <label className="block text-xs text-slate-400 mb-1">Nome da Fase</label>
-                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" />
-                </div>
-                <div>
-                    <label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label>
-                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={statuses} onChange={e => setStatuses(e.target.value)} />
-                </div>
-                <div>
-                    <label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label>
-                    <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={activities} onChange={e => setActivities(e.target.value)} rows={3} />
-                </div>
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden">
+            {/* List of Phases */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4">
+                 <h3 className="text-lg font-bold mb-4 text-white">Etapas Existentes</h3>
+                 <div className="space-y-2">
+                     {currentConfig.map((phase: WorkflowPhase, idx: number) => (
+                         <div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}>
+                             <div>
+                                 <span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span>
+                                 <span className="font-medium text-slate-200">{phase.name}</span>
+                                 <p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p>
+                             </div>
+                             <div className="flex gap-1">
+                                 <button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400">
+                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
+                                 </button>
+                                 <button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400">
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                                 </button>
+                             </div>
+                         </div>
+                     ))}
+                 </div>
+                 <div className="mt-4">
+                     <Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs">
+                         <IconPlus className="w-3 h-3" /> Adicionar Nova Fase
+                     </Button>
+                 </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6">
-                <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-                <Button onClick={handleSubmit}>Adicionar</Button>
+
+            {/* Form */}
+            <div className="flex-1 flex flex-col">
+                <h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3>
+                <div className="space-y-4 flex-1">
+                    <div>
+                        <label className="block text-xs text-slate-400 mb-1">Nome da Fase</label>
+                        <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" />
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label>
+                        <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não Iniciado, Em Andamento, Concluído..." />
+                    </div>
+                    <div>
+                        <label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label>
+                        <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." />
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-6">
+                    <Button variant="secondary" onClick={onClose}>Fechar</Button>
+                    <Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button>
+                </div>
             </div>
         </div>
     );
@@ -2314,15 +2482,15 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                             {currentPhase.activities.length > 0 && (
                                 <div>
                                     <label className="block text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider">Atividades da Fase</label>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                         {currentPhase.activities.map((activity: string) => {
                                             const isChecked = formData.projectData?.completedActivities.includes(activity);
                                             return (
                                                 <div key={activity} className="flex items-center gap-2 bg-slate-900 p-2 rounded border border-slate-700/50 hover:border-slate-500 transition-colors cursor-pointer" onClick={() => toggleActivity(activity)}>
-                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-indigo-500 border-indigo-500' : 'border-slate-500'}`}>
+                                                    <div className={`w-4 h-4 rounded-sm border flex-shrink-0 flex items-center justify-center transition-colors ${isChecked ? 'bg-indigo-500 border-indigo-500' : 'border-slate-500'}`}>
                                                         {isChecked && <IconCheck className="w-3 h-3 text-white" />}
                                                     </div>
-                                                    <span className={`text-xs ${isChecked ? 'text-slate-200' : 'text-slate-400'}`}>{activity}</span>
+                                                    <span className={`text-xs ${isChecked ? 'text-slate-200' : 'text-slate-400'} break-words`}>{activity}</span>
                                                 </div>
                                             )
                                         })}

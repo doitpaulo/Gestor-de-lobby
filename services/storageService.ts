@@ -6,7 +6,7 @@ const KEYS = {
   DEVS: 'nexus_devs_v2',
   USER: 'nexus_user_active', // Active session
   REGISTRY: 'nexus_users_registry', // All registered users
-  WORKFLOW: 'nexus_workflow_config'
+  WORKFLOW: 'nexus_workflow_config_v3'
 };
 
 export const StorageService = {
