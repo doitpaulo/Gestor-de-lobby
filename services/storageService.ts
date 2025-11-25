@@ -1,11 +1,12 @@
 
-import { Task, Developer, User } from '../types';
+import { Task, Developer, User, WorkflowPhase } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
   DEVS: 'nexus_devs_v2',
   USER: 'nexus_user_active', // Active session
-  REGISTRY: 'nexus_users_registry' // All registered users
+  REGISTRY: 'nexus_users_registry', // All registered users
+  WORKFLOW: 'nexus_workflow_config'
 };
 
 export const StorageService = {
@@ -55,6 +56,20 @@ export const StorageService = {
 
   saveDevs: (devs: Developer[]) => {
     localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
+  },
+
+  // --- Workflow Config ---
+  getWorkflowConfig: (defaultConfig: WorkflowPhase[]): WorkflowPhase[] => {
+      try {
+          const data = localStorage.getItem(KEYS.WORKFLOW);
+          return data ? JSON.parse(data) : defaultConfig;
+      } catch {
+          return defaultConfig;
+      }
+  },
+
+  saveWorkflowConfig: (config: WorkflowPhase[]) => {
+      localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
   },
 
   // --- Authentication Logic ---
@@ -132,6 +147,7 @@ export const StorageService = {
           endDate: existing.endDate,
           estimatedTime: existing.estimatedTime,
           actualTime: existing.actualTime,
+          projectData: existing.projectData // Preserve project lifecycle
         };
 
         taskMap.set(newTask.id, mergedTask);

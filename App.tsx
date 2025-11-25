@@ -9,13 +9,46 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority, HistoryEntry } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus } from './components/Icons';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase } from './types';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
 const PRIORITIES = ['1 - Crítica', '2 - Alta', '3 - Moderada', '4 - Baixa'];
 const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog'];
+
+const DEFAULT_WORKFLOW: WorkflowPhase[] = [
+    {
+        id: '1',
+        name: 'Avaliação',
+        statuses: ['Não Iniciado', 'Concluído', 'Aguardando Aprovação CoE', 'Em Andamento', 'Despriorizado pelo CoE', 'Cancelado'],
+        activities: ['Validar Business Case', 'Criar Business Case']
+    },
+    {
+        id: '2',
+        name: 'Fluxograma',
+        statuses: ['Não Iniciado', 'Concluído', 'Em Andamento'],
+        activities: ['Criar Desenho AS-IS', 'Validar Desenho AS-IS', 'Criar Desenho TO-BE', 'Validar Desenho TO-BE']
+    },
+    {
+        id: '3',
+        name: 'Especificação',
+        statuses: ['Não Iniciado', 'Concluído'],
+        activities: ['Criar PDD/BA', 'Validar PDD/BA + DEV', 'Criar DoR/BA', 'Validar DoR/BA + DEV', 'Criar SDD/DEV', 'Validar SDD/DEV']
+    },
+    {
+        id: '4',
+        name: 'Desenvolvimento',
+        statuses: ['Não Iniciado', 'Concluído'],
+        activities: ['Criar DoD – BA', 'Validar DoD – BA / DEV / Senior DEV', 'Criar Plano de Teste QA/DEV']
+    },
+    {
+        id: '5',
+        name: 'QA / Homolog / Prod',
+        statuses: ['Não Iniciado', 'Concluído'],
+        activities: ['Executar QA', 'Executar Homologação', 'Executar Produção', 'Monitorar Primeiras Execuções', 'Validar QA / Homologação / Produção']
+    }
+];
 
 // --- Helper: Time Parser ---
 const parseDuration = (durationStr: string | undefined): number => {
@@ -264,6 +297,16 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
         });
     }
     
+    // Detect Phase Change
+    if (original.projectData?.currentPhaseId !== updated.projectData?.currentPhaseId) {
+         changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Alterou fase do projeto`
+        });
+    }
+    
     // Check for generic text changes
     const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type'];
     const hasTextChanged = textFields.some(field => (original as any)[field] !== (updated as any)[field]);
@@ -280,6 +323,285 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     return changes;
 };
 
+// --- Project Lifecycle Flow View ---
+
+const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (t: Task) => void, user: User, workflowConfig: WorkflowPhase[], setWorkflowConfig: any }) => {
+    const [isConfigOpen, setIsConfigOpen] = useState(false);
+    const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
+        search: '', 
+        type: [], 
+        priority: [], 
+        status: [], 
+        assignee: [] 
+    });
+    
+    // Filter only Automations and Improvements AND apply filters
+    const filteredTasks = useMemo(() => {
+        return tasks.filter(t => {
+            const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação';
+            if (!isProjectType) return false;
+
+            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                  t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                  (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+            
+            const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+            const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+            const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
+            
+            let matchesAssignee = true;
+            if (filters.assignee.length > 0) {
+                const hasUnassigned = filters.assignee.includes('Não Atribuído');
+                if (hasUnassigned) {
+                    matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+                } else {
+                    matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+                }
+            }
+
+            return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
+        });
+    }, [tasks, filters]);
+
+    const handlePhaseUpdate = (taskId: string, phaseId: string, status: string) => {
+        const updated = tasks.map(t => {
+            if (t.id === taskId) {
+                const currentData = t.projectData || { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] };
+                
+                t.projectData = {
+                    ...currentData,
+                    currentPhaseId: phaseId,
+                    phaseStatus: status
+                };
+                
+                 const entry: HistoryEntry = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    date: new Date().toISOString(),
+                    user: user.name,
+                    action: `Atualizou status da fase para ${status}`
+                };
+                t.history = [...(t.history || []), entry];
+            }
+            return t;
+        });
+        setTasks(updated);
+        StorageService.saveTasks(updated);
+    };
+
+    const handleChangePhase = (taskId: string, direction: number) => {
+        const updated = tasks.map(t => {
+            if (t.id === taskId) {
+                const currentPhaseId = t.projectData?.currentPhaseId || '1';
+                const currentIndex = workflowConfig.findIndex(w => w.id === currentPhaseId);
+                const newIndex = currentIndex + direction;
+
+                if (newIndex >= 0 && newIndex < workflowConfig.length) {
+                    const newPhase = workflowConfig[newIndex];
+                    t.projectData = {
+                        ...t.projectData!,
+                        currentPhaseId: newPhase.id,
+                        phaseStatus: newPhase.statuses[0] // Default to first status (e.g., Not Started)
+                    };
+                    const entry: HistoryEntry = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        date: new Date().toISOString(),
+                        user: user.name,
+                        action: `Alterou fase do projeto para ${newPhase.name}`
+                    };
+                    t.history = [...(t.history || []), entry];
+                }
+            }
+            return t;
+        });
+        setTasks(updated);
+        StorageService.saveTasks(updated);
+    }
+
+    const handleAddPhase = (newPhase: WorkflowPhase) => {
+        const updated = [...workflowConfig, newPhase];
+        setWorkflowConfig(updated);
+        StorageService.saveWorkflowConfig(updated);
+        setIsConfigOpen(false);
+    }
+
+    return (
+        <div className="h-full flex flex-col space-y-4">
+            <div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div>
+                     <h2 className="text-xl font-bold text-white">Fluxo de Projetos</h2>
+                     <p className="text-sm text-slate-400">Acompanhamento detalhado das fases de Melhorias e Automações</p>
+                </div>
+                <Button variant="secondary" onClick={() => setIsConfigOpen(true)}>
+                    <IconPlus className="w-4 h-4" /> Configurar Fases
+                </Button>
+            </div>
+            
+            <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+
+            <div className="flex-1 overflow-auto bg-slate-900/50 rounded-xl border border-slate-700 p-4 custom-scrollbar">
+                <table className="w-full text-left text-sm border-separate border-spacing-y-2">
+                    <thead>
+                        <tr className="text-slate-400 font-medium text-xs uppercase tracking-wider">
+                            <th className="pb-2 pl-2">Projeto</th>
+                            {workflowConfig.map(phase => (
+                                <th key={phase.id} className="pb-2 px-2 text-center">{phase.name}</th>
+                            ))}
+                            <th className="pb-2 text-center">% Conclusão</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filteredTasks.map(task => {
+                             const currentPhaseIndex = workflowConfig.findIndex(w => w.id === (task.projectData?.currentPhaseId || '1'));
+                             const progress = Math.round(((currentPhaseIndex) / workflowConfig.length) * 100);
+
+                             return (
+                                 <tr key={task.id} className="bg-slate-800 hover:bg-slate-700/50 transition-colors group">
+                                     <td className="p-3 rounded-l-lg border-l-4 border-l-indigo-500 cursor-pointer" onClick={() => onEditTask(task)}>
+                                         <div className="flex flex-col gap-1">
+                                             <div className="flex items-center gap-2">
+                                                 <span className="font-mono text-xs text-slate-500">{task.id}</span>
+                                                 <Badge type={task.type} />
+                                             </div>
+                                             <span className="font-medium text-white truncate max-w-[200px]" title={task.summary}>{task.summary}</span>
+                                             <span className="text-xs text-slate-400">{task.assignee || 'Sem Dev'}</span>
+                                         </div>
+                                     </td>
+                                     {workflowConfig.map((phase, idx) => {
+                                         const isActive = (task.projectData?.currentPhaseId || '1') === phase.id;
+                                         const isPast = idx < currentPhaseIndex;
+                                         const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não Iniciado';
+                                         
+                                         let bgClass = "bg-slate-900/50 border-slate-700";
+                                         let textClass = "text-slate-500";
+                                         
+                                         if (isPast) {
+                                             bgClass = "bg-emerald-900/20 border-emerald-500/30";
+                                             textClass = "text-emerald-500";
+                                         } else if (isActive) {
+                                             bgClass = "bg-indigo-900/20 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)]";
+                                             textClass = "text-indigo-400 font-bold";
+                                         }
+
+                                         // Determine status color
+                                         let statusColor = "text-slate-400";
+                                         if (phaseStatus === 'Concluído' || phaseStatus === 'Completed') statusColor = "text-emerald-400";
+                                         if (phaseStatus === 'Em Andamento' || phaseStatus === 'In Progress') statusColor = "text-indigo-400";
+                                         if (phaseStatus === 'Cancelado' || phaseStatus === 'Canceled') statusColor = "text-rose-400";
+                                         if (phaseStatus.includes('Despriorizado')) statusColor = "text-orange-400";
+
+                                         return (
+                                             <td key={phase.id} className={`p-2 border-y first:border-l last:border-r border-slate-700/50 text-center relative`}>
+                                                 <div className={`w-full h-full p-2 rounded flex flex-col items-center justify-center border ${bgClass} min-h-[80px]`}>
+                                                      <span className={`text-[10px] uppercase mb-1 ${statusColor}`}>{phaseStatus}</span>
+                                                      {isActive && (
+                                                          <>
+                                                            <select 
+                                                                className="bg-slate-900 text-xs border border-slate-600 rounded px-1 py-0.5 max-w-[120px] outline-none mb-2"
+                                                                value={phaseStatus}
+                                                                onChange={(e) => handlePhaseUpdate(task.id, phase.id, e.target.value)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                {phase.statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                                                            </select>
+                                                            <div className="flex gap-2">
+                                                                <button 
+                                                                    onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, -1); }}
+                                                                    disabled={currentPhaseIndex === 0}
+                                                                    className="w-5 h-5 flex items-center justify-center rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                                                                    title="Fase Anterior"
+                                                                >
+                                                                    &lt;
+                                                                </button>
+                                                                <button 
+                                                                    onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, 1); }}
+                                                                    disabled={currentPhaseIndex === workflowConfig.length - 1}
+                                                                    className="w-5 h-5 flex items-center justify-center rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-xs text-white"
+                                                                    title="Próxima Fase"
+                                                                >
+                                                                    &gt;
+                                                                </button>
+                                                            </div>
+                                                          </>
+                                                      )}
+                                                      {isPast && <IconCheck className="w-4 h-4 text-emerald-500 mt-1" />}
+                                                 </div>
+                                                 {/* Connector Line */}
+                                                 {idx < workflowConfig.length - 1 && (
+                                                     <div className="absolute top-1/2 right-0 w-full h-[1px] bg-slate-700 -z-10 translate-x-[50%] hidden"></div>
+                                                 )}
+                                             </td>
+                                         )
+                                     })}
+                                     <td className="p-3 rounded-r-lg text-center">
+                                         <div className="flex items-center justify-center gap-2">
+                                             <div className="w-10 h-1 bg-slate-700 rounded-full overflow-hidden">
+                                                 <div className="h-full bg-emerald-500" style={{ width: `${progress}%` }}></div>
+                                             </div>
+                                             <span className="text-xs font-bold text-slate-300">{progress}%</span>
+                                         </div>
+                                     </td>
+                                 </tr>
+                             )
+                        })}
+                    </tbody>
+                </table>
+                {filteredTasks.length === 0 && (
+                    <div className="p-10 text-center text-slate-500">
+                        Nenhum projeto encontrado com os filtros atuais.
+                    </div>
+                )}
+            </div>
+
+            {/* Workflow Config Modal */}
+            {isConfigOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+                    <WorkflowEditor currentConfig={workflowConfig} onSave={handleAddPhase} onClose={() => setIsConfigOpen(false)} />
+                </div>
+            )}
+        </div>
+    )
+};
+
+const WorkflowEditor = ({ currentConfig, onSave, onClose }: any) => {
+    const [name, setName] = useState('');
+    const [statuses, setStatuses] = useState('Não Iniciado, Concluído');
+    const [activities, setActivities] = useState('');
+
+    const handleSubmit = () => {
+        if (!name) return;
+        const newPhase: WorkflowPhase = {
+            id: `ph-${Date.now()}`,
+            name,
+            statuses: statuses.split(',').map(s => s.trim()).filter(Boolean),
+            activities: activities.split(',').map(a => a.trim()).filter(Boolean)
+        };
+        onSave(newPhase);
+    };
+
+    return (
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full">
+            <h3 className="text-lg font-bold mb-4 text-white">Adicionar Nova Fase</h3>
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-xs text-slate-400 mb-1">Nome da Fase</label>
+                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" />
+                </div>
+                <div>
+                    <label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label>
+                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={statuses} onChange={e => setStatuses(e.target.value)} />
+                </div>
+                <div>
+                    <label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label>
+                    <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" value={activities} onChange={e => setActivities(e.target.value)} rows={3} />
+                </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+                <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+                <Button onClick={handleSubmit}>Adicionar</Button>
+            </div>
+        </div>
+    );
+};
 
 // --- User Profile View ---
 
@@ -1569,6 +1891,7 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
 
   const menuItems = [
     { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' },
+    { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' },
     { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' },
     { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' },
     { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
@@ -1761,7 +2084,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     );
 };
 
-const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete }: any) => {
+const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
     const [formData, setFormData] = useState<Task>(task || {
         id: '',
         type: 'Incidente',
@@ -1773,30 +2096,32 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete }: an
         estimatedTime: '',
         actualTime: '',
         startDate: '',
-        endDate: ''
+        endDate: '',
+        projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
     });
+
+    // Ensure projectData exists
+    useEffect(() => {
+        if (!formData.projectData) {
+            setFormData(prev => ({
+                ...prev,
+                projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
+            }));
+        }
+    }, []);
 
     // --- Auto-Calculate End Date Logic ---
     useEffect(() => {
-        // Only auto-calc if we have both StartDate and EstimatedTime
-        // and assume 8 hours work day for calculation
         if (formData.startDate && formData.estimatedTime) {
             const hours = parseDuration(formData.estimatedTime);
             if (hours > 0) {
-                // e.g., 4h -> 0.5 days -> same day
-                // e.g., 8h -> 1 day -> same day
-                // e.g., 9h -> 1.125 days -> next day
-                // Formula: (Hours - 0.1) / 8 gives completed full days to add
                 const daysToAdd = Math.floor((hours - 0.1) / 8);
-                
                 const start = new Date(formData.startDate);
-                // Avoid timezone issues by using setDate
                 const end = new Date(start);
                 end.setDate(start.getDate() + daysToAdd);
                 
                 const endDateStr = end.toISOString().split('T')[0];
                 
-                // Only update if different to avoid loops
                 if (endDateStr !== formData.endDate) {
                     setFormData(prev => ({ ...prev, endDate: endDateStr }));
                 }
@@ -1818,7 +2143,28 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete }: an
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    const handleProjectDataChange = (key: string, value: any) => {
+        setFormData(prev => ({
+            ...prev,
+            projectData: {
+                ...prev.projectData!,
+                [key]: value
+            }
+        }));
+    };
+
+    const toggleActivity = (activity: string) => {
+        const currentActivities = formData.projectData?.completedActivities || [];
+        if (currentActivities.includes(activity)) {
+            handleProjectDataChange('completedActivities', currentActivities.filter(a => a !== activity));
+        } else {
+            handleProjectDataChange('completedActivities', [...currentActivities, activity]);
+        }
+    };
+
     const isNewTask = !task.createdAt || task.id === '';
+    const isProject = formData.type === 'Melhoria' || formData.type === 'Nova Automação';
+    const currentPhase = workflowConfig.find((w: WorkflowPhase) => w.id === formData.projectData?.currentPhaseId) || workflowConfig[0];
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1927,6 +2273,65 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete }: an
                         </div>
                     </div>
 
+                    {/* Project Lifecycle Section - Only for Improvements/Automations */}
+                    {isProject && (
+                        <div className="bg-indigo-900/10 border border-indigo-500/30 p-4 rounded-lg">
+                            <h4 className="text-sm font-bold text-indigo-300 mb-4 flex items-center gap-2">
+                                <IconProject className="w-4 h-4" /> Ciclo de Vida do Projeto
+                            </h4>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Fase Atual</label>
+                                    <select 
+                                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"
+                                        value={formData.projectData?.currentPhaseId}
+                                        onChange={(e) => {
+                                            handleProjectDataChange('currentPhaseId', e.target.value);
+                                            // Reset status when phase changes
+                                            const newPhase = workflowConfig.find((w:any) => w.id === e.target.value);
+                                            if (newPhase) handleProjectDataChange('phaseStatus', newPhase.statuses[0]);
+                                        }}
+                                    >
+                                        {workflowConfig.map((p: WorkflowPhase) => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status da Fase</label>
+                                    <select 
+                                        className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"
+                                        value={formData.projectData?.phaseStatus}
+                                        onChange={(e) => handleProjectDataChange('phaseStatus', e.target.value)}
+                                    >
+                                        {currentPhase.statuses.map((s: string) => (
+                                            <option key={s} value={s}>{s}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            {currentPhase.activities.length > 0 && (
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-2 font-medium uppercase tracking-wider">Atividades da Fase</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {currentPhase.activities.map((activity: string) => {
+                                            const isChecked = formData.projectData?.completedActivities.includes(activity);
+                                            return (
+                                                <div key={activity} className="flex items-center gap-2 bg-slate-900 p-2 rounded border border-slate-700/50 hover:border-slate-500 transition-colors cursor-pointer" onClick={() => toggleActivity(activity)}>
+                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-indigo-500 border-indigo-500' : 'border-slate-500'}`}>
+                                                        {isChecked && <IconCheck className="w-3 h-3 text-white" />}
+                                                    </div>
+                                                    <span className={`text-xs ${isChecked ? 'text-slate-200' : 'text-slate-400'}`}>{activity}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* History Section */}
                     {formData.history && formData.history.length > 0 && (
                         <div className="mt-6 border-t border-slate-700 pt-4">
@@ -1964,6 +2369,9 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
   const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
   
+  // Workflow State
+  const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
+
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -2073,7 +2481,8 @@ export default function App() {
         startDate: '',
         endDate: '',
         createdAt: new Date().toISOString(),
-        requester: user?.name || 'Manual'
+        requester: user?.name || 'Manual',
+        projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
       });
   };
 
@@ -2213,6 +2622,7 @@ export default function App() {
                 task={editingTask} 
                 developers={devs} 
                 allTasks={tasks}
+                workflowConfig={workflowConfig}
                 onClose={() => setEditingTask(null)} 
                 onSave={handleTaskUpdate} 
                 onDelete={handleTaskDelete} 
@@ -2221,6 +2631,7 @@ export default function App() {
 
         <Routes>
           <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
+          <Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />

@@ -10,6 +10,19 @@ export interface HistoryEntry {
   action: string;
 }
 
+export interface WorkflowPhase {
+    id: string;
+    name: string;
+    statuses: string[];
+    activities: string[];
+}
+
+export interface ProjectLifecycleData {
+    currentPhaseId: string;
+    phaseStatus: string;
+    completedActivities: string[]; // List of Activity Names/IDs
+}
+
 export interface Task {
   id: string;
   type: TaskType;
@@ -33,6 +46,9 @@ export interface Task {
   // Kanban Ordering
   boardPosition?: number;
   
+  // Project Lifecycle
+  projectData?: ProjectLifecycleData;
+
   // Audit Log
   history?: HistoryEntry[];
 }
