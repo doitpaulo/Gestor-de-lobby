@@ -348,7 +348,7 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     }
     
     // Check for generic text changes
-    const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type'];
+    const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type', 'projectPath'];
     const hasTextChanged = textFields.some(field => (original as any)[field] !== (updated as any)[field]);
     
     if (hasTextChanged && changes.length === 0) { 
@@ -365,19 +365,59 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
 
 // --- Project Report View ---
 
-const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowConfig: WorkflowPhase[] }) => {
+const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[] }) => {
     
-    // 1. Filter only Projects (Improvements / Automations)
-    const projects = useMemo(() => {
-        return tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
-    }, [tasks]);
+    const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
+        search: '', 
+        type: [], 
+        priority: [], 
+        status: [], 
+        assignee: [] 
+    });
+
+    // 1. Filter Projects (Improvements / Automations) & Apply Filters
+    const filteredProjects = useMemo(() => {
+        return tasks.filter(t => {
+            const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação';
+            if (!isProjectType) return false;
+
+            // EXCLUDE COMPLETED BY DEFAULT unless filtered specifically
+            const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+            // Logic: The prompt says "remove from active view". We'll hide them unless status filter specifically asks for them or implies all.
+            // If the user selects "Concluído" in filter, we show them. If no status filter, we hide them.
+            if (filters.status.length === 0 && isCompleted) return false;
+
+            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                  t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
+                                  (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+            
+            const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+            const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+            const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
+            
+            let matchesAssignee = true;
+            if (filters.assignee.length > 0) {
+                const hasUnassigned = filters.assignee.includes('Não Atribuído');
+                if (hasUnassigned) {
+                    matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+                } else {
+                    matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+                }
+            }
+
+            return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
+        });
+    }, [tasks, filters]);
 
     // 2. Metrics Calculation
     const metrics = useMemo(() => {
-        const total = projects.length;
+        const total = filteredProjects.length;
         
         // Helper to calculate progress
         const getProgress = (task: Task) => {
+            // Logic: If status is completed/resolved, progress is 100%
+            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) return 100;
+
             const currentId = task.projectData?.currentPhaseId;
             let index = workflowConfig.findIndex(w => w.id === currentId);
             if (index === -1) index = 0;
@@ -387,12 +427,12 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
             return Math.min(100, Math.round((completedPhases / workflowConfig.length) * 100));
         };
 
-        const completedProjects = projects.filter(p => p.status === 'Concluído' || p.status === 'Resolvido').length;
-        const totalProgress = projects.reduce((acc, p) => acc + getProgress(p), 0);
+        const completedProjects = filteredProjects.filter(p => p.status === 'Concluído' || p.status === 'Resolvido').length;
+        const totalProgress = filteredProjects.reduce((acc, p) => acc + getProgress(p), 0);
         const avgProgress = total > 0 ? Math.round(totalProgress / total) : 0;
 
         // "Stuck" projects (Waiting or Deprioritized in Phase Status)
-        const stuckProjects = projects.filter(p => {
+        const stuckProjects = filteredProjects.filter(p => {
              const s = (p.projectData?.phaseStatus || '').toLowerCase();
              return s.includes('aguardando') || s.includes('despriorizado') || s.includes('cancelado');
         }).length;
@@ -400,24 +440,38 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
         // Active (Not stuck, not completed fully)
         const activeProjects = total - completedProjects - stuckProjects;
 
-        return { total, avgProgress, stuckProjects, activeProjects, completedProjects };
-    }, [projects, workflowConfig]);
+        return { total, avgProgress, stuckProjects, activeProjects, completedProjects, getProgress };
+    }, [filteredProjects, workflowConfig]);
 
     // 3. Chart Data: Phase Distribution
     const phaseData = useMemo(() => {
         return workflowConfig.map(phase => {
-            const count = projects.filter(p => {
-                // If the project is fully completed (status Concluído), we might count it in the last phase or exclude. 
-                // Let's count active projects in their phases.
+            const count = filteredProjects.filter(p => {
                 const isProjectDone = ['Concluído', 'Resolvido', 'Fechado'].includes(p.status);
                 if (isProjectDone) return false; 
                 return (p.projectData?.currentPhaseId || '1') === phase.id;
             }).length;
             return { name: phase.name, value: count };
         });
-    }, [projects, workflowConfig]);
+    }, [filteredProjects, workflowConfig]);
 
-    // 4. Chart Data: Status Health
+    // 4. Chart Data: Project Progress
+    const projectProgressData = useMemo(() => {
+        return filteredProjects.map(p => {
+             // Find Phase Name
+             const currentId = p.projectData?.currentPhaseId;
+             const phase = workflowConfig.find(w => w.id === currentId) || workflowConfig[0];
+             
+             return {
+                 name: p.summary,
+                 phase: phase.name,
+                 progress: metrics.getProgress(p),
+                 dev: p.assignee || 'N/A'
+             }
+        }).sort((a,b) => b.progress - a.progress);
+    }, [filteredProjects, workflowConfig, metrics]);
+
+    // 5. Chart Data: Status Health
     const healthData = useMemo(() => {
         const data = [
             { name: 'Em Andamento', value: metrics.activeProjects, color: '#10b981' }, // Emerald
@@ -439,12 +493,76 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
         ) : null;
     };
 
+    const handleExportReportPPT = () => {
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+        
+        // Slide 1: KPIs & Overview
+        let slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Report Detalhado de Projetos", { x: 1, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+        
+        // KPIs
+        slide.addText("Total: " + metrics.total, { x: 1, y: 1.5, fontSize: 18, color: 'FFFFFF' });
+        slide.addText("Média Conclusão: " + metrics.avgProgress + "%", { x: 4, y: 1.5, fontSize: 18, color: 'FFFFFF' });
+        slide.addText("Travados: " + metrics.stuckProjects, { x: 7, y: 1.5, fontSize: 18, color: 'FFFFFF' });
+
+        // Phase Chart
+        slide.addChart(pres.ChartType.bar, phaseData.map(p => ({
+            name: p.name, labels: [p.name], values: [p.value]
+        })), { x: 1, y: 2.5, w: '45%', h: '60%', chartColors: ['6366f1'], barDir: 'col', title: 'Distribuição por Fase' });
+
+        // Health Chart
+        if (healthData.length > 0) {
+             slide.addChart(pres.ChartType.doughnut, healthData, { 
+                 x: 7, y: 2.5, w: '40%', h: '60%', 
+                 showLegend: true, 
+                 chartColors: healthData.map(h => h.color.replace('#', '')) 
+             });
+        }
+
+        // Slide 2: Detailed Progress
+        slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Progresso Detalhado por Projeto", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
+
+        // Generate Chart Data for PPT
+        const projNames = projectProgressData.map(p => p.name.substring(0, 20) + (p.name.length > 20 ? '...' : ''));
+        const projVals = projectProgressData.map(p => p.progress);
+
+        if (projNames.length > 0) {
+            slide.addChart(pres.ChartType.bar, [{
+                name: '% Conclusão',
+                labels: projNames,
+                values: projVals
+            }], { 
+                x: 0.5, y: 1, w: '90%', h: '85%', 
+                barDir: 'bar', 
+                valAxisMaxVal: 100, 
+                chartColors: ['10b981'],
+                catAxisLabelColor: '94a3b8',
+                valAxisLabelColor: '94a3b8'
+            });
+        } else {
+             slide.addText("Nenhum projeto ativo encontrado para exibir.", { x: 1, y: 3, fontSize: 14, color: '94a3b8' });
+        }
+
+        pres.writeFile({ fileName: "Nexus_ProjectReport_Detail.pptx" });
+    }
+
     return (
         <div className="space-y-6 animate-fade-in pb-10">
-            <div>
-                <h2 className="text-2xl font-bold text-white">Report de Fluxo de Projetos</h2>
-                <p className="text-sm text-slate-400">Visão consolidada de Melhorias e Automações</p>
+            <div className="flex justify-between items-center">
+                <div>
+                    <h2 className="text-2xl font-bold text-white">Report de Fluxo de Projetos</h2>
+                    <p className="text-sm text-slate-400">Visão consolidada de Melhorias e Automações</p>
+                </div>
+                <Button onClick={handleExportReportPPT} variant="primary">
+                    <IconDownload /> Exportar PPT
+                </Button>
             </div>
+            
+            <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
 
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -453,7 +571,7 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
                         <IconProject className="w-8 h-8" />
                     </div>
                     <div>
-                        <p className="text-sm text-slate-400">Total Projetos</p>
+                        <p className="text-sm text-slate-400">Total Visualizado</p>
                         <p className="text-3xl font-bold text-white">{metrics.total}</p>
                     </div>
                 </Card>
@@ -481,7 +599,7 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
                     </div>
                     <div>
                         <p className="text-sm text-slate-400">Ativos em Fases</p>
-                        <p className="text-3xl font-bold text-white">{projects.length - metrics.completedProjects}</p>
+                        <p className="text-3xl font-bold text-white">{metrics.activeProjects}</p>
                     </div>
                 </Card>
             </div>
@@ -532,6 +650,40 @@ const ProjectReportView = ({ tasks, workflowConfig }: { tasks: Task[], workflowC
                      </div>
                 </Card>
             </div>
+
+            {/* NEW: Detailed Progress Chart */}
+            <Card className="min-h-[450px]">
+                 <h3 className="text-lg font-bold text-white mb-4">Progresso Detalhado por Projeto</h3>
+                 <div className="h-[400px] w-full">
+                     <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                            data={projectProgressData}
+                            layout="vertical"
+                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                            barSize={20}
+                        >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" opacity={0.5} />
+                            <XAxis type="number" domain={[0, 100]} stroke="#94a3b8" />
+                            <YAxis 
+                                dataKey="name" 
+                                type="category" 
+                                width={180} 
+                                stroke="#94a3b8" 
+                                tick={{ fontSize: 11, fill: '#cbd5e1' }}
+                            />
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} 
+                                cursor={{ fill: '#334155', opacity: 0.2 }}
+                                formatter={(value: number, name: string, props: any) => [`${value}%`, 'Conclusão']}
+                                labelFormatter={(label) => label}
+                            />
+                            <Bar dataKey="progress" fill="#10b981" radius={[0, 4, 4, 0]}>
+                                <LabelList dataKey="progress" position="right" fill="#fff" fontSize={10} formatter={(val: number) => `${val}%`} />
+                            </Bar>
+                        </BarChart>
+                     </ResponsiveContainer>
+                 </div>
+            </Card>
         </div>
     );
 };
@@ -654,6 +806,9 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
 
     // Helper to calculate progress accounting for completion
     const getProgress = (task: Task) => {
+        // Logic: 100% if status is Completed
+        if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) return 100;
+
         const currentId = task.projectData?.currentPhaseId;
         let index = workflowConfig.findIndex(w => w.id === currentId);
         
@@ -753,6 +908,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                              if (currentPhaseIndex === -1) currentPhaseIndex = 0; // fallback
 
                              const progress = getProgress(task);
+                             const isGlobalDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
 
                              return (
                                  <tr key={task.id} className="bg-slate-800 hover:bg-slate-700/50 transition-colors group">
@@ -769,8 +925,9 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                                      {workflowConfig.map((phase, idx) => {
                                          const isCurrentPhase = (task.projectData?.currentPhaseId || '1') === phase.id || (task.projectData?.currentPhaseId === undefined && idx === 0);
                                          
-                                         const isActive = isCurrentPhase; 
-                                         const isPast = idx < currentPhaseIndex;
+                                         // If global done, everything is visually past/done
+                                         const isActive = isCurrentPhase && !isGlobalDone; 
+                                         const isPast = idx < currentPhaseIndex || isGlobalDone;
                                          const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não iniciado';
                                          
                                          let bgClass = "bg-slate-900/50 border-slate-700";
@@ -1279,7 +1436,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
 
 interface Widget {
     id: string;
-    type: 'cards' | 'priority' | 'status' | 'devType' | 'capacity';
+    type: 'cards' | 'priority' | 'status' | 'devType' | 'capacity' | 'completedKPIs';
     title: string;
     size: 'half' | 'full';
     visible: boolean;
@@ -1291,6 +1448,7 @@ const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true },
     { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true },
     { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
+    { id: 'w6', type: 'completedKPIs', title: 'Total Concluído', size: 'full', visible: true },
 ];
 
 const renderCustomBarLabel = ({ x, y, width, height, value }: any) => {
@@ -1331,7 +1489,15 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       const saved = localStorage.getItem('nexus_dashboard_widgets');
-      return saved ? JSON.parse(saved) : DEFAULT_WIDGETS;
+      // Merge default if new widget is not in saved
+      if (saved) {
+          const parsed = JSON.parse(saved);
+          if (!parsed.find((w: Widget) => w.type === 'completedKPIs')) {
+              return [...parsed, { id: 'w6', type: 'completedKPIs', title: 'Total Concluído', size: 'full', visible: true }];
+          }
+          return parsed;
+      }
+      return DEFAULT_WIDGETS;
   });
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string[]>([]);
@@ -1351,6 +1517,26 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         const matchesType = filterType.length === 0 || filterType.includes(t.type);
         return matchesDev && matchesType;
     });
+  }, [tasks, filterDev, filterType]);
+
+  // Completed Tasks for new KPI Widget
+  const completedMetrics = useMemo(() => {
+    const completed = tasks.filter(t => ['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+    
+    // Apply filters to completed items as well if needed, or keep global. 
+    // Usually KPIs follow dashboard filters.
+    const filteredCompleted = completed.filter(t => {
+        const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || '');
+        const matchesType = filterType.length === 0 || filterType.includes(t.type);
+        return matchesDev && matchesType;
+    });
+
+    return {
+        incidents: filteredCompleted.filter(t => t.type === 'Incidente').length,
+        features: filteredCompleted.filter(t => t.type === 'Melhoria').length,
+        automations: filteredCompleted.filter(t => t.type === 'Nova Automação').length,
+        total: filteredCompleted.length
+    };
   }, [tasks, filterDev, filterType]);
 
   // --- Metrics Calculation (KPIs) ---
@@ -1602,6 +1788,26 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                         </div>
                      </div>
                  )}
+                 {widget.type === 'completedKPIs' && (
+                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
+                        <div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between">
+                            <span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span>
+                            <span className="text-3xl font-bold text-white">{completedMetrics.total}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80">
+                            <span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span>
+                            <span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80">
+                            <span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span>
+                            <span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span>
+                        </div>
+                        <div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80">
+                            <span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span>
+                            <span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span>
+                        </div>
+                     </div>
+                 )}
                  {widget.type === 'priority' && (
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={priorityData}>
@@ -1842,7 +2048,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 };
 
 // --- Kanban View (Updated: Developer Based) ---
-
+// ... (KanbanView remains same, skipping for brevity but assuming kept in file) ...
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], assignee: string[]}>({ 
       search: '', 
@@ -2083,9 +2289,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     </div>
   );
 };
-
-// --- List View ---
-
+// ... (ListView remains same) ...
 const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
       search: '', 
@@ -2254,9 +2458,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
     </div>
   );
 };
-
-// --- Layout ---
-
+// ... (Layout and AuthPage remain same) ...
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -2354,7 +2556,7 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
     </div>
   );
 };
-
+// ... AuthPage ...
 const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     const [isRegister, setIsRegister] = useState(false);
     const [email, setEmail] = useState('');
@@ -2464,6 +2666,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         type: 'Incidente',
         summary: '',
         description: '',
+        requester: '',
         priority: '3 - Moderada',
         status: 'Novo',
         assignee: null,
@@ -2471,6 +2674,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         actualTime: '',
         startDate: '',
         endDate: '',
+        projectPath: '', // Init new field
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
     });
 
@@ -2620,9 +2824,23 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                                 <option value="Resolvido">Resolvido</option>
                                 <option value="Fechado">Fechado</option>
                                 <option value="Aguardando">Aguardando</option>
+                                <option value="Concluído">Concluído</option>
                             </select>
                         </div>
                     </div>
+                    
+                    {/* NEW: Project Path Field */}
+                    <div>
+                         <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta do Projeto (Drive/Rede)</label>
+                         <input 
+                            name="projectPath" 
+                            value={formData.projectPath || ''} 
+                            onChange={handleChange} 
+                            placeholder="Ex: G:\Projetos\ClienteX\AutomacaoFinanceira"
+                            className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs"
+                         />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                         <div className="col-span-2 flex items-center gap-2 mb-2">
                              <IconClock className="w-4 h-4 text-indigo-400" />
@@ -2737,7 +2955,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         </div>
     )
 }
-
+// ... (App export remains same) ...
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
@@ -2854,6 +3072,7 @@ export default function App() {
         actualTime: '',
         startDate: '',
         endDate: '',
+        projectPath: '',
         createdAt: new Date().toISOString(),
         requester: user?.name || 'Manual',
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
@@ -3006,7 +3225,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
           <Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
-          <Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} />} />
+          <Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} />
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />

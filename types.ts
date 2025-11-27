@@ -43,6 +43,9 @@ export interface Task {
   actualTime?: string;
   manualFields?: string[];
   
+  // New Field for Project Path
+  projectPath?: string;
+  
   // Kanban Ordering
   boardPosition?: number;
   
