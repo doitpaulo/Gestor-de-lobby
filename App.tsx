@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell, LabelList, ComposedChart, Line 
+  PieChart, Pie, Cell, LabelList, ComposedChart, Line, AreaChart, Area, LineChart 
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
@@ -363,7 +363,25 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     return changes;
 };
 
+// --- Widget Interface ---
+
+interface Widget {
+    id: string;
+    type: string;
+    title: string;
+    size: 'half' | 'full';
+    visible: boolean;
+    visualStyle?: 'bar' | 'pie' | 'line' | 'area';
+}
+
 // --- Project Report View ---
+
+const DEFAULT_REPORT_WIDGETS: Widget[] = [
+    { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
+    { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
+    { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
+];
 
 const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[] }) => {
     
@@ -375,16 +393,23 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
         assignee: [] 
     });
 
+    const [widgets, setWidgets] = useState<Widget[]>(() => {
+        const saved = localStorage.getItem('nexus_report_widgets');
+        return saved ? JSON.parse(saved) : DEFAULT_REPORT_WIDGETS;
+    });
+    const [isEditMode, setIsEditMode] = useState(false);
+
+    useEffect(() => {
+        localStorage.setItem('nexus_report_widgets', JSON.stringify(widgets));
+    }, [widgets]);
+
     // 1. Filter Projects (Improvements / Automations) & Apply Filters
     const filteredProjects = useMemo(() => {
         return tasks.filter(t => {
             const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação';
             if (!isProjectType) return false;
 
-            // EXCLUDE COMPLETED BY DEFAULT unless filtered specifically
             const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
-            // Logic: The prompt says "remove from active view". We'll hide them unless status filter specifically asks for them or implies all.
-            // If the user selects "Concluído" in filter, we show them. If no status filter, we hide them.
             if (filters.status.length === 0 && isCompleted) return false;
 
             const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
@@ -413,11 +438,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     const metrics = useMemo(() => {
         const total = filteredProjects.length;
         
-        // Helper to calculate progress
         const getProgress = (task: Task) => {
-            // Logic: If status is completed/resolved, progress is 100%
             if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) return 100;
-
             const currentId = task.projectData?.currentPhaseId;
             let index = workflowConfig.findIndex(w => w.id === currentId);
             if (index === -1) index = 0;
@@ -430,20 +452,16 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
         const completedProjects = filteredProjects.filter(p => p.status === 'Concluído' || p.status === 'Resolvido').length;
         const totalProgress = filteredProjects.reduce((acc, p) => acc + getProgress(p), 0);
         const avgProgress = total > 0 ? Math.round(totalProgress / total) : 0;
-
-        // "Stuck" projects (Waiting or Deprioritized in Phase Status)
         const stuckProjects = filteredProjects.filter(p => {
              const s = (p.projectData?.phaseStatus || '').toLowerCase();
              return s.includes('aguardando') || s.includes('despriorizado') || s.includes('cancelado');
         }).length;
-
-        // Active (Not stuck, not completed fully)
         const activeProjects = total - completedProjects - stuckProjects;
 
         return { total, avgProgress, stuckProjects, activeProjects, completedProjects, getProgress };
     }, [filteredProjects, workflowConfig]);
 
-    // 3. Chart Data: Phase Distribution
+    // 3. Chart Data
     const phaseData = useMemo(() => {
         return workflowConfig.map(phase => {
             const count = filteredProjects.filter(p => {
@@ -455,13 +473,10 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
         });
     }, [filteredProjects, workflowConfig]);
 
-    // 4. Chart Data: Project Progress
     const projectProgressData = useMemo(() => {
         return filteredProjects.map(p => {
-             // Find Phase Name
              const currentId = p.projectData?.currentPhaseId;
              const phase = workflowConfig.find(w => w.id === currentId) || workflowConfig[0];
-             
              return {
                  name: p.summary,
                  phase: phase.name,
@@ -471,62 +486,45 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
         }).sort((a,b) => b.progress - a.progress);
     }, [filteredProjects, workflowConfig, metrics]);
 
-    // 5. Chart Data: Status Health
     const healthData = useMemo(() => {
-        const data = [
-            { name: 'Em Andamento', value: metrics.activeProjects, color: '#10b981' }, // Emerald
-            { name: 'Travados / Aguardando', value: metrics.stuckProjects, color: '#f59e0b' }, // Amber
-            { name: 'Concluídos', value: metrics.completedProjects, color: '#6366f1' } // Indigo
+        return [
+            { name: 'Em Andamento', value: metrics.activeProjects, color: '#10b981' }, 
+            { name: 'Travados / Aguardando', value: metrics.stuckProjects, color: '#f59e0b' }, 
+            { name: 'Concluídos', value: metrics.completedProjects, color: '#6366f1' } 
         ].filter(d => d.value > 0);
-        return data;
     }, [metrics]);
-
-    const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
-        const RADIAN = Math.PI / 180;
-        const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-        const x = cx + radius * Math.cos(-midAngle * RADIAN);
-        const y = cy + radius * Math.sin(-midAngle * RADIAN);
-        return percent > 0 ? (
-            <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={12} fontWeight="bold">
-                {`${(percent * 100).toFixed(0)}%`}
-            </text>
-        ) : null;
-    };
 
     const handleExportReportPPT = () => {
         const pres = new pptxgen();
         pres.layout = 'LAYOUT_WIDE';
-        
-        // Slide 1: KPIs & Overview
         let slide = pres.addSlide();
         slide.background = { color: "0f172a" };
         slide.addText("Report Detalhado de Projetos", { x: 1, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
         
-        // KPIs
         slide.addText("Total: " + metrics.total, { x: 1, y: 1.5, fontSize: 18, color: 'FFFFFF' });
         slide.addText("Média Conclusão: " + metrics.avgProgress + "%", { x: 4, y: 1.5, fontSize: 18, color: 'FFFFFF' });
         slide.addText("Travados: " + metrics.stuckProjects, { x: 7, y: 1.5, fontSize: 18, color: 'FFFFFF' });
 
-        // Phase Chart
-        slide.addChart(pres.ChartType.bar, phaseData.map(p => ({
-            name: p.name, labels: [p.name], values: [p.value]
-        })), { x: 1, y: 2.5, w: '45%', h: '60%', chartColors: ['6366f1'], barDir: 'col', title: 'Distribuição por Fase' });
+        if (phaseData.length > 0) {
+             slide.addChart(pres.ChartType.bar, [
+                 { name: 'Fases', labels: phaseData.map(p => p.name), values: phaseData.map(p => p.value) }
+             ], { x: 1, y: 2.5, w: '45%', h: '60%', chartColors: ['6366f1'], barDir: 'col', title: 'Distribuição por Fase' });
+        }
 
-        // Health Chart
         if (healthData.length > 0) {
-             slide.addChart(pres.ChartType.doughnut, healthData, { 
+             slide.addChart(pres.ChartType.doughnut, [
+                 { name: 'Saúde', labels: healthData.map(h => h.name), values: healthData.map(h => h.value) }
+             ], { 
                  x: 7, y: 2.5, w: '40%', h: '60%', 
                  showLegend: true, 
                  chartColors: healthData.map(h => h.color.replace('#', '')) 
              });
         }
 
-        // Slide 2: Detailed Progress
         slide = pres.addSlide();
         slide.background = { color: "0f172a" };
         slide.addText("Progresso Detalhado por Projeto", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
 
-        // Generate Chart Data for PPT
         const projNames = projectProgressData.map(p => p.name.substring(0, 20) + (p.name.length > 20 ? '...' : ''));
         const projVals = projectProgressData.map(p => p.progress);
 
@@ -544,11 +542,167 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                 valAxisLabelColor: '94a3b8'
             });
         } else {
-             slide.addText("Nenhum projeto ativo encontrado para exibir.", { x: 1, y: 3, fontSize: 14, color: '94a3b8' });
+             slide.addText("Nenhum projeto ativo encontrado.", { x: 1, y: 3, fontSize: 14, color: '94a3b8' });
         }
-
         pres.writeFile({ fileName: "Nexus_ProjectReport_Detail.pptx" });
     }
+
+    const toggleSize = (id: string) => {
+        setWidgets(prev => prev.map(w => w.id === id ? { ...w, size: w.size === 'full' ? 'half' : 'full' } : w));
+    };
+    const toggleVisibility = (id: string) => {
+        setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
+    };
+    const moveWidget = (index: number, direction: 'up' | 'down') => {
+        const newWidgets = [...widgets];
+        if (direction === 'up' && index > 0) {
+            [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]];
+        } else if (direction === 'down' && index < newWidgets.length - 1) {
+            [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]];
+        }
+        setWidgets(newWidgets);
+    };
+    const changeVisualStyle = (id: string, style: any) => {
+        setWidgets(prev => prev.map(w => w.id === id ? { ...w, visualStyle: style } : w));
+    };
+
+    const renderWidget = (widget: Widget) => {
+        const ChartContainer = ResponsiveContainer;
+        
+        if (widget.type === 'kpis') {
+            return (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
+                    <Card className="bg-indigo-900/10 border-indigo-500/30 flex flex-col justify-center">
+                        <span className="text-indigo-400 text-xs font-bold uppercase">Total</span>
+                        <span className="text-3xl text-white font-bold">{metrics.total}</span>
+                    </Card>
+                    <Card className="bg-emerald-900/10 border-emerald-500/30 flex flex-col justify-center">
+                        <span className="text-emerald-400 text-xs font-bold uppercase">Média Avanço</span>
+                        <span className="text-3xl text-white font-bold">{metrics.avgProgress}%</span>
+                    </Card>
+                    <Card className="bg-amber-900/10 border-amber-500/30 flex flex-col justify-center">
+                        <span className="text-amber-400 text-xs font-bold uppercase">Travados</span>
+                        <span className="text-3xl text-white font-bold">{metrics.stuckProjects}</span>
+                    </Card>
+                    <Card className="bg-rose-900/10 border-rose-500/30 flex flex-col justify-center">
+                        <span className="text-rose-400 text-xs font-bold uppercase">Ativos</span>
+                        <span className="text-3xl text-white font-bold">{metrics.activeProjects}</span>
+                    </Card>
+                </div>
+            );
+        }
+
+        const renderChart = () => {
+            const style = widget.visualStyle || 'bar';
+            
+            if (widget.type === 'phaseChart') {
+                if (style === 'pie') return (
+                    <PieChart>
+                         <Pie data={phaseData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#6366f1" label>
+                            {phaseData.map((entry, index) => <Cell key={`cell-${index}`} fill={['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899'][index % 5]} />)}
+                         </Pie>
+                         <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                         <Legend />
+                    </PieChart>
+                );
+                if (style === 'line') return (
+                    <LineChart data={phaseData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                        <XAxis dataKey="name" stroke="#94a3b8" />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                        <Line type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} />
+                    </LineChart>
+                );
+                if (style === 'area') return (
+                    <AreaChart data={phaseData}>
+                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                         <XAxis dataKey="name" stroke="#94a3b8" />
+                         <YAxis stroke="#94a3b8" />
+                         <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                         <Area type="monotone" dataKey="value" stroke="#6366f1" fill="#6366f1" fillOpacity={0.3} />
+                    </AreaChart>
+                );
+                // Default Bar
+                return (
+                    <BarChart data={phaseData} layout="vertical" margin={{ left: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
+                        <XAxis type="number" stroke="#94a3b8" />
+                        <YAxis type="category" dataKey="name" stroke="#94a3b8" width={120} tick={{fontSize: 10}} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                        <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={30}>
+                             <LabelList dataKey="value" position="right" fill="#fff" />
+                        </Bar>
+                    </BarChart>
+                );
+            }
+
+            if (widget.type === 'healthChart') {
+                 // Logic for Health Chart types... similar structure
+                 if (style === 'bar') return (
+                     <BarChart data={healthData}>
+                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                         <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
+                         <YAxis stroke="#94a3b8" />
+                         <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                            {healthData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                         </Bar>
+                     </BarChart>
+                 );
+                 // Default Pie
+                 return (
+                    <PieChart>
+                        <Pie data={healthData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" label>
+                            {healthData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                        <Legend />
+                    </PieChart>
+                 );
+            }
+            
+            if (widget.type === 'detailChart') {
+                return (
+                    <BarChart data={projectProgressData} layout="vertical" margin={{ left: 20 }} barSize={20}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
+                        <XAxis type="number" domain={[0, 100]} stroke="#94a3b8" />
+                        <YAxis dataKey="name" type="category" width={150} stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} formatter={(val: number) => [`${val}%`, 'Conclusão']} />
+                        <Bar dataKey="progress" fill="#10b981" radius={[0, 4, 4, 0]}>
+                             <LabelList dataKey="progress" position="right" fill="#fff" fontSize={10} formatter={(val: any) => `${val}%`} />
+                        </Bar>
+                    </BarChart>
+                )
+            }
+            return null;
+        };
+
+        return (
+            <div className="h-full flex flex-col">
+                 <div className="flex justify-between items-center mb-4">
+                     <h3 className="text-lg font-bold text-white">{widget.title}</h3>
+                     {isEditMode && widget.type !== 'kpis' && (
+                         <select 
+                            className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none"
+                            value={widget.visualStyle || 'bar'}
+                            onChange={(e) => changeVisualStyle(widget.id, e.target.value)}
+                         >
+                             <option value="bar">Barras</option>
+                             <option value="pie">Pizza</option>
+                             <option value="line">Linha</option>
+                             <option value="area">Área</option>
+                         </select>
+                     )}
+                 </div>
+                 <div className="flex-1 min-h-[300px]">
+                     <ResponsiveContainer width="100%" height="100%">
+                         {renderChart() as any}
+                     </ResponsiveContainer>
+                 </div>
+            </div>
+        )
+    };
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
@@ -557,133 +711,42 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                     <h2 className="text-2xl font-bold text-white">Report de Fluxo de Projetos</h2>
                     <p className="text-sm text-slate-400">Visão consolidada de Melhorias e Automações</p>
                 </div>
-                <Button onClick={handleExportReportPPT} variant="primary">
-                    <IconDownload /> Exportar PPT
-                </Button>
+                <div className="flex gap-2">
+                     <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>
+                        {isEditMode ? 'Salvar Layout' : 'Editar Layout'}
+                     </Button>
+                    <Button onClick={handleExportReportPPT} variant="primary">
+                        <IconDownload /> Exportar PPT
+                    </Button>
+                </div>
             </div>
             
             <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
 
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-indigo-500">
-                    <div className="p-3 bg-indigo-500/20 rounded-full text-indigo-400">
-                        <IconProject className="w-8 h-8" />
-                    </div>
-                    <div>
-                        <p className="text-sm text-slate-400">Total Visualizado</p>
-                        <p className="text-3xl font-bold text-white">{metrics.total}</p>
-                    </div>
-                </Card>
-                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-emerald-500">
-                    <div className="p-3 bg-emerald-500/20 rounded-full text-emerald-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
-                    </div>
-                    <div>
-                        <p className="text-sm text-slate-400">Média de Avanço</p>
-                        <p className="text-3xl font-bold text-white">{metrics.avgProgress}%</p>
-                    </div>
-                </Card>
-                <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-amber-500">
-                    <div className="p-3 bg-amber-500/20 rounded-full text-amber-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-                    </div>
-                    <div>
-                        <p className="text-sm text-slate-400">Travados / Espera</p>
-                        <p className="text-3xl font-bold text-white">{metrics.stuckProjects}</p>
-                    </div>
-                </Card>
-                 <Card className="flex items-center gap-4 bg-gradient-to-br from-slate-800 to-slate-900 border-l-4 border-l-rose-500">
-                    <div className="p-3 bg-rose-500/20 rounded-full text-rose-400">
-                         <IconChartBar className="w-8 h-8" />
-                    </div>
-                    <div>
-                        <p className="text-sm text-slate-400">Ativos em Fases</p>
-                        <p className="text-3xl font-bold text-white">{metrics.activeProjects}</p>
-                    </div>
-                </Card>
-            </div>
-
-            {/* Charts Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Phase Distribution */}
-                <Card className="min-h-[400px]">
-                    <h3 className="text-lg font-bold text-white mb-4">Projetos Ativos por Fase</h3>
-                    <ResponsiveContainer width="100%" height={320}>
-                        <BarChart data={phaseData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
-                            <XAxis type="number" stroke="#94a3b8" />
-                            <YAxis type="category" dataKey="name" stroke="#94a3b8" width={120} tick={{ fontSize: 11 }} />
-                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{ fill: '#334155', opacity: 0.4 }} />
-                            <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={30}>
-                                <LabelList dataKey="value" position="right" fill="#cbd5e1" fontWeight="bold" />
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
-                </Card>
-
-                {/* Project Health Pie */}
-                <Card className="min-h-[400px] flex flex-col">
-                    <h3 className="text-lg font-bold text-white mb-4">Saúde do Portfólio</h3>
-                     <div className="flex-1">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie
-                                    data={healthData}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={100}
-                                    paddingAngle={5}
-                                    dataKey="value"
-                                    labelLine={false}
-                                    label={renderCustomLabel}
-                                >
-                                    {healthData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="rgba(0,0,0,0)" />
-                                    ))}
-                                </Pie>
-                                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} />
-                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                            </PieChart>
-                        </ResponsiveContainer>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                 {widgets.filter(w => w.visible).map((widget, index) => (
+                     <div key={widget.id} className={`${widget.size === 'full' ? 'md:col-span-2 lg:col-span-4' : 'md:col-span-1 lg:col-span-2'} relative group`}>
+                         <Card className="h-full min-h-[350px]">
+                             {renderWidget(widget)}
+                         </Card>
+                         {isEditMode && (
+                             <div className="absolute top-2 right-2 flex flex-col gap-1 bg-slate-900/90 p-1 rounded z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+                                 {index > 0 && <button onClick={() => moveWidget(index, 'up')} className="p-1 text-white hover:text-indigo-400">↑</button>}
+                                 {index < widgets.length - 1 && <button onClick={() => moveWidget(index, 'down')} className="p-1 text-white hover:text-indigo-400">↓</button>}
+                                 <button onClick={() => toggleSize(widget.id)} className="p-1 text-white hover:text-emerald-400">↔</button>
+                                 <button onClick={() => toggleVisibility(widget.id)} className="p-1 text-white hover:text-rose-400">✕</button>
+                             </div>
+                         )}
                      </div>
-                </Card>
+                 ))}
             </div>
-
-            {/* NEW: Detailed Progress Chart */}
-            <Card className="min-h-[450px]">
-                 <h3 className="text-lg font-bold text-white mb-4">Progresso Detalhado por Projeto</h3>
-                 <div className="h-[400px] w-full">
-                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                            data={projectProgressData}
-                            layout="vertical"
-                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                            barSize={20}
-                        >
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" opacity={0.5} />
-                            <XAxis type="number" domain={[0, 100]} stroke="#94a3b8" />
-                            <YAxis 
-                                dataKey="name" 
-                                type="category" 
-                                width={180} 
-                                stroke="#94a3b8" 
-                                tick={{ fontSize: 11, fill: '#cbd5e1' }}
-                            />
-                            <Tooltip 
-                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} 
-                                cursor={{ fill: '#334155', opacity: 0.2 }}
-                                formatter={(value: number, name: string, props: any) => [`${value}%`, 'Conclusão']}
-                                labelFormatter={(label) => label}
-                            />
-                            <Bar dataKey="progress" fill="#10b981" radius={[0, 4, 4, 0]}>
-                                <LabelList dataKey="progress" position="right" fill="#fff" fontSize={10} formatter={(val: number) => `${val}%`} />
-                            </Bar>
-                        </BarChart>
-                     </ResponsiveContainer>
-                 </div>
-            </Card>
+            {isEditMode && widgets.some(w => !w.visible) && (
+                <div className="bg-slate-800 p-4 rounded flex gap-2">
+                    {widgets.filter(w => !w.visible).map(w => (
+                        <button key={w.id} onClick={() => toggleVisibility(w.id)} className="bg-slate-700 px-3 py-1 rounded text-white text-xs">+ {w.title}</button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 };
@@ -1133,322 +1196,16 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     );
 };
 
-// --- User Profile View ---
-
-const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
-  const [formData, setFormData] = useState({
-    name: user.name,
-    email: user.email,
-    password: user.password || '',
-    newPassword: ''
-  });
-  const [avatar, setAvatar] = useState<string | undefined>(user.avatar);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatar(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const updatedUser: User = {
-      ...user,
-      name: formData.name,
-      email: formData.email,
-      avatar: avatar,
-      password: formData.newPassword ? formData.newPassword : user.password
-    };
-
-    StorageService.updateUser(updatedUser);
-    setUser(updatedUser);
-    alert('Perfil atualizado com sucesso!');
-  };
-
-  const handleReset = () => {
-      if (window.confirm("ATENÇÃO: Isso apagará TODAS as demandas cadastradas (incidentes, melhorias, automações). Essa ação é irreversível. Deseja continuar?")) {
-          onResetData();
-      }
-  };
-
-  return (
-    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in pb-10">
-      <h2 className="text-2xl font-bold text-white mb-6">Gerenciar Perfil</h2>
-      
-      <Card>
-        <div className="flex flex-col items-center mb-8">
-          <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-            <div className="w-32 h-32 rounded-full bg-slate-700 flex items-center justify-center text-4xl text-indigo-300 overflow-hidden border-4 border-slate-600 group-hover:border-indigo-500 transition-all">
-               {avatar ? (
-                 <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
-               ) : (
-                 user.name.substring(0, 2).toUpperCase()
-               )}
-            </div>
-            <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-               <span className="text-xs text-white font-medium">Alterar Foto</span>
-            </div>
-            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
-          </div>
-          <p className="text-slate-400 text-xs mt-2">Clique para alterar a foto</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-             <label className="block text-sm font-medium text-slate-400 mb-1">Nome Completo</label>
-             <input 
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-             />
-          </div>
-          
-          <div>
-             <label className="block text-sm font-medium text-slate-400 mb-1">Email</label>
-             <input 
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-             />
-          </div>
-
-          <div className="pt-4 border-t border-slate-700 mt-4">
-             <h4 className="text-lg font-medium text-white mb-4">Alterar Senha</h4>
-             <div className="space-y-4">
-                <div>
-                   <label className="block text-sm font-medium text-slate-400 mb-1">Nova Senha (deixe em branco para manter)</label>
-                   <input 
-                      type="password"
-                      value={formData.newPassword}
-                      onChange={(e) => setFormData({...formData, newPassword: e.target.value})}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder="Nova senha"
-                   />
-                </div>
-             </div>
-          </div>
-
-          <div className="flex justify-end mt-6">
-             <Button type="submit" variant="primary" className="w-full md:w-auto">Salvar Alterações</Button>
-          </div>
-        </form>
-      </Card>
-
-      <Card className="border-rose-900/50 bg-rose-950/10">
-          <h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3>
-          <p className="text-sm text-slate-400 mb-4">Ações irreversíveis que afetam os dados da aplicação.</p>
-          <div className="flex justify-start">
-               <Button variant="danger" onClick={handleReset}>Resetar Todas as Demandas</Button>
-          </div>
-      </Card>
-    </div>
-  );
-};
-
-// --- Gantt View ---
-
-const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
-  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
-      search: '', 
-      type: [], 
-      priority: [], 
-      status: [], 
-      assignee: [] 
-  });
-
-  const filteredTasks = useMemo(() => {
-      return tasks.filter(t => {
-          const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) ||
-                                t.id.toLowerCase().includes(filters.search.toLowerCase()) ||
-                                (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-          
-          const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
-          const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
-          const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
-          
-          let matchesAssignee = true;
-          if (filters.assignee.length > 0) {
-              const hasUnassigned = filters.assignee.includes('Não Atribuído');
-              if (hasUnassigned) {
-                  matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
-              } else {
-                  matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
-              }
-          }
-
-          // Must have dates to show in Gantt
-          return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee && t.startDate && t.endDate;
-      });
-  }, [tasks, filters]);
-
-  const timelineData = useMemo(() => {
-    return filteredTasks
-      .map(t => ({
-        ...t,
-        start: new Date(t.startDate!).getTime(),
-        end: new Date(t.endDate!).getTime()
-      }))
-      .sort((a, b) => a.start - b.start);
-  }, [filteredTasks]);
-
-  if (timelineData.length === 0) {
-    return (
-        <div className="h-full flex flex-col">
-             <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-             <div className="flex-1 flex items-center justify-center text-slate-500 bg-slate-800/30 rounded-xl border border-slate-700/50">
-                 Adicione datas de início e fim às tarefas e verifique os filtros para visualizar o cronograma.
-             </div>
-         </div>
-    );
-  }
-
-  const minDate = Math.min(...timelineData.map(t => t.start));
-  const maxDate = Math.max(...timelineData.map(t => t.end));
-  const dayMs = 86400000;
-  const totalDays = Math.ceil((maxDate - minDate) / dayMs) + 10; // Padding
-  const cellWidth = 50; // Width per day
-
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const todayMs = today.getTime();
-  const isTodayVisible = todayMs >= minDate && todayMs <= (minDate + (totalDays * dayMs));
-  const todayOffset = Math.floor((todayMs - minDate) / dayMs);
-
-  return (
-    <div className="h-full flex flex-col space-y-4">
-      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-      
-      <Card className="flex-1 p-0 overflow-hidden flex flex-col bg-slate-900 border-slate-700">
-         {/* Header + Scroll Area */}
-         <div className="flex-1 flex overflow-hidden">
-             
-             {/* Fixed Left Column (Task Info) */}
-             <div className="w-80 flex-shrink-0 bg-slate-800/80 border-r border-slate-700 z-20 shadow-lg">
-                 <div className="h-12 bg-slate-800 border-b border-slate-700 flex items-center px-4 font-bold text-slate-300 text-sm">
-                     Tarefas
-                 </div>
-                 <div className="overflow-y-hidden">
-                     {timelineData.map((task, idx) => (
-                         <div key={task.id} className="h-12 border-b border-slate-700/50 flex flex-col justify-center px-4 group hover:bg-slate-700/30">
-                             <div className="flex justify-between items-center">
-                                 <span className="text-sm font-medium text-slate-200 truncate w-48" title={task.summary}>{task.summary}</span>
-                                 <Badge type={task.status} className="text-[9px] px-1" />
-                             </div>
-                             <span className="text-xs text-slate-500 truncate">{task.assignee || 'Sem atribuição'}</span>
-                         </div>
-                     ))}
-                 </div>
-             </div>
-
-             {/* Scrollable Timeline */}
-             <div className="flex-1 overflow-auto custom-scrollbar relative bg-slate-900/50">
-                 <div style={{ width: `${totalDays * cellWidth}px` }}>
-                     {/* Calendar Header */}
-                     <div className="h-12 bg-slate-800 border-b border-slate-700 flex sticky top-0 z-10">
-                         {Array.from({ length: totalDays }).map((_, i) => {
-                             const d = new Date(minDate + i * dayMs);
-                             const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                             const isToday = d.getTime() === todayMs;
-                             return (
-                                 <div key={i} className={`flex-shrink-0 text-center border-r border-slate-700 py-2 text-[10px] ${isWeekend ? 'bg-slate-800/50' : ''} ${isToday ? 'bg-indigo-900/30' : ''}`} style={{ width: `${cellWidth}px` }}>
-                                     <div className="font-bold text-slate-400">{d.getDate()}</div>
-                                     <div className="text-slate-600">{d.toLocaleDateString('pt-BR', { weekday: 'narrow' })}</div>
-                                 </div>
-                             )
-                         })}
-                     </div>
-
-                     {/* Grid Lines & Today Line */}
-                     <div className="absolute inset-0 top-12 z-0 pointer-events-none flex">
-                         {Array.from({ length: totalDays }).map((_, i) => {
-                             const d = new Date(minDate + i * dayMs);
-                             const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                             return (
-                                 <div key={i} className={`h-full border-r border-slate-700/30 flex-shrink-0 ${isWeekend ? 'bg-black/20' : ''}`} style={{ width: `${cellWidth}px` }}></div>
-                             )
-                         })}
-                         {isTodayVisible && (
-                            <div 
-                                className="absolute top-0 bottom-0 w-px bg-rose-500 z-10 shadow-[0_0_10px_rgba(244,63,94,0.5)]" 
-                                style={{ left: `${todayOffset * cellWidth + (cellWidth/2)}px` }}
-                            >
-                                <div className="absolute -top-1 -left-1 w-2 h-2 bg-rose-500 rounded-full"></div>
-                            </div>
-                         )}
-                     </div>
-
-                     {/* Bars */}
-                     <div className="relative z-10">
-                        {timelineData.map((task, idx) => {
-                           const durationMs = task.end - task.start;
-                           const durationDays = Math.floor(durationMs / dayMs) + 1; // +1 to include start day
-                           const offsetDays = Math.floor((task.start - minDate) / dayMs);
-                           
-                           let colorClass = "bg-slate-600";
-                           if (task.type === 'Incidente') colorClass = "bg-rose-500";
-                           if (task.type === 'Melhoria') colorClass = "bg-emerald-500";
-                           if (task.type === 'Nova Automação') colorClass = "bg-indigo-500";
-
-                           const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
-
-                           return (
-                               <div key={task.id} className="h-12 flex items-center relative border-b border-transparent">
-                                   <div 
-                                      className={`absolute h-7 rounded-lg shadow-lg ${colorClass} ${isDone ? 'opacity-60 saturate-0' : 'opacity-90'} hover:opacity-100 transition-all cursor-pointer flex items-center px-2 overflow-hidden whitespace-nowrap text-xs text-white font-medium group border border-white/10`}
-                                      style={{ 
-                                          left: `${offsetDays * cellWidth + 2}px`, 
-                                          width: `${Math.max(durationDays * cellWidth - 4, 40)}px` 
-                                      }}
-                                      title={`${task.summary} (${new Date(task.start).toLocaleDateString()} - ${new Date(task.end).toLocaleDateString()})`}
-                                   >
-                                       {/* Striped pattern overlay */}
-                                       <div className="absolute inset-0 opacity-10 bg-[linear-gradient(45deg,rgba(255,255,255,.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,.15)_50%,rgba(255,255,255,.15)_75%,transparent_75%,transparent)] bg-[length:10px_10px]"></div>
-                                       
-                                       <span className="relative z-10 drop-shadow-md flex justify-between w-full items-center">
-                                           <span className="truncate mr-2">{task.summary}</span>
-                                           {task.estimatedTime && (
-                                               <span className="bg-black/30 px-1 rounded text-[9px]">{Math.ceil(parseDuration(task.estimatedTime)/8)}d</span>
-                                           )}
-                                       </span>
-                                   </div>
-                               </div>
-                           )
-                        })}
-                     </div>
-                 </div>
-             </div>
-         </div>
-      </Card>
-    </div>
-  );
-};
-
-// --- Dashboard Widget System ---
-
-interface Widget {
-    id: string;
-    type: 'cards' | 'priority' | 'status' | 'devType' | 'capacity' | 'completedKPIs';
-    title: string;
-    size: 'half' | 'full';
-    visible: boolean;
-}
+// --- Dashboard View ---
 
 const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w1', type: 'cards', title: 'KPIs Gerais (Ativos)', size: 'full', visible: true },
-    { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true },
-    { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true },
-    { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true },
+    { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true, visualStyle: 'bar' },
     { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
     { id: 'w6', type: 'completedKPIs', title: 'Total Concluído', size: 'full', visible: true },
+    { id: 'w7', type: 'incidentByAuto', title: 'Top Automações com Incidentes', size: 'full', visible: true, visualStyle: 'bar' }
 ];
 
 const renderCustomBarLabel = ({ x, y, width, height, value }: any) => {
@@ -1476,10 +1233,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             <span className="text-white font-mono">{p.value}</span>
           </div>
         ))}
-        <div className="border-t border-slate-700 mt-2 pt-1 flex justify-between items-center">
-             <span className="text-slate-400 text-xs">Total</span>
-             <span className="text-white font-bold">{total}</span>
-        </div>
+        {total > 0 && (
+            <div className="border-t border-slate-700 mt-2 pt-1 flex justify-between items-center">
+                <span className="text-slate-400 text-xs">Total</span>
+                <span className="text-white font-bold">{total}</span>
+            </div>
+        )}
       </div>
     );
   }
@@ -1492,10 +1251,14 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
       // Merge default if new widget is not in saved
       if (saved) {
           const parsed = JSON.parse(saved);
-          if (!parsed.find((w: Widget) => w.type === 'completedKPIs')) {
-              return [...parsed, { id: 'w6', type: 'completedKPIs', title: 'Total Concluído', size: 'full', visible: true }];
-          }
-          return parsed;
+          const hasIncidentAuto = parsed.find((w: Widget) => w.type === 'incidentByAuto');
+          const hasCompletedKPIs = parsed.find((w: Widget) => w.type === 'completedKPIs');
+          
+          let merged = [...parsed];
+          if (!hasCompletedKPIs) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'completedKPIs'));
+          if (!hasIncidentAuto) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'incidentByAuto'));
+          
+          return merged;
       }
       return DEFAULT_WIDGETS;
   });
@@ -1594,7 +1357,6 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   const capacityData = useMemo(() => {
     const data = devs.map(dev => {
         // Filter active tasks for this specific dev from the already filtered list
-        // This means if "Type: Incident" is selected on dashboard, we calculate capacity based on incidents only.
         const myTasks = activeFilteredTasks.filter(t => t.assignee === dev.name);
         
         // Sum estimated time (Calculate workload time)
@@ -1612,6 +1374,31 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     // Sort by totalHours Ascending (Least busy first -> Available First)
     return data.sort((a, b) => a.totalHours - b.totalHours);
   }, [activeFilteredTasks, devs]);
+
+  // --- Incident by Automation Logic ---
+  const incidentByAutoData = useMemo(() => {
+    // For analysis of incidents, we usually want to see where the pain points are, 
+    // including potentially closed tickets if we are looking for patterns.
+    // However, Dashboard usually reflects current state. 
+    // To be useful as "Analysis", we should probably include closed tickets if they match the filter criteria.
+    // Let's use 'tasks' filtered by Dev, but specifically filtering for Type=Incidente.
+    const relevantTasks = tasks.filter(t => {
+         const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || '');
+         return t.type === 'Incidente' && matchesDev;
+    });
+
+    const counts: Record<string, number> = {};
+    relevantTasks.forEach(t => {
+        // Use subcategory as automation name, fallback to category or summary
+        const name = t.subcategory || t.category || 'Não Classificado';
+        counts[name] = (counts[name] || 0) + 1;
+    });
+
+    return Object.entries(counts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10); // Top 10
+  }, [tasks, filterDev]);
 
   // --- Widget Actions ---
   const toggleSize = (id: string) => {
@@ -1632,21 +1419,21 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
       setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
   };
 
+  const changeVisualStyle = (id: string, style: any) => {
+      setWidgets(prev => prev.map(w => w.id === id ? { ...w, visualStyle: style } : w));
+  };
+
   const exportPPT = () => {
     const pres = new pptxgen();
     pres.layout = 'LAYOUT_WIDE';
-    pres.author = 'Nexus Project';
-    pres.company = 'Nexus';
-    pres.subject = 'Relatório de Projetos';
-    pres.title = 'One Page Project Report';
     
     // Slide 1: Title
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Relatório One Page Project", { x: 1, y: 2, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
-    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral (Projetos Ativos)`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
 
-    // Slide 2: KPIs (Text Based)
+    // Slide 2: KPIs
     slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Métricas Gerais (KPIs - Projetos Ativos)", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
@@ -1672,101 +1459,136 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         return s;
     };
 
-    // Slide 3: Priority (Bar)
     addChartSlide("Demandas por Prioridade", pres.ChartType.bar, priorityData.map(p => ({
-        name: p.name,
-        labels: [p.name],
-        values: [p.value]
+        name: p.name, labels: [p.name], values: [p.value]
     })), { barDir: 'col', chartColors: ['8b5cf6'], valAxisMinVal: 0, valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
 
-    // Slide 4: Status (Stacked Bar by Type)
     if (statusByTypeData.length > 0) {
         const statusLabels = statusByTypeData.map(s => s.name);
-        const incData = statusByTypeData.map(s => s.Incidente);
-        const featData = statusByTypeData.map(s => s.Melhoria);
-        const autoData = statusByTypeData.map(s => s['Nova Automação']);
-
         addChartSlide("Distribuição de Status por Tipo", pres.ChartType.bar, [
-            { name: 'Incidentes', labels: statusLabels, values: incData },
-            { name: 'Melhorias', labels: statusLabels, values: featData },
-            { name: 'Automações', labels: statusLabels, values: autoData }
-        ], { 
-            barDir: 'col', 
-            barGrouping: 'stacked', 
-            showLegend: true, 
-            legendPos: 'b', 
-            valAxisLabelColor: '94a3b8', 
-            catAxisLabelColor: '94a3b8', 
-            chartColors: ['f43f5e', '10b981', '6366f1'] 
-        });
+            { name: 'Incidentes', labels: statusLabels, values: statusByTypeData.map(s => s.Incidente) },
+            { name: 'Melhorias', labels: statusLabels, values: statusByTypeData.map(s => s.Melhoria) },
+            { name: 'Automações', labels: statusLabels, values: statusByTypeData.map(s => s['Nova Automação']) }
+        ], { barDir: 'col', barGrouping: 'stacked', showLegend: true, legendPos: 'b', valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8', chartColors: ['f43f5e', '10b981', '6366f1'] });
     }
 
-    // Slide 5: Dev Workload (Stacked Bar)
-    if (devTypeData.length > 0) {
-        const devNames = devTypeData.map(d => d.name);
-        const incData = devTypeData.map(d => d.Incidente);
-        const featData = devTypeData.map(d => d.Melhoria);
-        const autoData = devTypeData.map(d => d['Nova Automação']);
-
-        addChartSlide("Demandas por Desenvolvedor (Tipo)", pres.ChartType.bar, [
-            { name: 'Incidentes', labels: devNames, values: incData },
-            { name: 'Melhorias', labels: devNames, values: featData },
-            { name: 'Automações', labels: devNames, values: autoData }
-        ], { barDir: 'bar', showLegend: true, legendPos: 'b', valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8', chartColors: ['f43f5e', '10b981', '6366f1'] });
-    }
-
-    // Slide 6: Capacity (Bar) - Time Based
-    // Sorted by availability (least hours first)
-    const capLabels = capacityData.map(d => d.name);
-    const capValues = capacityData.map(d => d.totalHours);
-    const s = addChartSlide("Capacidade & Disponibilidade (Horas Estimadas)", pres.ChartType.bar, [
-        {
-            name: 'Horas Estimadas Pendentes',
-            labels: capLabels,
-            values: capValues
-        }
-    ], { 
-        barDir: 'bar', 
-        chartColors: ['10b981'], 
-        valAxisLabelColor: '94a3b8', 
-        catAxisLabelColor: '94a3b8',
-        valAxisTitle: 'Horas'
-    });
-    
-    // Add suggestion text to slide
-    if (capacityData.length > 0) {
-        const bestDev = capacityData[0];
-        const bestDevName = bestDev ? bestDev.name : "";
-        const bestDevHours = bestDev ? bestDev.totalHours : 0;
-        s.addText(`Sugestão de Atribuição: ${bestDevName} (Livre em ~${formatDuration(bestDevHours)})`, { 
-            x: 1, y: 1, w: '80%', h: 0.5, color: '10b981', fontSize: 14, bold: true 
-        });
+    // Incident by Automation Slide
+    if (incidentByAutoData.length > 0) {
+         addChartSlide("Top Automações com Incidentes", pres.ChartType.bar, [{
+             name: 'Incidentes',
+             labels: incidentByAutoData.map(d => d.name),
+             values: incidentByAutoData.map(d => d.value)
+         }], { barDir: 'bar', chartColors: ['f43f5e'], valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
     }
 
     pres.writeFile({ fileName: "Nexus_OnePageReport.pptx" });
   };
 
   const renderWidget = (widget: Widget) => {
+      const style = widget.visualStyle || 'bar';
+
+      const renderChartContent = () => {
+          if (widget.type === 'priority') {
+             if (style === 'pie') return (
+                 <PieChart>
+                     <Pie data={priorityData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                        {priorityData.map((entry, index) => <Cell key={`cell-${index}`} fill={['#8b5cf6', '#a855f7', '#d8b4fe', '#ddd6fe'][index % 4]} />)}
+                     </Pie>
+                     <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                 </PieChart>
+             );
+             return (
+                <BarChart data={priorityData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                    <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
+                    <YAxis stroke="#94a3b8" />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
+                    <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
+                </BarChart>
+             );
+          }
+
+          if (widget.type === 'incidentByAuto') {
+              if (style === 'pie') return (
+                  <PieChart>
+                      <Pie data={incidentByAutoData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#f43f5e" label>
+                          {incidentByAutoData.map((entry, index) => <Cell key={index} fill={['#f43f5e', '#fb7185', '#fda4af', '#e11d48'][index % 4]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                  </PieChart>
+              );
+              // Default Bar
+              return (
+                <BarChart data={incidentByAutoData} layout="vertical" margin={{ left: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
+                    <XAxis type="number" stroke="#94a3b8" />
+                    <YAxis type="category" dataKey="name" width={150} stroke="#94a3b8" tick={{fontSize: 10}} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                    <Bar dataKey="value" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={20}>
+                        <LabelList dataKey="value" position="right" fill="#fff" />
+                    </Bar>
+                </BarChart>
+              );
+          }
+
+          if (widget.type === 'status') {
+             // Stacked Bar (Default) or Area/Line
+             return (
+                 <BarChart data={statusByTypeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }} barSize={40}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                    <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
+                    <YAxis stroke="#94a3b8" />
+                    <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
+                    <Legend wrapperStyle={{paddingTop: '10px'}} />
+                    <Bar dataKey="Incidente" stackId="a" fill="#f43f5e"><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar>
+                    <Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar>
+                    <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]}><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar>
+                </BarChart>
+             );
+          }
+
+          if (widget.type === 'devType') {
+              return (
+                <ComposedChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }} barSize={32}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} />
+                    <XAxis type="number" stroke="#64748b" tick={{fontSize: 10}} hide />
+                    <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} width={150} interval={0} tickLine={false} axisLine={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
+                    <Legend wrapperStyle={{paddingTop: '10px'}} />
+                    <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" radius={[4, 0, 0, 4]}><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar>
+                    <Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar>
+                    <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]}><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar>
+                    <Line dataKey="total" stroke="none" isAnimationActive={false}><LabelList dataKey="total" position="right" style={{ fill: "#94a3b8", fontSize: "12px", fontWeight: "bold" }} formatter={(val: any) => `Total: ${val}`} /></Line>
+                </ComposedChart>
+              );
+          }
+          return null;
+      };
+
       return (
           <div className="h-full flex flex-col">
-             {/* Widget Header */}
              <div className="flex justify-between items-center mb-4">
                  <h3 className="text-lg font-semibold text-slate-200">{widget.title}</h3>
-                 {isEditMode && (
-                     <div className="flex items-center gap-1 bg-slate-900 rounded p-1">
-                         <button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400" title="Alterar Tamanho">
-                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-                                 {widget.size === 'full' ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" /> : <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />}
-                             </svg>
-                         </button>
-                         <button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400" title="Ocultar">
-                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                         </button>
-                     </div>
-                 )}
+                 <div className="flex items-center gap-2">
+                     {isEditMode && ['priority', 'status', 'incidentByAuto'].includes(widget.type) && (
+                         <select 
+                            className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none"
+                            value={widget.visualStyle || 'bar'}
+                            onChange={(e) => changeVisualStyle(widget.id, e.target.value)}
+                         >
+                             <option value="bar">Barras</option>
+                             <option value="pie">Pizza</option>
+                         </select>
+                     )}
+                     {isEditMode && (
+                         <div className="flex items-center gap-1 bg-slate-900 rounded p-1">
+                             <button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400">↔</button>
+                             <button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400">✕</button>
+                         </div>
+                     )}
+                 </div>
              </div>
              
-             {/* Widget Content */}
              <div className="flex-1 min-h-[250px]">
                  {widget.type === 'cards' && (
                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
@@ -1807,87 +1629,6 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                             <span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span>
                         </div>
                      </div>
-                 )}
-                 {widget.type === 'priority' && (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={priorityData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                            <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
-                            <YAxis stroke="#94a3b8" />
-                            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} />
-                            <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                 )}
-                 {widget.type === 'status' && (
-                     <ResponsiveContainer width="100%" height="100%">
-                         <BarChart 
-                            data={statusByTypeData} 
-                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }} 
-                            barSize={40}
-                         >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                            <XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} />
-                            <YAxis stroke="#94a3b8" />
-                            <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
-                            <Legend wrapperStyle={{paddingTop: '10px'}} />
-                            
-                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e">
-                                <LabelList dataKey="Incidente" content={renderCustomBarLabel} />
-                            </Bar>
-                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
-                                <LabelList dataKey="Melhoria" content={renderCustomBarLabel} />
-                            </Bar>
-                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]}>
-                                <LabelList dataKey="Nova Automação" content={renderCustomBarLabel} />
-                            </Bar>
-                        </BarChart>
-                     </ResponsiveContainer>
-                 )}
-                 {widget.type === 'devType' && (
-                     <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart 
-                            data={devTypeData} 
-                            layout="vertical" 
-                            margin={{ top: 5, right: 60, left: 10, bottom: 5 }} 
-                            barSize={32}
-                        >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} />
-                            <XAxis type="number" stroke="#64748b" tick={{fontSize: 10}} hide />
-                            <YAxis 
-                                dataKey="name" 
-                                type="category" 
-                                stroke="#94a3b8" 
-                                tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} 
-                                width={150} 
-                                interval={0}
-                                tickLine={false}
-                                axisLine={false}
-                            />
-                            <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
-                            <Legend wrapperStyle={{paddingTop: '10px'}} />
-                            
-                            <Bar dataKey="Incidente" stackId="a" fill="#f43f5e" radius={[4, 0, 0, 4]}>
-                                <LabelList dataKey="Incidente" content={renderCustomBarLabel} />
-                            </Bar>
-                            <Bar dataKey="Melhoria" stackId="a" fill="#10b981">
-                                <LabelList dataKey="Melhoria" content={renderCustomBarLabel} />
-                            </Bar>
-                            <Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]}>
-                                <LabelList dataKey="Nova Automação" content={renderCustomBarLabel} />
-                            </Bar>
-
-                            {/* Invisible Line to Anchor the Total Label at the end of the bars */}
-                            <Line dataKey="total" stroke="none" isAnimationActive={false}>
-                                <LabelList 
-                                    dataKey="total" 
-                                    position="right" 
-                                    style={{ fill: "#94a3b8", fontSize: "12px", fontWeight: "bold" }}
-                                    formatter={(val: any) => `Total: ${val}`} 
-                                />
-                            </Line>
-                        </ComposedChart>
-                    </ResponsiveContainer>
                  )}
                  {widget.type === 'capacity' && (
                      <div className="h-full flex flex-col">
@@ -1961,6 +1702,12 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
                         </div>
                      </div>
                  )}
+                 
+                 {(widget.type === 'priority' || widget.type === 'status' || widget.type === 'devType' || widget.type === 'incidentByAuto') && (
+                     <ResponsiveContainer width="100%" height="100%">
+                         {renderChartContent() as any}
+                     </ResponsiveContainer>
+                 )}
              </div>
           </div>
       )
@@ -1991,11 +1738,11 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
               />
           </div>
 
-          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"} className="whitespace-nowrap">
+          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>
               {isEditMode ? 'Salvar Layout' : 'Editar Layout'}
           </Button>
           
-          <Button onClick={exportPPT} variant="primary" className="whitespace-nowrap bg-indigo-600 hover:bg-indigo-700">
+          <Button onClick={exportPPT} variant="primary">
               <IconDownload /> Exportar PPT
           </Button>
         </div>
@@ -2047,8 +1794,6 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   );
 };
 
-// --- Kanban View (Updated: Developer Based) ---
-// ... (KanbanView remains same, skipping for brevity but assuming kept in file) ...
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], assignee: string[]}>({ 
       search: '', 
@@ -2458,7 +2203,172 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
     </div>
   );
 };
-// ... (Layout and AuthPage remain same) ...
+
+const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+  const ganttTasks = useMemo(() => {
+      return tasks.filter(t => t.startDate && t.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status))
+          .sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
+  }, [tasks]);
+
+  if (ganttTasks.length === 0) {
+      return (
+          <div className="h-full flex items-center justify-center text-slate-500">
+              <div className="text-center">
+                  <IconClock className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhuma tarefa ativa com datas definidas.</p>
+                  <p className="text-sm">Defina Início e Fim nas tarefas para visualizar aqui.</p>
+              </div>
+          </div>
+      );
+  }
+
+  // Calculate timeline bounds
+  const dates = ganttTasks.flatMap(t => [new Date(t.startDate!), new Date(t.endDate!)]);
+  const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
+  const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+  
+  // Add padding (2 days before, 5 days after)
+  minDate.setDate(minDate.getDate() - 2);
+  maxDate.setDate(maxDate.getDate() + 5);
+
+  const totalTime = maxDate.getTime() - minDate.getTime();
+
+  const getPos = (d: string) => {
+      const diff = new Date(d).getTime() - minDate.getTime();
+      return (diff / totalTime) * 100;
+  }
+
+  const getWidth = (start: string, end: string) => {
+      const s = new Date(start).getTime();
+      const e = new Date(end).getTime();
+      return ((e - s) / totalTime) * 100;
+  }
+
+  return (
+      <div className="h-full flex flex-col space-y-4">
+           <div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+              <div>
+                   <h2 className="text-xl font-bold text-white">Cronograma (Gantt)</h2>
+                   <p className="text-sm text-slate-400">Linha do tempo das demandas ativas</p>
+              </div>
+          </div>
+          
+          <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 p-4 overflow-hidden flex flex-col">
+               {/* Header Dates */}
+               <div className="flex justify-between text-xs text-slate-500 border-b border-slate-700 pb-2 mb-2">
+                   <span>{minDate.toLocaleDateString()}</span>
+                   <span>{maxDate.toLocaleDateString()}</span>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto custom-scrollbar relative space-y-3 pr-2">
+                   {/* Grid Lines (Approximate) */}
+                   <div className="absolute inset-0 flex pointer-events-none">
+                       {[0, 25, 50, 75, 100].map(p => (
+                           <div key={p} className="h-full border-l border-slate-800/50 absolute top-0 bottom-0" style={{ left: `${p}%` }}></div>
+                       ))}
+                   </div>
+
+                   {ganttTasks.map(task => {
+                       const left = getPos(task.startDate!);
+                       const width = Math.max(getWidth(task.startDate!, task.endDate!), 0.5); // Min width
+                       
+                       let color = "bg-indigo-600";
+                       if (task.type === 'Incidente') color = "bg-rose-600";
+                       if (task.type === 'Melhoria') color = "bg-emerald-600";
+                       if (task.priority === '1 - Crítica') color = "bg-red-600";
+
+                       return (
+                           <div key={task.id} className="relative h-10 flex items-center group">
+                               <div className="absolute left-0 right-0 h-8 bg-slate-800/30 rounded flex items-center px-2">
+                                    <span className="text-xs text-slate-400 w-32 truncate mr-2">{task.assignee || 'N/A'}</span>
+                               </div>
+                               <div 
+                                    className={`absolute h-6 rounded shadow-lg flex items-center px-2 cursor-pointer hover:brightness-110 transition-all ${color}`}
+                                    style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}
+                                    title={`${task.summary} \n${new Date(task.startDate!).toLocaleDateString()} - ${new Date(task.endDate!).toLocaleDateString()}`}
+                               >
+                                   <span className="text-[10px] font-bold text-white truncate sticky left-0">{task.summary}</span>
+                               </div>
+                           </div>
+                       )
+                   })}
+               </div>
+          </div>
+      </div>
+  )
+}
+
+const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
+    const [name, setName] = useState(user.name);
+    const [avatar, setAvatar] = useState(user.avatar || '');
+    const [password, setPassword] = useState(user.password || '');
+    
+    const handleSave = () => {
+        const updated = { ...user, name, avatar, password };
+        setUser(updated);
+        StorageService.updateUser(updated);
+        alert('Perfil atualizado com sucesso!');
+    }
+
+    const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                if(ev.target?.result) setAvatar(ev.target.result as string);
+            }
+            reader.readAsDataURL(file);
+        }
+    }
+
+    return (
+        <div className="max-w-3xl mx-auto space-y-6">
+             <h2 className="text-2xl font-bold text-white">Meu Perfil</h2>
+             <Card className="space-y-6">
+                 <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
+                      <div className="relative group">
+                          <div className="w-24 h-24 rounded-full bg-slate-700 border-2 border-indigo-500 overflow-hidden flex items-center justify-center">
+                              {avatar ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" /> : <span className="text-2xl font-bold text-indigo-300">{user.name.substring(0,2).toUpperCase()}</span>}
+                          </div>
+                          <label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full cursor-pointer">
+                              <IconUpload className="w-6 h-6 text-white" />
+                              <input type="file" className="hidden" accept="image/*" onChange={handleFile} />
+                          </label>
+                      </div>
+                      <div className="flex-1 space-y-4 w-full">
+                          <div>
+                              <label className="block text-xs text-slate-400 mb-1">Nome Completo</label>
+                              <input value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" />
+                          </div>
+                          <div>
+                              <label className="block text-xs text-slate-400 mb-1">Email</label>
+                              <input value={user.email} disabled className="w-full bg-slate-900/50 border border-slate-700 rounded p-2 text-slate-500 cursor-not-allowed" />
+                          </div>
+                          <div>
+                              <label className="block text-xs text-slate-400 mb-1">Senha</label>
+                              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" placeholder="Nova senha..." />
+                          </div>
+                      </div>
+                 </div>
+                 <div className="flex justify-end pt-4 border-t border-slate-700">
+                     <Button onClick={handleSave}>Salvar Alterações</Button>
+                 </div>
+             </Card>
+
+             <div className="border-t border-slate-800 pt-8">
+                 <h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3>
+                 <div className="bg-rose-900/10 border border-rose-900/30 p-4 rounded-lg flex items-center justify-between">
+                     <div>
+                         <p className="text-slate-300 font-medium">Resetar Dados</p>
+                         <p className="text-xs text-slate-500">Apaga todas as tarefas e restaura configurações padrão. Irreversível.</p>
+                     </div>
+                     <Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta?")) onResetData(); }}>Resetar Tudo</Button>
+                 </div>
+             </div>
+        </div>
+    )
+}
+
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -2955,7 +2865,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         </div>
     )
 }
-// ... (App export remains same) ...
+
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
