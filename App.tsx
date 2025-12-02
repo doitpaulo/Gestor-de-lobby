@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -1375,29 +1374,41 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     return data.sort((a, b) => a.totalHours - b.totalHours);
   }, [activeFilteredTasks, devs]);
 
-  // --- Incident by Automation Logic ---
+  // --- Incident by Automation Logic (Updated for Breakdown) ---
   const incidentByAutoData = useMemo(() => {
-    // For analysis of incidents, we usually want to see where the pain points are, 
-    // including potentially closed tickets if we are looking for patterns.
-    // However, Dashboard usually reflects current state. 
-    // To be useful as "Analysis", we should probably include closed tickets if they match the filter criteria.
-    // Let's use 'tasks' filtered by Dev, but specifically filtering for Type=Incidente.
+    // We use all tasks (filtered by dev if applicable) to show analysis of automation health
+    // Logic: Group by Automation Name -> Count Incidents vs Improvements vs Automations
     const relevantTasks = tasks.filter(t => {
+         // Respect dev filter if set, otherwise all
          const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || '');
-         return t.type === 'Incidente' && matchesDev;
+         // Filter out 'Closed' if you only want active analysis, OR keep them for history.
+         // Let's stick to 'Active' to match dashboard consistency, OR if user wants 'Analysis' maybe include all?
+         // Standard Dashboard usually implies Active. Let's use activeFilteredTasks but grouped by Auto Name.
+         // Wait, user asked for "Incidents per demand". Using activeFilteredTasks is safer for consistency.
+         return matchesDev && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
     });
 
-    const counts: Record<string, number> = {};
+    const grouped: Record<string, { name: string, Incidente: number, Melhoria: number, 'Nova Automação': number, total: number }> = {};
+
     relevantTasks.forEach(t => {
         // Use automationName (if exists), then subcategory, then category
         const name = t.automationName || t.subcategory || t.category || 'Não Classificado';
-        counts[name] = (counts[name] || 0) + 1;
+        
+        if (!grouped[name]) {
+            grouped[name] = { name, Incidente: 0, Melhoria: 0, 'Nova Automação': 0, total: 0 };
+        }
+        
+        if (t.type === 'Incidente') grouped[name].Incidente++;
+        else if (t.type === 'Melhoria') grouped[name].Melhoria++;
+        else if (t.type === 'Nova Automação') grouped[name]['Nova Automação']++;
+        
+        grouped[name].total++;
     });
 
-    return Object.entries(counts)
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 10); // Top 10
+    // Sort by Incidents Count Descending (Primary goal is Incident Analysis), then Total
+    return Object.values(grouped)
+        .sort((a, b) => b.Incidente - a.Incidente || b.total - a.total)
+        .slice(0, 15); // Top 15
   }, [tasks, filterDev]);
 
   // --- Widget Actions ---
@@ -1474,11 +1485,11 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 
     // Incident by Automation Slide
     if (incidentByAutoData.length > 0) {
-         addChartSlide("Top Automações com Incidentes", pres.ChartType.bar, [{
-             name: 'Incidentes',
-             labels: incidentByAutoData.map(d => d.name),
-             values: incidentByAutoData.map(d => d.value)
-         }], { barDir: 'bar', chartColors: ['f43f5e'], valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
+         const autoLabels = incidentByAutoData.map(d => d.name);
+         addChartSlide("Top Automações com Incidentes", pres.ChartType.bar, [
+             { name: 'Incidentes', labels: autoLabels, values: incidentByAutoData.map(d => d.Incidente) },
+             { name: 'Melhorias', labels: autoLabels, values: incidentByAutoData.map(d => d.Melhoria) }
+         ], { barDir: 'bar', barGrouping: 'stacked', chartColors: ['f43f5e', '10b981'], valAxisLabelColor: '94a3b8', catAxisLabelColor: '94a3b8' });
     }
 
     pres.writeFile({ fileName: "Nexus_OnePageReport.pptx" });
@@ -1511,21 +1522,28 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
           if (widget.type === 'incidentByAuto') {
               if (style === 'pie') return (
                   <PieChart>
-                      <Pie data={incidentByAutoData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#f43f5e" label>
-                          {incidentByAutoData.map((entry, index) => <Cell key={index} fill={['#f43f5e', '#fb7185', '#fda4af', '#e11d48'][index % 4]} />)}
+                      <Pie data={incidentByAutoData} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#f43f5e" label>
+                          {incidentByAutoData.map((entry, index) => <Cell key={index} fill={['#f43f5e', '#10b981', '#6366f1'][index % 3]} />)}
                       </Pie>
                       <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
                   </PieChart>
               );
-              // Default Bar
+              // Stacked Bar for Better Analysis
               return (
-                <BarChart data={incidentByAutoData} layout="vertical" margin={{ left: 40 }}>
+                <BarChart data={incidentByAutoData} layout="vertical" margin={{ left: 10, right: 30, top: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
-                    <XAxis type="number" stroke="#94a3b8" />
-                    <YAxis type="category" dataKey="name" width={150} stroke="#94a3b8" tick={{fontSize: 10}} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
-                    <Bar dataKey="value" fill="#f43f5e" radius={[0, 4, 4, 0]} barSize={20}>
-                        <LabelList dataKey="value" position="right" fill="#fff" />
+                    <XAxis type="number" stroke="#94a3b8" hide />
+                    <YAxis type="category" dataKey="name" width={180} stroke="#94a3b8" tick={{fontSize: 11, fill: '#cbd5e1'}} interval={0} />
+                    <Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} />
+                    <Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} />
+                    <Bar dataKey="Incidente" name="Incidentes" stackId="a" fill="#f43f5e" radius={[0, 0, 0, 0]} barSize={20}>
+                        <LabelList dataKey="Incidente" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} />
+                    </Bar>
+                    <Bar dataKey="Melhoria" name="Melhorias" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} barSize={20}>
+                        <LabelList dataKey="Melhoria" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} />
+                    </Bar>
+                    <Bar dataKey="Nova Automação" name="Novas Auto." stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20}>
+                        <LabelList dataKey="Nova Automação" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} />
                     </Bar>
                 </BarChart>
               );
