@@ -1376,16 +1376,11 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 
   // --- Incident by Automation Logic (Updated for Breakdown) ---
   const incidentByAutoData = useMemo(() => {
-    // We use all tasks (filtered by dev if applicable) to show analysis of automation health
-    // Logic: Group by Automation Name -> Count Incidents vs Improvements vs Automations
     const relevantTasks = tasks.filter(t => {
-         // Respect dev filter if set, otherwise all
          const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || '');
-         // Filter out 'Closed' if you only want active analysis, OR keep them for history.
-         // Let's stick to 'Active' to match dashboard consistency, OR if user wants 'Analysis' maybe include all?
-         // Standard Dashboard usually implies Active. Let's use activeFilteredTasks but grouped by Auto Name.
-         // Wait, user asked for "Incidents per demand". Using activeFilteredTasks is safer for consistency.
-         return matchesDev && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+         // User Request: Include All Statuses (History) but only Incidents and Improvements
+         const isTargetType = t.type === 'Incidente' || t.type === 'Melhoria';
+         return matchesDev && isTargetType;
     });
 
     const grouped: Record<string, { name: string, Incidente: number, Melhoria: number, 'Nova Automação': number, total: number }> = {};
@@ -1400,7 +1395,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
         
         if (t.type === 'Incidente') grouped[name].Incidente++;
         else if (t.type === 'Melhoria') grouped[name].Melhoria++;
-        else if (t.type === 'Nova Automação') grouped[name]['Nova Automação']++;
+        // Nova Automação will be 0 based on filter, but keeping structure ensures chart doesn't break
         
         grouped[name].total++;
     });
