@@ -348,7 +348,7 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     }
     
     // Check for generic text changes
-    const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type', 'projectPath'];
+    const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type', 'projectPath', 'automationName'];
     const hasTextChanged = textFields.some(field => (original as any)[field] !== (updated as any)[field]);
     
     if (hasTextChanged && changes.length === 0) { 
@@ -1389,8 +1389,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 
     const counts: Record<string, number> = {};
     relevantTasks.forEach(t => {
-        // Use subcategory as automation name, fallback to category or summary
-        const name = t.subcategory || t.category || 'Não Classificado';
+        // Use automationName (if exists), then subcategory, then category
+        const name = t.automationName || t.subcategory || t.category || 'Não Classificado';
         counts[name] = (counts[name] || 0) + 1;
     });
 
@@ -2286,7 +2286,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                                     className={`absolute h-6 rounded shadow-lg flex items-center px-2 cursor-pointer hover:brightness-110 transition-all ${color}`}
                                     style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}
                                     title={`${task.summary} \n${new Date(task.startDate!).toLocaleDateString()} - ${new Date(task.endDate!).toLocaleDateString()}`}
-                               >
+                                >
                                    <span className="text-[10px] font-bold text-white truncate sticky left-0">{task.summary}</span>
                                </div>
                            </div>
@@ -2585,6 +2585,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         startDate: '',
         endDate: '',
         projectPath: '', // Init new field
+        automationName: '', // Init automation name
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
     });
 
@@ -2739,16 +2740,28 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         </div>
                     </div>
                     
-                    {/* NEW: Project Path Field */}
-                    <div>
-                         <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta do Projeto (Drive/Rede)</label>
-                         <input 
-                            name="projectPath" 
-                            value={formData.projectPath || ''} 
-                            onChange={handleChange} 
-                            placeholder="Ex: G:\Projetos\ClienteX\AutomacaoFinanceira"
-                            className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs"
-                         />
+                    {/* NEW: Project Path & Automation Name Fields */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div>
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label>
+                             <input 
+                                name="automationName" 
+                                value={formData.automationName || ''} 
+                                onChange={handleChange} 
+                                placeholder="Ex: Robô Financeiro, SAP..."
+                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs"
+                             />
+                        </div>
+                         <div>
+                             <label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label>
+                             <input 
+                                name="projectPath" 
+                                value={formData.projectPath || ''} 
+                                onChange={handleChange} 
+                                placeholder="Ex: G:\Projetos\ClienteX..."
+                                className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs"
+                             />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
@@ -2983,6 +2996,7 @@ export default function App() {
         startDate: '',
         endDate: '',
         projectPath: '',
+        automationName: '',
         createdAt: new Date().toISOString(),
         requester: user?.name || 'Manual',
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }

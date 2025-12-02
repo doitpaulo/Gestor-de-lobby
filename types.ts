@@ -46,6 +46,9 @@ export interface Task {
   // New Field for Project Path
   projectPath?: string;
   
+  // New Field specifically for Automation Name
+  automationName?: string;
+
   // Kanban Ordering
   boardPosition?: number;
   

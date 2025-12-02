@@ -148,7 +148,8 @@ export const StorageService = {
           estimatedTime: existing.estimatedTime,
           actualTime: existing.actualTime,
           projectData: existing.projectData, // Preserve project lifecycle
-          projectPath: existing.projectPath // Preserve project path
+          projectPath: existing.projectPath, // Preserve project path
+          automationName: newTask.automationName || existing.automationName // Preserve automation name
         };
 
         taskMap.set(newTask.id, mergedTask);
