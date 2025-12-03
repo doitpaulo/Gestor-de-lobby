@@ -2218,97 +2218,243 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
 };
 
 const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
-  const ganttTasks = useMemo(() => {
-      return tasks.filter(t => t.startDate && t.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status))
-          .sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
-  }, [tasks]);
+    // Local Filter State
+    const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
+        search: '', 
+        type: [], 
+        priority: [], 
+        status: [], 
+        assignee: [] 
+    });
 
-  if (ganttTasks.length === 0) {
-      return (
-          <div className="h-full flex items-center justify-center text-slate-500">
-              <div className="text-center">
-                  <IconClock className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma tarefa ativa com datas definidas.</p>
-                  <p className="text-sm">Defina Início e Fim nas tarefas para visualizar aqui.</p>
-              </div>
-          </div>
-      );
-  }
+    const [viewMode, setViewMode] = useState<'Day' | 'Week' | 'Month'>('Day');
+    const [startDate, setStartDate] = useState(new Date());
 
-  // Calculate timeline bounds
-  const dates = ganttTasks.flatMap(t => [new Date(t.startDate!), new Date(t.endDate!)]);
-  const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
-  const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
-  
-  // Add padding (2 days before, 5 days after)
-  minDate.setDate(minDate.getDate() - 2);
-  maxDate.setDate(maxDate.getDate() + 5);
+    // 1. Filter Tasks
+    const ganttTasks = useMemo(() => {
+        return tasks.filter(t => {
+             // Must have start and end date for Gantt
+             if(!t.startDate || !t.endDate) return false;
 
-  const totalTime = maxDate.getTime() - minDate.getTime();
+             const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
+                                   t.id.toLowerCase().includes(filters.search.toLowerCase());
+             
+             const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
+             const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
+             const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
+             
+             let matchesAssignee = true;
+             if (filters.assignee.length > 0) {
+                 const hasUnassigned = filters.assignee.includes('Não Atribuído');
+                 if (hasUnassigned) {
+                     matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee);
+                 } else {
+                     matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee);
+                 }
+             }
 
-  const getPos = (d: string) => {
-      const diff = new Date(d).getTime() - minDate.getTime();
-      return (diff / totalTime) * 100;
-  }
+             return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
+        }).sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
+    }, [tasks, filters]);
 
-  const getWidth = (start: string, end: string) => {
-      const s = new Date(start).getTime();
-      const e = new Date(end).getTime();
-      return ((e - s) / totalTime) * 100;
-  }
+    // 2. Timeline Calculations
+    const { dates, columnWidth, totalWidth } = useMemo(() => {
+        const d = new Date(startDate);
+        const datesArr: Date[] = [];
+        let colW = 50;
 
-  return (
+        // Generate date range centered on startDate (or starting from it)
+        // Let's generate a fixed window based on mode
+        let count = 30; // Days to show
+        if (viewMode === 'Week') { count = 12; colW = 150; } // 12 Weeks
+        else if (viewMode === 'Month') { count = 12; colW = 200; } // 12 Months
+        else { count = 45; colW = 40; } // 45 Days
+
+        // Adjust Start Date to be slightly in past
+        const startOffset = viewMode === 'Day' ? 5 : 1; 
+        if (viewMode === 'Day') d.setDate(d.getDate() - startOffset);
+        if (viewMode === 'Week') d.setDate(d.getDate() - (startOffset * 7));
+        if (viewMode === 'Month') d.setMonth(d.getMonth() - startOffset);
+
+        for (let i = 0; i < count; i++) {
+            const next = new Date(d);
+            if (viewMode === 'Day') next.setDate(d.getDate() + i);
+            if (viewMode === 'Week') next.setDate(d.getDate() + (i * 7));
+            if (viewMode === 'Month') next.setMonth(d.getMonth() + i);
+            datesArr.push(next);
+        }
+
+        return { dates: datesArr, columnWidth: colW, totalWidth: datesArr.length * colW };
+    }, [startDate, viewMode]);
+
+    const handleShiftDate = (dir: number) => {
+        const newDate = new Date(startDate);
+        if (viewMode === 'Day') newDate.setDate(newDate.getDate() + (dir * 7));
+        if (viewMode === 'Week') newDate.setDate(newDate.getDate() + (dir * 28));
+        if (viewMode === 'Month') newDate.setMonth(newDate.getMonth() + (dir * 3));
+        setStartDate(newDate);
+    }
+
+    const getTaskPosition = (task: Task) => {
+        if (!task.startDate || !task.endDate || dates.length === 0) return { left: 0, width: 0 };
+        
+        const timelineStart = dates[0].getTime();
+        const timelineEnd = viewMode === 'Month' 
+            ? new Date(dates[dates.length-1].getFullYear(), dates[dates.length-1].getMonth() + 1, 0).getTime() 
+            : dates[dates.length-1].getTime() + (viewMode === 'Week' ? 7 : 1) * 86400000;
+
+        const taskStart = new Date(task.startDate).getTime();
+        const taskEnd = new Date(task.endDate).getTime();
+
+        // If task is outside view
+        if (taskEnd < timelineStart || taskStart > timelineEnd) return null;
+
+        const oneDay = 86400000;
+        let scaleFactor = 1; 
+        if (viewMode === 'Day') scaleFactor = columnWidth / oneDay;
+        if (viewMode === 'Week') scaleFactor = columnWidth / (oneDay * 7);
+        if (viewMode === 'Month') scaleFactor = columnWidth / (oneDay * 30); // Approx
+
+        // Calculate offset from timeline start
+        const offsetTime = Math.max(0, taskStart - timelineStart);
+        const left = offsetTime * scaleFactor;
+        
+        // Calculate visible width
+        // Clamp duration to visible area logic is complex, simplify:
+        const duration = taskEnd - taskStart;
+        const width = Math.max(4, duration * scaleFactor);
+
+        return { left, width };
+    }
+
+    return (
       <div className="h-full flex flex-col space-y-4">
-           <div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+           {/* Controls Header */}
+           <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
               <div>
-                   <h2 className="text-xl font-bold text-white">Cronograma (Gantt)</h2>
-                   <p className="text-sm text-slate-400">Linha do tempo das demandas ativas</p>
+                   <h2 className="text-xl font-bold text-white">Cronograma Interativo</h2>
+                   <p className="text-sm text-slate-400">Linha do tempo dinâmica com filtros</p>
+              </div>
+              <div className="flex gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">
+                  {['Day', 'Week', 'Month'].map((m) => (
+                      <button 
+                        key={m}
+                        onClick={() => setViewMode(m as any)}
+                        className={`px-4 py-1.5 rounded text-xs font-medium transition-all ${viewMode === m ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                      >
+                          {m === 'Day' ? 'Dia' : m === 'Week' ? 'Semana' : 'Mês'}
+                      </button>
+                  ))}
+              </div>
+              <div className="flex items-center gap-2">
+                  <button onClick={() => handleShiftDate(-1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5" /></button>
+                  <span className="text-sm font-mono text-slate-300 min-w-[100px] text-center">{startDate.toLocaleDateString()}</span>
+                  <button onClick={() => handleShiftDate(1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5 rotate-180" /></button>
               </div>
           </div>
           
-          <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 p-4 overflow-hidden flex flex-col">
-               {/* Header Dates */}
-               <div className="flex justify-between text-xs text-slate-500 border-b border-slate-700 pb-2 mb-2">
-                   <span>{minDate.toLocaleDateString()}</span>
-                   <span>{maxDate.toLocaleDateString()}</span>
-               </div>
+          <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+
+          {/* Main Gantt Area */}
+          <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col md:flex-row">
                
-               <div className="flex-1 overflow-y-auto custom-scrollbar relative space-y-3 pr-2">
-                   {/* Grid Lines (Approximate) */}
-                   <div className="absolute inset-0 flex pointer-events-none">
-                       {[0, 25, 50, 75, 100].map(p => (
-                           <div key={p} className="h-full border-l border-slate-800/50 absolute top-0 bottom-0" style={{ left: `${p}%` }}></div>
-                       ))}
+               {/* Fixed Sidebar (Task List) */}
+               <div className="w-64 flex-shrink-0 border-r border-slate-700 bg-slate-800/30 flex flex-col">
+                   <div className="h-10 border-b border-slate-700 flex items-center px-4 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                       Tarefas
                    </div>
+                   <div className="overflow-y-hidden flex-1 relative">
+                       {/* This div syncs scroll with the right side via JS usually, or we just let right side scroll body and this stays sticky. 
+                           For simplicity in React without heavy libs, we'll make the whole container scroll vertical, but split horizontal.
+                       */}
+                        {/* Actually, best approach for simple Gantt is a grid container */}
+                        <div className="absolute inset-0 overflow-y-auto custom-scrollbar no-scrollbar-vertical-sync"> 
+                             {ganttTasks.map((task, i) => (
+                                 <div key={task.id} className="h-10 border-b border-slate-700/50 flex items-center px-4 hover:bg-slate-800/50 transition-colors group cursor-pointer" title={task.summary}>
+                                     <div className="truncate text-xs font-medium text-slate-300 group-hover:text-white w-full">
+                                         <span className="text-slate-500 mr-2 opacity-50">{i+1}.</span>
+                                         {task.summary}
+                                     </div>
+                                 </div>
+                             ))}
+                        </div>
+                   </div>
+               </div>
 
-                   {ganttTasks.map(task => {
-                       const left = getPos(task.startDate!);
-                       const width = Math.max(getWidth(task.startDate!, task.endDate!), 0.5); // Min width
-                       
-                       let color = "bg-indigo-600";
-                       if (task.type === 'Incidente') color = "bg-rose-600";
-                       if (task.type === 'Melhoria') color = "bg-emerald-600";
-                       if (task.priority === '1 - Crítica') color = "bg-red-600";
+               {/* Timeline Scroll Area */}
+               <div className="flex-1 overflow-x-auto custom-scrollbar bg-slate-900 relative flex flex-col">
+                    
+                    {/* Header Row */}
+                    <div className="h-10 flex border-b border-slate-700 bg-slate-800 sticky top-0 z-10" style={{ width: totalWidth }}>
+                        {dates.map((d, i) => (
+                            <div key={i} className="flex-shrink-0 border-r border-slate-700 flex items-center justify-center text-[10px] text-slate-400 font-mono uppercase" style={{ width: columnWidth }}>
+                                {viewMode === 'Day' && `${d.getDate()}/${d.getMonth()+1}`}
+                                {viewMode === 'Week' && `Sem ${getWeekNumber(d)}`}
+                                {viewMode === 'Month' && d.toLocaleDateString('pt-BR', { month: 'short' })}
+                            </div>
+                        ))}
+                    </div>
 
-                       return (
-                           <div key={task.id} className="relative h-10 flex items-center group">
-                               <div className="absolute left-0 right-0 h-8 bg-slate-800/30 rounded flex items-center px-2">
-                                    <span className="text-xs text-slate-400 w-32 truncate mr-2">{task.assignee || 'N/A'}</span>
-                               </div>
-                               <div 
-                                    className={`absolute h-6 rounded shadow-lg flex items-center px-2 cursor-pointer hover:brightness-110 transition-all ${color}`}
-                                    style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}
-                                    title={`${task.summary} \n${new Date(task.startDate!).toLocaleDateString()} - ${new Date(task.endDate!).toLocaleDateString()}`}
-                                >
-                                   <span className="text-[10px] font-bold text-white truncate sticky left-0">{task.summary}</span>
-                               </div>
-                           </div>
-                       )
-                   })}
+                    {/* Timeline Body */}
+                    <div className="flex-1 relative" style={{ width: totalWidth }}>
+                         {/* Grid Lines Background */}
+                         <div className="absolute inset-0 flex pointer-events-none">
+                             {dates.map((_, i) => (
+                                 <div key={i} className="flex-shrink-0 h-full border-r border-slate-800/40" style={{ width: columnWidth }}></div>
+                             ))}
+                         </div>
+                         
+                         {/* Rows */}
+                         <div className="absolute inset-0">
+                             {ganttTasks.map((task) => {
+                                 const pos = getTaskPosition(task);
+                                 
+                                 // Determine Color
+                                 let color = "bg-indigo-600 border-indigo-500";
+                                 if (['Concluído', 'Resolvido'].includes(task.status)) color = "bg-emerald-600 border-emerald-500 opacity-60";
+                                 else if (task.priority === '1 - Crítica') color = "bg-rose-600 border-rose-500";
+                                 else if (task.type === 'Melhoria') color = "bg-teal-600 border-teal-500";
+
+                                 return (
+                                     <div key={task.id} className="h-10 border-b border-slate-700/30 relative w-full group hover:bg-white/5 transition-colors">
+                                          {pos && (
+                                              <div 
+                                                className={`absolute top-2 h-6 rounded-md shadow-lg border ${color} bg-opacity-90 hover:bg-opacity-100 transition-all cursor-pointer z-10 flex items-center px-2 overflow-hidden`}
+                                                style={{ left: pos.left, width: pos.width }}
+                                              >
+                                                  <span className="text-[10px] font-bold text-white whitespace-nowrap sticky left-2 drop-shadow-md">
+                                                      {task.assignee ? `${task.assignee.split(' ')[0]}: ` : ''}{task.summary}
+                                                  </span>
+                                                  
+                                                  {/* Tooltip */}
+                                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-800 border border-slate-600 text-white text-xs p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none w-max z-50">
+                                                      <p className="font-bold">{task.summary}</p>
+                                                      <p className="text-[10px] text-slate-400">{new Date(task.startDate!).toLocaleDateString()} - {new Date(task.endDate!).toLocaleDateString()}</p>
+                                                  </div>
+                                              </div>
+                                          )}
+                                     </div>
+                                 )
+                             })}
+                         </div>
+                    </div>
                </div>
           </div>
+          {ganttTasks.length === 0 && (
+               <div className="text-center p-8 text-slate-500 border border-dashed border-slate-700 rounded-xl">
+                   Nenhuma tarefa encontrada com data de início e fim definidos para os filtros selecionados.
+               </div>
+          )}
       </div>
-  )
+    )
+}
+
+function getWeekNumber(d: Date) {
+    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+    var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+    var weekNo = Math.ceil(( ( (d.getTime() - yearStart.getTime()) / 86400000) + 1)/7);
+    return weekNo;
 }
 
 const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
