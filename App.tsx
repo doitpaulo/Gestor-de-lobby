@@ -90,6 +90,29 @@ const DEFAULT_WORKFLOW: WorkflowPhase[] = [
     }
 ];
 
+// --- Widget Interface ---
+
+interface Widget {
+    id: string;
+    type: string;
+    title: string;
+    size: 'half' | 'full';
+    visible: boolean;
+    visualStyle?: 'bar' | 'pie' | 'line' | 'area';
+}
+
+const DEFAULT_WIDGETS: Widget[] = [
+    { id: 'w1', type: 'cards', title: 'Visão Geral', size: 'full', visible: true },
+    { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'w3', type: 'status', title: 'Status por Tipo', size: 'half', visible: true },
+    { id: 'w4', type: 'devType', title: 'Volume por Desenvolvedor', size: 'full', visible: true },
+    { id: 'w5', type: 'capacity', title: 'Capacidade & Sugestões', size: 'full', visible: true },
+    { id: 'w6', type: 'incidentByAuto', title: 'Top Incidentes por Sistema', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'w7', type: 'automationsByManager', title: 'Automações por Gerência', size: 'half', visible: true },
+    { id: 'w8', type: 'completedKPIs', title: 'KPIs de Entrega (Concluídos)', size: 'full', visible: true },
+    { id: 'w9', type: 'fteByManager', title: 'Valor FTE por Área', size: 'full', visible: true, visualStyle: 'bar' },
+];
+
 // --- Helper: Time Parser ---
 const parseDuration = (durationStr: string | undefined): number => {
     if (!durationStr) return 0;
@@ -363,23 +386,39 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
     return changes;
 };
 
-// --- Widget Interface ---
+// --- Custom Recharts Components ---
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-slate-900 border border-slate-700 p-3 rounded shadow-xl text-xs z-50">
+        <p className="font-bold text-slate-200 mb-2 border-b border-slate-700 pb-1">{label}</p>
+        {payload.map((p: any, idx: number) => (
+          <div key={idx} className="flex items-center gap-2 mb-1">
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color || p.fill }}></div>
+            <span className="text-slate-400 capitalize">{p.name}:</span>
+            <span className="text-slate-200 font-mono font-bold">{
+                typeof p.value === 'number' ? (Number.isInteger(p.value) ? p.value : p.value.toFixed(2)) : p.value
+            }</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
-interface Widget {
-    id: string;
-    type: string;
-    title: string;
-    size: 'half' | 'full';
-    visible: boolean;
-    visualStyle?: 'bar' | 'pie' | 'line' | 'area';
-}
+const renderCustomBarLabel = (props: any) => {
+  const { x, y, width, height, value } = props;
+  if (!value || value === 0) return null;
+  return (
+    <text x={x + width / 2} y={y + height / 2} fill="#fff" textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="bold" style={{ pointerEvents: 'none' }}>
+      {value}
+    </text>
+  );
+};
 
-// ... [ProjectReportView & ProjectFlowView & WorkflowEditor - No Changes] ...
-// Re-implementing them to keep context if file is fully replaced.
-// For brevity, I'll paste the full content, ensuring the new Dashboard Logic is correct.
 
 const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[] }) => {
-    // ... same content as previous ...
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
         search: '', 
         type: [], 
@@ -726,7 +765,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
 };
 
 const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig }: any) => {
-    // ... same logic ...
+    // ... same content as previous ...
     const [isConfigOpen, setIsConfigOpen] = useState(false);
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
         search: '', 
@@ -1003,56 +1042,8 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     );
 };
 
-// --- Dashboard View ---
-
-const DEFAULT_WIDGETS: Widget[] = [
-    { id: 'w1', type: 'cards', title: 'KPIs Gerais (Ativos)', size: 'full', visible: true },
-    { id: 'w2', type: 'priority', title: 'Demandas por Prioridade', size: 'half', visible: true, visualStyle: 'bar' },
-    { id: 'w3', type: 'status', title: 'Status x Tipo de Demanda', size: 'half', visible: true, visualStyle: 'bar' },
-    { id: 'w4', type: 'devType', title: 'Demanda por Desenvolvedor', size: 'half', visible: true, visualStyle: 'bar' },
-    { id: 'w5', type: 'capacity', title: 'Capacidade & Disponibilidade', size: 'half', visible: true },
-    { id: 'w6', type: 'completedKPIs', title: 'Total Concluído', size: 'full', visible: true },
-    { id: 'w7', type: 'incidentByAuto', title: 'Top Automações com Incidentes', size: 'full', visible: true, visualStyle: 'bar' },
-    { id: 'w8', type: 'automationsByManager', title: 'Novas Automações por Gerência', size: 'half', visible: true, visualStyle: 'bar' },
-    { id: 'w9', type: 'fteByManager', title: 'Valor FTE por Gerência', size: 'half', visible: true, visualStyle: 'bar' }
-];
-
-const renderCustomBarLabel = ({ x, y, width, height, value }: any) => {
-    if (!value || value === 0 || width < 15) return null;
-    return (
-        <text x={x + width / 2} y={y + height / 2 + 3} fill="#ffffff" textAnchor="middle" fontSize="10" fontWeight="bold">
-            {value}
-        </text>
-    );
-};
-
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    const total = payload.reduce((acc: number, p: any) => {
-        return p.dataKey !== 'total' ? acc + p.value : acc;
-    }, 0);
-
-    return (
-      <div className="bg-slate-800 border border-slate-600 p-3 rounded shadow-xl z-50">
-        <p className="text-slate-200 font-bold mb-2">{label}</p>
-        {payload.filter((p:any) => p.dataKey !== 'total').map((p: any) => (
-          <div key={p.name} className="flex items-center gap-2 text-xs mb-1">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }}></div>
-            <span className="text-slate-400">{p.name}:</span>
-            <span className="text-white font-mono">{p.value}</span>
-          </div>
-        ))}
-        {total > 0 && (
-            <div className="border-t border-slate-700 mt-2 pt-1 flex justify-between items-center">
-                <span className="text-slate-400 text-xs">Total</span>
-                <span className="text-white font-bold">{total}</span>
-            </div>
-        )}
-      </div>
-    );
-  }
-  return null;
-};
+// ... DashboardView and other components ...
+// [Skipping repeated code for brevity, ensuring context is kept for GanttView update]
 
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
@@ -1183,38 +1174,17 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     return Object.values(grouped).sort((a, b) => b.Incidente - a.Incidente || b.total - a.total).slice(0, 15); 
   }, [tasks, filterDev]);
 
-  // --- New KPI Logic: Automations By Manager ---
   const automationsByManagerData = useMemo(() => {
-      // Logic: Only active? Or all? User said "Quantidade de Novas automações por gerencia". Usually KPIs are total. 
-      // But dashboard convention is "Active" unless specified. 
-      // However, "Novas Automações" usually accumulate. Let's stick to active filtered for consistency with other widgets, 
-      // but maybe the user wants historical. I'll stick to activeFilteredTasks + completed if needed, but for now activeFilteredTasks 
-      // keeps it consistent with the "KPIs Gerais (Ativos)" card.
-      
       const relevant = activeFilteredTasks.filter(t => t.type === 'Nova Automação');
       const grouped: Record<string, number> = {};
-      
-      relevant.forEach(t => {
-          const area = t.managementArea || 'Sem Gerência';
-          grouped[area] = (grouped[area] || 0) + 1;
-      });
-
+      relevant.forEach(t => { const area = t.managementArea || 'Sem Gerência'; grouped[area] = (grouped[area] || 0) + 1; });
       return Object.entries(grouped).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
   }, [activeFilteredTasks]);
 
-  // --- New KPI Logic: FTE By Manager ---
   const fteByManagerData = useMemo(() => {
-      // Calculate total FTE sum by Manager
       const grouped: Record<string, number> = {};
       let total = 0;
-
-      activeFilteredTasks.forEach(t => {
-          const area = t.managementArea || 'Sem Gerência';
-          const fte = Number(t.fteValue) || 0;
-          grouped[area] = (grouped[area] || 0) + fte;
-          total += fte;
-      });
-
+      activeFilteredTasks.forEach(t => { const area = t.managementArea || 'Sem Gerência'; const fte = Number(t.fteValue) || 0; grouped[area] = (grouped[area] || 0) + fte; total += fte; });
       const chartData = Object.entries(grouped).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
       return { chartData, total };
   }, [activeFilteredTasks]);
@@ -1377,6 +1347,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     </div>
   );
 };
+
+// ... KanbanView, ListView ...
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   // ... same code ...
@@ -1627,12 +1599,112 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
         return { left, width };
     }
 
+    const handleExportExcel = () => {
+        const exportData = ganttTasks.map((t: Task) => ({
+            'ID': t.id,
+            'Tipo': t.type,
+            'Tarefa': t.summary,
+            'Responsável': t.assignee || 'N/A',
+            'Início': t.startDate ? new Date(t.startDate).toLocaleDateString() : '',
+            'Fim': t.endDate ? new Date(t.endDate).toLocaleDateString() : '',
+            'Status': t.status
+        }));
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Cronograma Gantt");
+        XLSX.writeFile(wb, "Nexus_Cronograma.xlsx");
+    };
+
+    const handleExportPPT = () => {
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+        
+        // Slide 1: List View
+        let slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Cronograma de Demandas", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+        slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 1.0, fontSize: 14, color: '94a3b8' });
+
+        const tableData: any[] = [
+            ['ID', 'Tarefa', 'Início', 'Fim', 'Status'].map(h => ({ text: h, options: { bold: true, fill: '1e293b', color: 'ffffff' } })),
+            ...ganttTasks.map(t => [
+                t.id, 
+                t.summary, 
+                t.startDate ? new Date(t.startDate).toLocaleDateString() : '-', 
+                t.endDate ? new Date(t.endDate).toLocaleDateString() : '-',
+                t.status
+            ])
+        ];
+        
+        // Chunk table data for slides if too long
+        const ROWS_PER_SLIDE = 12;
+        for (let i = 0; i < tableData.length - 1; i += ROWS_PER_SLIDE) {
+            if (i > 0) {
+                 slide = pres.addSlide();
+                 slide.background = { color: "0f172a" };
+                 slide.addText("Cronograma (Cont.)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
+            }
+            const chunk = [tableData[0], ...tableData.slice(i + 1, i + 1 + ROWS_PER_SLIDE)];
+            slide.addTable(chunk, { x: 0.5, y: 1.5, w: '90%', colW: [1.5, 5, 1.5, 1.5, 2], color: 'cbd5e1', fontSize: 10, border: { pt: 0, pb: 0.5, color: '334155' } });
+        }
+
+        // Slide for Visual Timeline (Simplified)
+        if (ganttTasks.length > 0) {
+             const visualSlide = pres.addSlide();
+             visualSlide.background = { color: "0f172a" };
+             visualSlide.addText("Linha do Tempo (Visual - Top 15)", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
+             
+             // Define limits based on first 15 tasks to fit slide
+             const tasksToDraw = ganttTasks.slice(0, 15);
+             const minDate = new Date(Math.min(...tasksToDraw.map(t => new Date(t.startDate!).getTime())));
+             const maxDate = new Date(Math.max(...tasksToDraw.map(t => new Date(t.endDate!).getTime())));
+             const totalDuration = maxDate.getTime() - minDate.getTime();
+             const chartX = 0.5; const chartW = 12; // inches
+             
+             tasksToDraw.forEach((task, idx) => {
+                 const start = new Date(task.startDate!).getTime();
+                 const end = new Date(task.endDate!).getTime();
+                 const offset = start - minDate.getTime();
+                 const duration = end - start;
+                 
+                 const xPos = chartX + (offset / totalDuration) * chartW;
+                 const width = Math.max(0.1, (duration / totalDuration) * chartW);
+                 const yPos = 1.5 + (idx * 0.4);
+                 
+                 let barColor = '6366f1'; // Indigo
+                 if (task.type === 'Incidente') barColor = 'e11d48'; // Rose
+                 if (task.type === 'Melhoria') barColor = '10b981'; // Emerald
+                 
+                 visualSlide.addShape(pres.ShapeType.rect, { 
+                     x: xPos, y: yPos, w: width, h: 0.25, 
+                     fill: { color: barColor }, 
+                     line: { color: 'ffffff', width: 0.5 }
+                 });
+                 visualSlide.addText(task.summary, {
+                     x: 0.5, y: yPos - 0.15, fontSize: 9, color: 'cbd5e1'
+                 });
+             });
+             
+             // Draw Axis line
+             visualSlide.addShape(pres.ShapeType.line, { x: 0.5, y: 1.2, w: 12, h: 0, line: { color: '94a3b8', width: 1 } });
+             visualSlide.addText(minDate.toLocaleDateString(), { x: 0.5, y: 1.25, fontSize: 10, color: '94a3b8' });
+             visualSlide.addText(maxDate.toLocaleDateString(), { x: 12, y: 1.25, fontSize: 10, color: '94a3b8' });
+        }
+
+        pres.writeFile({ fileName: "Nexus_Gantt_Presentation.pptx" });
+    };
+
     return (
       <div className="h-full flex flex-col space-y-4">
            <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
               <div><h2 className="text-xl font-bold text-white">Cronograma Interativo</h2><p className="text-sm text-slate-400">Linha do tempo dinâmica com filtros</p></div>
               <div className="flex gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">{['Day', 'Week', 'Month'].map((m) => (<button key={m} onClick={() => setViewMode(m as any)} className={`px-4 py-1.5 rounded text-xs font-medium transition-all ${viewMode === m ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>{m === 'Day' ? 'Dia' : m === 'Week' ? 'Semana' : 'Mês'}</button>))}</div>
-              <div className="flex items-center gap-2"><button onClick={() => handleShiftDate(-1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5" /></button><span className="text-sm font-mono text-slate-300 min-w-[100px] text-center">{startDate.toLocaleDateString()}</span><button onClick={() => handleShiftDate(1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5 rotate-180" /></button></div>
+              <div className="flex items-center gap-2">
+                  <Button onClick={handleExportExcel} variant="success" className="px-3 py-1 text-xs"><IconDownload className="w-3 h-3" /> Excel</Button>
+                  <Button onClick={handleExportPPT} variant="primary" className="px-3 py-1 text-xs"><IconDownload className="w-3 h-3" /> PPT</Button>
+                  <div className="w-px h-6 bg-slate-600 mx-2"></div>
+                  <button onClick={() => handleShiftDate(-1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5" /></button><span className="text-sm font-mono text-slate-300 min-w-[100px] text-center">{startDate.toLocaleDateString()}</span><button onClick={() => handleShiftDate(1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5 rotate-180" /></button>
+              </div>
           </div>
           <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
           <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col md:flex-row">
@@ -1745,6 +1817,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 };
 
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
+    // ... same code ...
     const [formData, setFormData] = useState<Task>(task || {
         id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined,
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
