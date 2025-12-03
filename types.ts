@@ -49,6 +49,10 @@ export interface Task {
   // New Field specifically for Automation Name
   automationName?: string;
 
+  // New KPI Fields
+  fteValue?: number; // Valor FTE
+  managementArea?: string; // Gerencia
+
   // Kanban Ordering
   boardPosition?: number;
   
