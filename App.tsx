@@ -34,6 +34,18 @@ const DEFAULT_WORKFLOW: WorkflowPhase[] = [
         activities: ['Validar Business Case', 'Elaborar Business Case']
     },
     {
+        id: 'phase_backlog',
+        name: 'Backlog',
+        statuses: [
+            'Não iniciado',
+            'Backlog',
+            'Priorizado',
+            'Em Refinamento',
+            'Concluído'
+        ],
+        activities: ['Priorização', 'Refinamento Técnico', 'Estimativa Macro']
+    },
+    {
         id: '2',
         name: 'Fluxograma do Processo',
         statuses: [
@@ -713,7 +725,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                          {renderChart() as any}
                      </ResponsiveContainer>
                  </div>
-            </div>
+             </div>
         )
     };
 
@@ -958,6 +970,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                                          else if (statusLower.includes('aguardando')) statusColor = "text-orange-400 font-bold";
                                          else if (statusLower.includes('validar')) statusColor = "text-blue-400";
                                          else if (statusLower.includes('elaborar') || statusLower.includes('executar')) statusColor = "text-yellow-400";
+                                         else if (statusLower.includes('backlog')) statusColor = "text-purple-400";
 
                                          return (
                                              <td key={phase.id} className={`p-2 border-y first:border-l last:border-r border-slate-700/50 text-center relative`}>
@@ -1515,7 +1528,13 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
              {selected.size > 0 ? (
                  <>
                     <span className="text-sm text-slate-300 mr-2">{selected.size} selecionados</span>
-                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('status', e.target.value)}><option value="">Mudar Status</option><option value="Novo">Novo</option><option value="Em Atendimento">Em Atendimento</option><option value="Resolvido">Resolvido</option></select>
+                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('status', e.target.value)}>
+                        <option value="">Mudar Status</option>
+                        <option value="Novo">Novo</option>
+                        <option value="Backlog">Backlog</option>
+                        <option value="Em Atendimento">Em Atendimento</option>
+                        <option value="Resolvido">Resolvido</option>
+                    </select>
                     <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('assign', e.target.value)}><option value="">Atribuir Dev</option>{devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select>
                     <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-2 px-3">Excluir</Button>
                  </>
@@ -1862,7 +1881,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div>
-                        <div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div>
+                        <div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div>
                     </div>
                     
                     {/* Management and FTE Fields */}
