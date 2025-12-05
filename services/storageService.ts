@@ -1,12 +1,14 @@
 
-import { Task, Developer, User, WorkflowPhase } from '../types';
+
+import { Task, Developer, User, WorkflowPhase, Robot } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
   DEVS: 'nexus_devs_v2',
   USER: 'nexus_user_active', // Active session
   REGISTRY: 'nexus_users_registry', // All registered users
-  WORKFLOW: 'nexus_workflow_config_v4'
+  WORKFLOW: 'nexus_workflow_config_v4',
+  ROBOTS: 'nexus_robots_v1'
 };
 
 export const StorageService = {
@@ -31,6 +33,7 @@ export const StorageService = {
   clearTasks: () => {
     try {
         localStorage.removeItem(KEYS.TASKS);
+        localStorage.removeItem(KEYS.ROBOTS);
     } catch (e) {
         console.error("Error clearing tasks", e);
     }
@@ -56,6 +59,20 @@ export const StorageService = {
 
   saveDevs: (devs: Developer[]) => {
     localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
+  },
+
+  // --- Robots ---
+  getRobots: (): Robot[] => {
+      try {
+          const data = localStorage.getItem(KEYS.ROBOTS);
+          return data ? JSON.parse(data) : [];
+      } catch {
+          return [];
+      }
+  },
+
+  saveRobots: (robots: Robot[]) => {
+      localStorage.setItem(KEYS.ROBOTS, JSON.stringify(robots));
   },
 
   // --- Workflow Config ---

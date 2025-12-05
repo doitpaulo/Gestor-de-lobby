@@ -1,5 +1,6 @@
+
 import * as XLSX from 'xlsx';
-import { Task, TaskType, Priority } from '../types';
+import { Task, TaskType, Priority, Robot } from '../types';
 
 export const ExcelService = {
   parseFile: async (file: File, defaultType?: TaskType): Promise<Task[]> => {
@@ -23,6 +24,38 @@ export const ExcelService = {
       };
       reader.onerror = (error) => reject(error);
       reader.readAsArrayBuffer(file);
+    });
+  },
+
+  parseRobotFile: async (file: File): Promise<Robot[]> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = e.target?.result;
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet, { raw: false });
+                
+                const robots: Robot[] = json.map((row: any) => {
+                     return {
+                         id: `rpa-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+                         name: row['NOME DO ROBÔ'] || row['Nome'] || 'Robô Sem Nome',
+                         folder: row['PASTA QUE ESTÁ ARMAZENADO'] || row['Pasta'] || '',
+                         status: (row['SITUAÇÃO'] || row['Status'] || 'DESATIVO').toUpperCase(),
+                         developer: row['DESENVOLVEDOR'] || row['Desenvolvedor'] || 'N/A',
+                         owners: row['OWNERS'] || row['Owners'] || 'N/A',
+                         area: row['ÁREA'] || row['Area'] || 'N/A'
+                     };
+                });
+                resolve(robots);
+            } catch (error) {
+                reject(error);
+            }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
     });
   }
 };

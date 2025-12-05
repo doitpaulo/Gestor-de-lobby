@@ -1,4 +1,5 @@
 
+
 export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
 export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog';
@@ -61,6 +62,16 @@ export interface Task {
 
   // Audit Log
   history?: HistoryEntry[];
+}
+
+export interface Robot {
+    id: string;
+    name: string;      // NOME DO ROBÔ
+    folder: string;    // PASTA QUE ESTÁ ARMAZENADO
+    status: string;    // SITUAÇÃO (ATIVO/DESATIVO)
+    developer: string; // DESENVOLVEDOR
+    owners: string;    // OWNERS
+    area: string;      // ÁREA
 }
 
 export interface Developer {

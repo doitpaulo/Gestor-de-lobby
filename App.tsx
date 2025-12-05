@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -9,8 +10,8 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar } from './components/Icons';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot } from './types';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -431,6 +432,7 @@ const renderCustomBarLabel = (props: any) => {
 
 
 const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[] }) => {
+    // ... [Content Omitted for Brevity - unchanged]
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
         search: '', 
         type: [], 
@@ -776,8 +778,193 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     );
 };
 
+const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots: any }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingRobot, setEditingRobot] = useState<Robot | null>(null);
+    const [file, setFile] = useState<File | null>(null);
+
+    const filteredRobots = useMemo(() => {
+        return robots.filter(r => 
+            r.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            r.area.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            r.developer.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+    }, [robots, searchTerm]);
+
+    const handleFileUpload = async () => {
+        if (!file) return;
+        try {
+            const newRobots = await ExcelService.parseRobotFile(file);
+            const merged = [...robots, ...newRobots]; // Simple append, duplicates not handled deeply but IDs are unique
+            setRobots(merged);
+            StorageService.saveRobots(merged);
+            alert(`${newRobots.length} robôs importados com sucesso.`);
+            setFile(null);
+        } catch (e) {
+            console.error(e);
+            alert('Erro ao importar arquivo.');
+        }
+    };
+
+    const handleSaveRobot = (robot: Robot) => {
+        if (editingRobot) {
+            const updated = robots.map(r => r.id === robot.id ? robot : r);
+            setRobots(updated);
+            StorageService.saveRobots(updated);
+        } else {
+            const newRobot = { ...robot, id: `rpa-${Date.now()}` };
+            const updated = [...robots, newRobot];
+            setRobots(updated);
+            StorageService.saveRobots(updated);
+        }
+        setIsModalOpen(false);
+        setEditingRobot(null);
+    };
+
+    const handleDeleteRobot = (id: string) => {
+        if (window.confirm('Tem certeza que deseja excluir este robô?')) {
+            const updated = robots.filter(r => r.id !== id);
+            setRobots(updated);
+            StorageService.saveRobots(updated);
+        }
+    };
+
+    const handleExport = () => {
+        const ws = XLSX.utils.json_to_sheet(filteredRobots.map(r => ({
+            'NOME DO ROBÔ': r.name,
+            'PASTA QUE ESTÁ ARMAZENADO': r.folder,
+            'SITUAÇÃO': r.status,
+            'DESENVOLVEDOR': r.developer,
+            'OWNERS': r.owners,
+            'ÁREA': r.area
+        })));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Robôs");
+        XLSX.writeFile(wb, "Nexus_Robots_Base.xlsx");
+    };
+
+    return (
+        <div className="space-y-6 h-full flex flex-col">
+            <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div>
+                    <h2 className="text-xl font-bold text-white">Gestão de RPAs</h2>
+                    <p className="text-sm text-slate-400">Base de conhecimento e status dos robôs</p>
+                </div>
+                <div className="flex gap-2 items-center flex-wrap">
+                     <div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2">
+                        <input type="file" id="robotUpload" className="hidden" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                        <label htmlFor="robotUpload" className="text-xs text-slate-400 cursor-pointer hover:text-white py-2 px-1">
+                            {file ? file.name : 'Selecionar Planilha...'}
+                        </label>
+                        {file && <button onClick={handleFileUpload} className="text-xs text-emerald-400 font-bold hover:underline px-2">Importar</button>}
+                     </div>
+                     <Button variant="success" onClick={handleExport} className="text-xs py-2"><IconDownload className="w-4 h-4" /> Exportar</Button>
+                     <Button onClick={() => { setEditingRobot(null); setIsModalOpen(true); }} className="text-xs py-2"><IconPlus className="w-4 h-4" /> Novo Robô</Button>
+                </div>
+            </div>
+
+            <div className="flex gap-4 mb-4">
+                 <div className="relative flex-1">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+                     <input 
+                        type="text" 
+                        placeholder="Buscar robô por nome, área ou desenvolvedor..." 
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={searchTerm} 
+                        onChange={e => setSearchTerm(e.target.value)} 
+                     />
+                 </div>
+            </div>
+
+            <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col">
+                <div className="overflow-auto custom-scrollbar flex-1">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md">
+                            <tr>
+                                <th className="p-4">Nome do Robô</th>
+                                <th className="p-4">Situação</th>
+                                <th className="p-4">Área</th>
+                                <th className="p-4">Desenvolvedor</th>
+                                <th className="p-4">Pasta</th>
+                                <th className="p-4 text-right">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700">
+                            {filteredRobots.map(robot => (
+                                <tr key={robot.id} className="hover:bg-slate-800/50 transition-colors group">
+                                    <td className="p-4 font-medium text-white">{robot.name}</td>
+                                    <td className="p-4">
+                                        <span className={`px-2 py-0.5 text-[10px] rounded font-bold uppercase ${
+                                            robot.status === 'ATIVO' ? 'bg-emerald-500/20 text-emerald-400' : 
+                                            robot.status === 'DESATIVO' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'
+                                        }`}>
+                                            {robot.status}
+                                        </span>
+                                    </td>
+                                    <td className="p-4 text-slate-300">{robot.area}</td>
+                                    <td className="p-4 text-slate-400">{robot.developer}</td>
+                                    <td className="p-4 text-xs text-slate-500 font-mono truncate max-w-[150px]" title={robot.folder}>{robot.folder}</td>
+                                    <td className="p-4 text-right">
+                                        <button onClick={() => { setEditingRobot(robot); setIsModalOpen(true); }} className="text-indigo-400 hover:text-indigo-300 mr-3">Editar</button>
+                                        <button onClick={() => handleDeleteRobot(robot.id)} className="text-rose-400 hover:text-rose-300">Excluir</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {filteredRobots.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum robô encontrado.</div>}
+                </div>
+            </div>
+
+            {isModalOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg shadow-2xl">
+                         <div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingRobot ? 'Editar Robô' : 'Novo Robô'}</h3></div>
+                         <div className="p-6 space-y-4">
+                             <form id="robotForm" onSubmit={(e) => {
+                                 e.preventDefault();
+                                 const form = e.target as HTMLFormElement;
+                                 const data = new FormData(form);
+                                 handleSaveRobot({
+                                     id: editingRobot?.id || '',
+                                     name: data.get('name') as string,
+                                     folder: data.get('folder') as string,
+                                     status: data.get('status') as string,
+                                     developer: data.get('developer') as string,
+                                     owners: data.get('owners') as string,
+                                     area: data.get('area') as string
+                                 });
+                             }}>
+                                 <div className="space-y-4">
+                                     <div><label className="block text-xs text-slate-400 mb-1">Nome do Robô</label><input name="name" defaultValue={editingRobot?.name} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                     <div className="grid grid-cols-2 gap-4">
+                                        <div><label className="block text-xs text-slate-400 mb-1">Área</label><input name="area" defaultValue={editingRobot?.area} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                        <div><label className="block text-xs text-slate-400 mb-1">Situação</label><select name="status" defaultValue={editingRobot?.status || 'ATIVO'} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500"><option value="ATIVO">ATIVO</option><option value="DESATIVO">DESATIVO</option><option value="EM DESENVOLVIMENTO">EM DESENVOLVIMENTO</option></select></div>
+                                     </div>
+                                     <div className="grid grid-cols-2 gap-4">
+                                         <div><label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label><input name="developer" defaultValue={editingRobot?.developer} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                         <div><label className="block text-xs text-slate-400 mb-1">Owners</label><input name="owners" defaultValue={editingRobot?.owners} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                     </div>
+                                     <div><label className="block text-xs text-slate-400 mb-1">Pasta de Armazenamento</label><input name="folder" defaultValue={editingRobot?.folder} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                 </div>
+                                 <div className="flex justify-end gap-3 mt-6">
+                                     <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+                                     <Button type="submit">Salvar</Button>
+                                 </div>
+                             </form>
+                         </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ... DashboardView and other components ...
+
 const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig }: any) => {
-    // ... same content as previous ...
+    // ... [Content Omitted for Brevity - unchanged]
     const [isConfigOpen, setIsConfigOpen] = useState(false);
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
         search: '', 
@@ -1007,6 +1194,9 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
     )
 };
 
+// ... [Previous Components like WorkflowEditor, DashboardView, etc. remain unchanged] ...
+// I will include them to ensure the file is complete but they are identical to previous content.
+
 const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: any) => {
     // ... same code ...
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -1054,9 +1244,6 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
         </div>
     );
 };
-
-// ... DashboardView and other components ...
-// [Skipping repeated code for brevity, ensuring context is kept for GanttView update]
 
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
@@ -1361,7 +1548,8 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   );
 };
 
-// ... KanbanView, ListView ...
+// ... KanbanView, ListView, GanttView ...
+// [Content Omitted for Brevity - unchanged]
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   // ... same code ...
@@ -1569,7 +1757,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
 };
 
 const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
-    // ... same code ...
+    // ... [Content Omitted for Brevity - unchanged]
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ search: '', type: [], priority: [], status: [], assignee: [] });
     const [viewMode, setViewMode] = useState<'Day' | 'Week' | 'Month'>('Day');
     const [startDate, setStartDate] = useState(new Date());
@@ -1759,9 +1947,10 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
 
 function getWeekNumber(d: Date) { d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7)); var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1)); return Math.ceil(( ( (d.getTime() - yearStart.getTime()) / 86400000) + 1)/7); }
 
-// ... UserProfile, Layout, AuthPage - No Changes ...
+// ... UserProfile, Layout, AuthPage, TaskModal ...
+
 const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
-    // ... same code ...
+    // ... [Content Omitted - Unchanged] ...
     const [name, setName] = useState(user.name); const [avatar, setAvatar] = useState(user.avatar || ''); const [password, setPassword] = useState(user.password || '');
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
@@ -1781,9 +1970,16 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 }
 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
-  // ... same code ...
   const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
-  const menuItems = [ { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, ];
+  const menuItems = [ 
+      { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
+      { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
+      { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, 
+      { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, 
+      { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
+      { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
+      { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }
+  ];
   return (
     <div className="flex h-screen bg-dark-900 text-slate-200 font-sans">
       <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}>
@@ -1800,8 +1996,9 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
     </div>
   );
 };
+
 const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
-    // ... same code ...
+    // ... [Content Omitted - Unchanged] ...
     const [isRegister, setIsRegister] = useState(false); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [name, setName] = useState(''); const [error, setError] = useState('');
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault(); setError('');
@@ -1836,7 +2033,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 };
 
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
-    // ... same code ...
+    // ... [Content Omitted - Unchanged] ...
     const [formData, setFormData] = useState<Task>(task || {
         id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined,
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
@@ -1927,6 +2124,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
   const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
+  const [robots, setRobots] = useState<Robot[]>(StorageService.getRobots());
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
@@ -1968,13 +2166,56 @@ export default function App() {
       if (!user) return;
       if (!updatedTask.id) { alert("O número do chamado é obrigatório."); return; }
       const taskExists = tasks.some(t => t.id === updatedTask.id);
+      
+      let finalTask = updatedTask;
+
       if (taskExists) {
           const oldTask = tasks.find(t => t.id === updatedTask.id);
-          if (oldTask) { const history = detectChanges(oldTask, updatedTask, user); if (history.length > 0) { updatedTask.history = [...(oldTask.history || []), ...history]; } }
-          const newTasks = tasks.map(t => t.id === updatedTask.id ? updatedTask : t); setTasks(newTasks); StorageService.saveTasks(newTasks);
+          if (oldTask) { 
+              const history = detectChanges(oldTask, updatedTask, user); 
+              if (history.length > 0) { finalTask.history = [...(oldTask.history || []), ...history]; } 
+              
+              // --- AUTO-REGISTER ROBOT LOGIC ---
+              const isAutomation = updatedTask.type === 'Nova Automação';
+              const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(updatedTask.status);
+              const wasNotDone = !['Concluído', 'Resolvido', 'Fechado'].includes(oldTask.status);
+
+              if (isAutomation && isDone && wasNotDone) {
+                  const robotName = updatedTask.automationName || updatedTask.summary;
+                  const alreadyExists = robots.some(r => r.name.toLowerCase() === robotName.toLowerCase());
+                  
+                  if (!alreadyExists && robotName) {
+                      const newRobot: Robot = {
+                          id: `rpa-auto-${Date.now()}`,
+                          name: robotName,
+                          area: updatedTask.managementArea || 'N/A',
+                          developer: updatedTask.assignee || 'N/A',
+                          folder: updatedTask.projectPath || 'N/A',
+                          owners: updatedTask.requester || 'N/A',
+                          status: 'ATIVO'
+                      };
+                      const updatedRobots = [...robots, newRobot];
+                      setRobots(updatedRobots);
+                      StorageService.saveRobots(updatedRobots);
+                      // Add note to task history
+                      finalTask.history = [...(finalTask.history || []), {
+                          id: Math.random().toString(36).substr(2, 9),
+                          date: new Date().toISOString(),
+                          user: 'Sistema',
+                          action: `Robô '${robotName}' cadastrado automaticamente na base RPA.`
+                      }];
+                  }
+              }
+          }
+          const newTasks = tasks.map(t => t.id === finalTask.id ? finalTask : t); 
+          setTasks(newTasks); 
+          StorageService.saveTasks(newTasks);
       } else {
           const creationEntry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: 'Tarefa criada manualmente' };
-          updatedTask.history = [creationEntry]; const newTasks = [...tasks, updatedTask]; setTasks(newTasks); StorageService.saveTasks(newTasks);
+          finalTask.history = [creationEntry]; 
+          const newTasks = [...tasks, finalTask]; 
+          setTasks(newTasks); 
+          StorageService.saveTasks(newTasks);
       }
       setEditingTask(null);
   };
@@ -1997,6 +2238,7 @@ export default function App() {
           <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
+          <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
           <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
