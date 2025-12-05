@@ -72,6 +72,9 @@ export interface Robot {
     developer: string; // DESENVOLVEDOR
     owners: string;    // OWNERS
     area: string;      // ÁREA
+    // New fields
+    fte?: number;      // FTE
+    ticketNumber?: string; // NÚMERO DO CHAMADO
 }
 
 export interface Developer {

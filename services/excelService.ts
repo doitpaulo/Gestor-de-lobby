@@ -1,4 +1,5 @@
 
+
 import * as XLSX from 'xlsx';
 import { Task, TaskType, Priority, Robot } from '../types';
 
@@ -46,7 +47,9 @@ export const ExcelService = {
                          status: (row['SITUAÇÃO'] || row['Status'] || 'DESATIVO').toUpperCase(),
                          developer: row['DESENVOLVEDOR'] || row['Desenvolvedor'] || 'N/A',
                          owners: row['OWNERS'] || row['Owners'] || 'N/A',
-                         area: row['ÁREA'] || row['Area'] || 'N/A'
+                         area: row['ÁREA'] || row['Area'] || 'N/A',
+                         fte: parseFloat(row['FTE'] || row['fte'] || '0'),
+                         ticketNumber: row['NÚMERO DO CHAMADO'] || row['CHAMADO'] || row['Ticket'] || ''
                      };
                 });
                 resolve(robots);

@@ -780,23 +780,50 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
 
 const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots: any }) => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('Todos');
+    const [areaFilter, setAreaFilter] = useState('Todas');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingRobot, setEditingRobot] = useState<Robot | null>(null);
     const [file, setFile] = useState<File | null>(null);
 
+    const areas = useMemo(() => {
+        const unique = new Set(robots.map(r => r.area).filter(Boolean));
+        return ['Todas', ...Array.from(unique).sort()];
+    }, [robots]);
+
+    const statuses = ['Todos', 'ATIVO', 'DESATIVO', 'EM DESENVOLVIMENTO'];
+
     const filteredRobots = useMemo(() => {
-        return robots.filter(r => 
-            r.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            r.area.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            r.developer.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [robots, searchTerm]);
+        return robots.filter(r => {
+            const matchSearch = r.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                r.developer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                r.area.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            const matchStatus = statusFilter === 'Todos' || r.status === statusFilter;
+            const matchArea = areaFilter === 'Todas' || r.area === areaFilter;
+
+            return matchSearch && matchStatus && matchArea;
+        });
+    }, [robots, searchTerm, statusFilter, areaFilter]);
+
+    // Dashboard Data
+    const statusData = useMemo(() => {
+        const counts: Record<string, number> = {};
+        filteredRobots.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+        return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    }, [filteredRobots]);
+
+    const areaData = useMemo(() => {
+        const counts: Record<string, number> = {};
+        filteredRobots.forEach(r => { counts[r.area] = (counts[r.area] || 0) + 1; });
+        return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
+    }, [filteredRobots]);
 
     const handleFileUpload = async () => {
         if (!file) return;
         try {
             const newRobots = await ExcelService.parseRobotFile(file);
-            const merged = [...robots, ...newRobots]; // Simple append, duplicates not handled deeply but IDs are unique
+            const merged = [...robots, ...newRobots]; 
             setRobots(merged);
             StorageService.saveRobots(merged);
             alert(`${newRobots.length} robôs importados com sucesso.`);
@@ -837,7 +864,9 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
             'SITUAÇÃO': r.status,
             'DESENVOLVEDOR': r.developer,
             'OWNERS': r.owners,
-            'ÁREA': r.area
+            'ÁREA': r.area,
+            'FTE': r.fte || 0,
+            'CHAMADO': r.ticketNumber || ''
         })));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Robôs");
@@ -845,7 +874,7 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
     };
 
     return (
-        <div className="space-y-6 h-full flex flex-col">
+        <div className="space-y-6 h-full flex flex-col pb-20">
             <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
                 <div>
                     <h2 className="text-xl font-bold text-white">Gestão de RPAs</h2>
@@ -864,17 +893,66 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
                 </div>
             </div>
 
-            <div className="flex gap-4 mb-4">
+            {/* Dashboard Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card className="h-64 flex flex-col">
+                    <h3 className="text-sm font-bold text-slate-300 mb-2">Distribuição por Status</h3>
+                    <div className="flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label>
+                                    {statusData.map((entry, index) => <Cell key={index} fill={entry.name === 'ATIVO' ? '#10b981' : entry.name === 'DESATIVO' ? '#f43f5e' : '#f59e0b'} />)}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                                <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize:'10px'}} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </Card>
+                <Card className="h-64 flex flex-col">
+                    <h3 className="text-sm font-bold text-slate-300 mb-2">Robôs por Área</h3>
+                    <div className="flex-1">
+                         <ResponsiveContainer width="100%" height="100%">
+                             <BarChart data={areaData} layout="vertical" margin={{ left: 20 }}>
+                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
+                                 <XAxis type="number" stroke="#94a3b8" hide />
+                                 <YAxis type="category" dataKey="name" stroke="#94a3b8" width={100} tick={{fontSize: 10}} />
+                                 <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
+                                 <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20}>
+                                     <LabelList dataKey="value" position="right" fill="#fff" fontSize={10} />
+                                 </Bar>
+                             </BarChart>
+                         </ResponsiveContainer>
+                    </div>
+                </Card>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-col md:flex-row gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
                  <div className="relative flex-1">
                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
                      <input 
                         type="text" 
-                        placeholder="Buscar robô por nome, área ou desenvolvedor..." 
+                        placeholder="Buscar robô..." 
                         className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500"
                         value={searchTerm} 
                         onChange={e => setSearchTerm(e.target.value)} 
                      />
                  </div>
+                 <select 
+                    className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                 >
+                     {statuses.map(s => <option key={s} value={s}>{s === 'Todos' ? 'Status: Todos' : s}</option>)}
+                 </select>
+                 <select 
+                    className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none max-w-[200px]"
+                    value={areaFilter}
+                    onChange={(e) => setAreaFilter(e.target.value)}
+                 >
+                     {areas.map(a => <option key={a} value={a}>{a === 'Todas' ? 'Área: Todas' : a}</option>)}
+                 </select>
             </div>
 
             <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col">
@@ -885,6 +963,8 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
                                 <th className="p-4">Nome do Robô</th>
                                 <th className="p-4">Situação</th>
                                 <th className="p-4">Área</th>
+                                <th className="p-4">Chamado</th>
+                                <th className="p-4">FTE</th>
                                 <th className="p-4">Desenvolvedor</th>
                                 <th className="p-4">Pasta</th>
                                 <th className="p-4 text-right">Ações</th>
@@ -903,6 +983,8 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
                                         </span>
                                     </td>
                                     <td className="p-4 text-slate-300">{robot.area}</td>
+                                    <td className="p-4 text-slate-400 font-mono text-xs">{robot.ticketNumber || '-'}</td>
+                                    <td className="p-4 text-slate-300">{robot.fte || '-'}</td>
                                     <td className="p-4 text-slate-400">{robot.developer}</td>
                                     <td className="p-4 text-xs text-slate-500 font-mono truncate max-w-[150px]" title={robot.folder}>{robot.folder}</td>
                                     <td className="p-4 text-right">
@@ -933,7 +1015,9 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
                                      status: data.get('status') as string,
                                      developer: data.get('developer') as string,
                                      owners: data.get('owners') as string,
-                                     area: data.get('area') as string
+                                     area: data.get('area') as string,
+                                     fte: parseFloat(data.get('fte') as string) || undefined,
+                                     ticketNumber: data.get('ticketNumber') as string
                                  });
                              }}>
                                  <div className="space-y-4">
@@ -945,6 +1029,10 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
                                      <div className="grid grid-cols-2 gap-4">
                                          <div><label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label><input name="developer" defaultValue={editingRobot?.developer} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
                                          <div><label className="block text-xs text-slate-400 mb-1">Owners</label><input name="owners" defaultValue={editingRobot?.owners} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                     </div>
+                                     <div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded">
+                                         <div><label className="block text-xs text-slate-400 mb-1">Nº Chamado</label><input name="ticketNumber" defaultValue={editingRobot?.ticketNumber} placeholder="Ex: R12345" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
+                                         <div><label className="block text-xs text-slate-400 mb-1">FTE</label><input type="number" step="0.01" name="fte" defaultValue={editingRobot?.fte} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
                                      </div>
                                      <div><label className="block text-xs text-slate-400 mb-1">Pasta de Armazenamento</label><input name="folder" defaultValue={editingRobot?.folder} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div>
                                  </div>
