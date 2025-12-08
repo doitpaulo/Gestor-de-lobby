@@ -168,7 +168,8 @@ export const StorageService = {
           projectPath: existing.projectPath, // Preserve project path
           automationName: newTask.automationName || existing.automationName, // Preserve automation name
           fteValue: existing.fteValue, // Preserve FTE
-          managementArea: existing.managementArea // Preserve Management Area
+          managementArea: existing.managementArea, // Preserve Management Area
+          blocker: existing.blocker // Preserve Blocker
         };
 
         taskMap.set(newTask.id, mergedTask);

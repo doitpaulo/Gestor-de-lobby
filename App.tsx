@@ -1,3 +1,5 @@
+
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -380,6 +382,16 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
             action: `Alterou fase do projeto`
         });
     }
+
+    // Detect Blocker Change
+    if (original.blocker !== updated.blocker) {
+         changes.push({
+            id: Math.random().toString(36).substr(2, 9),
+            date: timestamp,
+            user: user.name,
+            action: `Atualizou motivo de bloqueio`
+        });
+    }
     
     // Check for generic text changes
     const textFields = ['summary', 'requester', 'estimatedTime', 'actualTime', 'startDate', 'endDate', 'category', 'subcategory', 'type', 'projectPath', 'automationName', 'managementArea', 'fteValue'];
@@ -446,7 +458,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
             { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
             { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
-            { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas', size: 'half', visible: true },
+            { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
         ];
         
         if (saved) {
@@ -455,6 +467,10 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             if (!hasForecast) {
                 // Merge new widget for existing users
                 parsed.push(DEFAULT_REPORT_WIDGETS.find(w => w.type === 'deliveryForecast'));
+            } else {
+                // Update title just in case
+                const w = parsed.find((w: Widget) => w.type === 'deliveryForecast');
+                if (w) w.title = 'Previsão de Entregas & Bloqueios';
             }
             return parsed;
         }
@@ -656,25 +672,36 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             today.setHours(0,0,0,0);
 
             const forecastData = filteredProjects
-                .filter(p => p.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(p.status))
+                .filter(p => (p.endDate || p.blocker) && !['Concluído', 'Resolvido', 'Fechado'].includes(p.status))
                 .map(p => {
-                    const end = new Date(p.endDate!);
-                    end.setHours(0,0,0,0);
-                    const diffTime = end.getTime() - today.getTime();
-                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    
-                    let statusColor = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"; 
-                    let statusText = "No Prazo";
-                    
-                    if (diffDays < 0) {
+                    let diffDays = 0;
+                    let statusColor = "bg-slate-500/20 text-slate-400 border border-slate-500/30";
+                    let statusText = "Sem data";
+
+                    if (p.endDate) {
+                        const end = new Date(p.endDate!);
+                        end.setHours(0,0,0,0);
+                        const diffTime = end.getTime() - today.getTime();
+                        diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        
+                        statusColor = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"; 
+                        statusText = "No Prazo";
+                        
+                        if (diffDays < 0) {
+                            statusColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
+                            statusText = "Atrasado";
+                        } else if (diffDays <= 7) {
+                            statusColor = "bg-orange-500/20 text-orange-400 border border-orange-500/30";
+                            statusText = "Crítico";
+                        } else if (diffDays <= 15) {
+                            statusColor = "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30";
+                            statusText = "Atenção";
+                        }
+                    }
+
+                    if (p.status === 'Aguardando' || p.status === 'Pendente') {
                         statusColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
-                        statusText = "Atrasado";
-                    } else if (diffDays <= 7) {
-                        statusColor = "bg-orange-500/20 text-orange-400 border border-orange-500/30";
-                        statusText = "Crítico";
-                    } else if (diffDays <= 15) {
-                        statusColor = "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30";
-                        statusText = "Atenção";
+                        statusText = "Bloqueado";
                     }
 
                     return {
@@ -684,12 +711,16 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                         statusText
                     };
                 })
-                .sort((a, b) => a.diffDays - b.diffDays);
+                .sort((a, b) => {
+                     if (a.statusText === 'Bloqueado' && b.statusText !== 'Bloqueado') return -1;
+                     if (a.statusText !== 'Bloqueado' && b.statusText === 'Bloqueado') return 1;
+                     return a.diffDays - b.diffDays;
+                });
 
             return (
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2 max-h-[300px]">
                     {forecastData.length === 0 ? (
-                        <div className="text-center text-slate-500 py-10">Nenhum projeto com data de entrega futura definida.</div>
+                        <div className="text-center text-slate-500 py-10">Nenhum projeto com data de entrega futura ou bloqueio.</div>
                     ) : (
                         <table className="w-full text-sm text-left">
                             <thead className="text-xs text-slate-400 uppercase bg-slate-900/50 sticky top-0">
@@ -697,26 +728,30 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                                     <th className="p-2 rounded-l">Projeto</th>
                                     <th className="p-2 text-center">Data Fim</th>
                                     <th className="p-2 text-center">Dias Restantes</th>
-                                    <th className="p-2 text-center rounded-r">Status</th>
+                                    <th className="p-2 text-center">Status</th>
+                                    <th className="p-2 rounded-r">Bloqueios</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700/50">
                                 {forecastData.map(p => (
                                     <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
                                         <td className="p-2">
-                                            <div className="font-medium text-slate-200 truncate max-w-[200px]" title={p.summary}>{p.summary}</div>
+                                            <div className="font-medium text-slate-200 truncate max-w-[150px]" title={p.summary}>{p.summary}</div>
                                             <div className="text-xs text-slate-500">{p.assignee || 'Sem Dev'}</div>
                                         </td>
                                         <td className="p-2 text-center text-slate-400 font-mono text-xs">
-                                            {new Date(p.endDate!).toLocaleDateString()}
+                                            {p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'}
                                         </td>
                                         <td className="p-2 text-center font-bold text-slate-300">
-                                            {p.diffDays}d
+                                            {p.endDate ? `${p.diffDays}d` : '-'}
                                         </td>
                                         <td className="p-2 text-center">
                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${p.statusColor}`}>
                                                 {p.statusText}
                                             </span>
+                                        </td>
+                                        <td className="p-2 text-xs text-rose-300 max-w-[150px] truncate" title={p.blocker || ''}>
+                                            {p.blocker || '-'}
                                         </td>
                                     </tr>
                                 ))}
@@ -2209,7 +2244,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
     // ... [Content Omitted - Unchanged] ...
     const [formData, setFormData] = useState<Task>(task || {
-        id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined,
+        id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '',
         projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }
     });
 
@@ -2254,6 +2289,14 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         <div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div>
                         <div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div>
                     </div>
+                    
+                    {/* Blocker Input - Conditional */}
+                    {(formData.status === 'Aguardando' || formData.status === 'Pendente') && (
+                         <div className="col-span-2 bg-rose-900/20 border border-rose-500/30 p-4 rounded-lg animate-fade-in">
+                             <label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label>
+                             <input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all" />
+                         </div>
+                    )}
                     
                     {/* Management and FTE Fields */}
                     <div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded">
@@ -2334,7 +2377,7 @@ export default function App() {
 
   const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
   const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
-  const handleCreateTask = () => { setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: new Date().toISOString(), requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } }); };
+  const handleCreateTask = () => { setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: new Date().toISOString(), requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' }); };
 
   const handleTaskUpdate = (updatedTask: Task) => {
       if (!user) return;

@@ -54,6 +54,9 @@ export interface Task {
   fteValue?: number; // Valor FTE
   managementArea?: string; // Gerencia
 
+  // Blockers
+  blocker?: string; // Motivo de bloqueio/pendência
+
   // Kanban Ordering
   boardPosition?: number;
   
