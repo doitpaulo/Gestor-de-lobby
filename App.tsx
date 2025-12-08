@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -448,8 +446,20 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
             { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
             { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
+            { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas', size: 'half', visible: true },
         ];
-        return saved ? JSON.parse(saved) : DEFAULT_REPORT_WIDGETS;
+        
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            const hasForecast = parsed.find((w: Widget) => w.type === 'deliveryForecast');
+            if (!hasForecast) {
+                // Merge new widget for existing users
+                parsed.push(DEFAULT_REPORT_WIDGETS.find(w => w.type === 'deliveryForecast'));
+            }
+            return parsed;
+        }
+
+        return DEFAULT_REPORT_WIDGETS;
     });
     const [isEditMode, setIsEditMode] = useState(false);
 
@@ -641,6 +651,82 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             );
         }
 
+        if (widget.type === 'deliveryForecast') {
+            const today = new Date();
+            today.setHours(0,0,0,0);
+
+            const forecastData = filteredProjects
+                .filter(p => p.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(p.status))
+                .map(p => {
+                    const end = new Date(p.endDate!);
+                    end.setHours(0,0,0,0);
+                    const diffTime = end.getTime() - today.getTime();
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    let statusColor = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"; 
+                    let statusText = "No Prazo";
+                    
+                    if (diffDays < 0) {
+                        statusColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30";
+                        statusText = "Atrasado";
+                    } else if (diffDays <= 7) {
+                        statusColor = "bg-orange-500/20 text-orange-400 border border-orange-500/30";
+                        statusText = "Crítico";
+                    } else if (diffDays <= 15) {
+                        statusColor = "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30";
+                        statusText = "Atenção";
+                    }
+
+                    return {
+                        ...p,
+                        diffDays,
+                        statusColor,
+                        statusText
+                    };
+                })
+                .sort((a, b) => a.diffDays - b.diffDays);
+
+            return (
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2 max-h-[300px]">
+                    {forecastData.length === 0 ? (
+                        <div className="text-center text-slate-500 py-10">Nenhum projeto com data de entrega futura definida.</div>
+                    ) : (
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-slate-400 uppercase bg-slate-900/50 sticky top-0">
+                                <tr>
+                                    <th className="p-2 rounded-l">Projeto</th>
+                                    <th className="p-2 text-center">Data Fim</th>
+                                    <th className="p-2 text-center">Dias Restantes</th>
+                                    <th className="p-2 text-center rounded-r">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700/50">
+                                {forecastData.map(p => (
+                                    <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
+                                        <td className="p-2">
+                                            <div className="font-medium text-slate-200 truncate max-w-[200px]" title={p.summary}>{p.summary}</div>
+                                            <div className="text-xs text-slate-500">{p.assignee || 'Sem Dev'}</div>
+                                        </td>
+                                        <td className="p-2 text-center text-slate-400 font-mono text-xs">
+                                            {new Date(p.endDate!).toLocaleDateString()}
+                                        </td>
+                                        <td className="p-2 text-center font-bold text-slate-300">
+                                            {p.diffDays}d
+                                        </td>
+                                        <td className="p-2 text-center">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${p.statusColor}`}>
+                                                {p.statusText}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            );
+        }
+
         const renderChart = () => {
             const style = widget.visualStyle || 'bar';
             
@@ -711,7 +797,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
             <div className="h-full flex flex-col">
                  <div className="flex justify-between items-center mb-4">
                      <h3 className="text-lg font-bold text-white">{widget.title}</h3>
-                     {isEditMode && widget.type !== 'kpis' && (
+                     {isEditMode && widget.type !== 'kpis' && widget.type !== 'deliveryForecast' && (
                          <select 
                             className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none"
                             value={widget.visualStyle || 'bar'}
@@ -2280,7 +2366,9 @@ export default function App() {
                           developer: updatedTask.assignee || 'N/A',
                           folder: updatedTask.projectPath || 'N/A',
                           owners: updatedTask.requester || 'N/A',
-                          status: 'ATIVO'
+                          status: 'ATIVO',
+                          ticketNumber: updatedTask.id, // Mapped ticket number
+                          fte: updatedTask.fteValue || 0 // Mapped FTE
                       };
                       const updatedRobots = [...robots, newRobot];
                       setRobots(updatedRobots);
