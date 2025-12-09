@@ -11,7 +11,7 @@ import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -895,6 +895,191 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                     ))}
                 </div>
             )}
+        </div>
+    );
+};
+
+const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[] }) => {
+    // --- Excel Exports ---
+    const handleExportGeneral = () => {
+        const data = tasks.map(t => ({
+            'ID': t.id,
+            'Tipo': t.type,
+            'Resumo': t.summary,
+            'Prioridade': t.priority,
+            'Status': t.status,
+            'Responsável': t.assignee || 'Não Atribuído',
+            'Criado Em': t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '',
+            'Solicitante': t.requester,
+            'Estimativa': t.estimatedTime || '',
+            'Tempo Real': t.actualTime || '',
+            'Início': t.startDate || '',
+            'Fim': t.endDate || '',
+            'Gerência': t.managementArea || '',
+            'FTE': t.fteValue || 0
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Demandas");
+        XLSX.writeFile(wb, "Nexus_Geral.xlsx");
+    };
+
+    const handleExportBacklog = () => {
+        const backlog = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado', 'Cancelado'].includes(t.status));
+        const data = backlog.map(t => ({
+            'ID': t.id,
+            'Tipo': t.type,
+            'Resumo': t.summary,
+            'Status': t.status,
+            'Prioridade': t.priority,
+            'Responsável': t.assignee || 'Não Atribuído'
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Backlog");
+        XLSX.writeFile(wb, "Nexus_Backlog.xlsx");
+    };
+
+    const handleExportRobots = () => {
+        const data = robots.map(r => ({
+            'Nome': r.name,
+            'Status': r.status,
+            'Área': r.area,
+            'Desenvolvedor': r.developer,
+            'FTE': r.fte,
+            'Pasta': r.folder
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Robôs");
+        XLSX.writeFile(wb, "Nexus_Inventario_RPA.xlsx");
+    };
+
+    // --- PPT Exports ---
+    const handleExportExecutivePPT = () => {
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+        
+        // Metrics
+        const total = tasks.length;
+        const active = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length;
+        const incidents = tasks.filter(t => t.type === 'Incidente' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length;
+        const improvements = tasks.filter(t => t.type === 'Melhoria' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length;
+        const automations = tasks.filter(t => t.type === 'Nova Automação' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length;
+
+        // Slide 1: Cover
+        let slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Relatório Executivo Mensal", { x: 1, y: 3, fontSize: 36, color: 'FFFFFF', bold: true });
+        slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 4, fontSize: 18, color: '94a3b8' });
+
+        // Slide 2: High Level Numbers
+        slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Visão Geral do Portfólio", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+
+        // Cards
+        const cardY = 1.5; const cardW = 2.5; const cardH = 1.5; const gap = 0.5;
+        
+        // Helper to draw card
+        const drawCard = (x:number, title:string, val:number, color:string) => {
+            slide.addShape(pres.ShapeType.roundRect, { x, y: cardY, w: cardW, h: cardH, fill: { color: '1e293b' }, line: { color, width: 2 } });
+            slide.addText(title, { x, y: cardY + 0.2, w: cardW, fontSize: 14, color: '94a3b8', align: 'center' });
+            slide.addText(val.toString(), { x, y: cardY + 0.6, w: cardW, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' });
+        }
+
+        drawCard(0.5, "Total Ativos", active, '6366f1');
+        drawCard(0.5 + cardW + gap, "Incidentes", incidents, 'e11d48');
+        drawCard(0.5 + (cardW + gap)*2, "Melhorias", improvements, '10b981');
+        drawCard(0.5 + (cardW + gap)*3, "Automações", automations, '8b5cf6');
+
+        // Slide 3: Dev Breakdown
+        slide.addText("Volume por Desenvolvedor (Ativos)", { x: 0.5, y: 3.5, fontSize: 18, color: 'FFFFFF' });
+        const devData = devs.map(d => {
+            const count = tasks.filter(t => t.assignee === d.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length;
+            return { name: d.name, count };
+        }).sort((a,b) => b.count - a.count);
+        
+        const chartLabels = devData.map(d => d.name);
+        const chartValues = devData.map(d => d.count);
+        
+        slide.addChart(pres.ChartType.bar, [{ name: 'Demandas', labels: chartLabels, values: chartValues }], 
+            { x: 0.5, y: 4, w: '90%', h: 3, chartColors: ['6366f1'], barDir: 'col', valAxisMaxVal: Math.max(...chartValues) + 2 });
+
+        pres.writeFile({ fileName: "Nexus_Executivo.pptx" });
+    };
+
+    return (
+        <div className="space-y-6 pb-20 animate-fade-in">
+            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                <h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2>
+                <p className="text-slate-400">Extração de dados e apresentações automatizadas para gestão.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Excel Section */}
+                <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-emerald-400 flex items-center gap-2">
+                        <IconList className="w-6 h-6" /> Exportações Operacionais (Excel)
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4">
+                        <Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportGeneral}>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Base Geral de Demandas</h4>
+                                    <p className="text-sm text-slate-400 mt-1">Extração completa de todas as tarefas, incluindo histórico, datas e responsáveis.</p>
+                                </div>
+                                <div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconDownload className="w-6 h-6" /></div>
+                            </div>
+                        </Card>
+                        <Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportBacklog}>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Relatório de Backlog</h4>
+                                    <p className="text-sm text-slate-400 mt-1">Apenas itens pendentes, em andamento ou aguardando. Ideal para daily/weekly.</p>
+                                </div>
+                                <div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconDownload className="w-6 h-6" /></div>
+                            </div>
+                        </Card>
+                        <Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportRobots}>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Inventário de Robôs (RPA)</h4>
+                                    <p className="text-sm text-slate-400 mt-1">Lista consolidada de todos os robôs cadastrados, status e FTEs.</p>
+                                </div>
+                                <div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconDownload className="w-6 h-6" /></div>
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+
+                {/* PPT Section */}
+                <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-orange-400 flex items-center gap-2">
+                        <IconChartBar className="w-6 h-6" /> Apresentações Executivas (PPT)
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4">
+                        <Card className="hover:border-orange-500/50 transition-colors group cursor-pointer" onClick={handleExportExecutivePPT}>
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="font-bold text-white group-hover:text-orange-400 transition-colors">Status Report Executivo</h4>
+                                    <p className="text-sm text-slate-400 mt-1">Slides com KPIs macro, volumetria por tipo e carga da equipe. Visão gerencial.</p>
+                                </div>
+                                <div className="p-2 bg-orange-900/20 rounded-lg text-orange-400"><IconDownload className="w-6 h-6" /></div>
+                            </div>
+                        </Card>
+                         <Card className="opacity-75 cursor-not-allowed border-slate-700 bg-slate-800/50">
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h4 className="font-bold text-slate-500">Book de Projetos (Em breve)</h4>
+                                    <p className="text-sm text-slate-600 mt-1">Detalhamento slide a slide de cada projeto em andamento com cronograma.</p>
+                                </div>
+                                <div className="p-2 bg-slate-900/20 rounded-lg text-slate-600"><IconClock className="w-6 h-6" /></div>
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
@@ -2187,7 +2372,8 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
       { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, 
       { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
       { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' },
-      { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }
+      { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' },
+      { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' }
   ];
   return (
     <div className="flex h-screen bg-dark-900 text-slate-200 font-sans">
@@ -2458,6 +2644,7 @@ export default function App() {
           <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
           <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
           <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
+          <Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} />
           <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
