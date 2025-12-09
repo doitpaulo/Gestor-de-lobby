@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -185,8 +183,8 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
   );
 };
 
-const Card = ({ children, className = '' }: any) => (
-  <div className={`bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 shadow-xl ${className}`}>
+const Card = ({ children, className = '', ...props }: any) => (
+  <div className={`bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 shadow-xl ${className}`} {...props}>
     {children}
   </div>
 );
