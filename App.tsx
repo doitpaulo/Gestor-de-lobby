@@ -450,30 +450,40 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     });
 
     const [widgets, setWidgets] = useState<Widget[]>(() => {
-        const saved = localStorage.getItem('nexus_report_widgets');
-        const DEFAULT_REPORT_WIDGETS: Widget[] = [
-            { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
-            { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
-            { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
-            { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
-            { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
-        ];
-        
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            const hasForecast = parsed.find((w: Widget) => w.type === 'deliveryForecast');
-            if (!hasForecast) {
-                // Merge new widget for existing users
-                parsed.push(DEFAULT_REPORT_WIDGETS.find(w => w.type === 'deliveryForecast'));
-            } else {
-                // Update title just in case
-                const w = parsed.find((w: Widget) => w.type === 'deliveryForecast');
-                if (w) w.title = 'Previsão de Entregas & Bloqueios';
+        try {
+            const saved = localStorage.getItem('nexus_report_widgets');
+            const DEFAULT_REPORT_WIDGETS: Widget[] = [
+                { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
+                { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
+                { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
+                { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
+                { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
+            ];
+            
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                const hasForecast = parsed.find((w: Widget) => w.type === 'deliveryForecast');
+                if (!hasForecast) {
+                    // Merge new widget for existing users
+                    parsed.push(DEFAULT_REPORT_WIDGETS.find(w => w.type === 'deliveryForecast'));
+                } else {
+                    // Update title just in case
+                    const w = parsed.find((w: Widget) => w.type === 'deliveryForecast');
+                    if (w) w.title = 'Previsão de Entregas & Bloqueios';
+                }
+                return parsed;
             }
-            return parsed;
+            return DEFAULT_REPORT_WIDGETS;
+        } catch (e) {
+            console.error("Error loading report widgets", e);
+            return [
+                { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
+                { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
+                { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
+                { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
+                { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
+            ];
         }
-
-        return DEFAULT_REPORT_WIDGETS;
     });
     const [isEditMode, setIsEditMode] = useState(false);
 
@@ -816,7 +826,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
                         <XAxis type="number" domain={[0, 100]} stroke="#94a3b8" />
                         <YAxis dataKey="name" type="category" width={150} stroke="#94a3b8" tick={{ fontSize: 10 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} formatter={(val: number) => [`${val}%`, 'Conclusão']} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b' }} />
                         <Bar dataKey="progress" fill="#10b981" radius={[0, 4, 4, 0]}>
                              <LabelList dataKey="progress" position="right" fill="#fff" fontSize={10} formatter={(val: any) => `${val}%`} />
                         </Bar>
@@ -1424,7 +1434,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
                 if (newIndex >= 0 && newIndex < workflowConfig.length) {
                     const newPhase = workflowConfig[newIndex];
                     t.projectData = {
-                        ...t.projectData!,
+                        ...(t.projectData || { completedActivities: [] }),
                         currentPhaseId: newPhase.id,
                         phaseStatus: newPhase.statuses[0] 
                     };
@@ -1586,9 +1596,6 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
     )
 };
 
-// ... [Previous Components like WorkflowEditor, DashboardView, etc. remain unchanged] ...
-// I will include them to ensure the file is complete but they are identical to previous content.
-
 const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: any) => {
     // ... same code ...
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -1639,22 +1646,27 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
 
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
-      const saved = localStorage.getItem('nexus_dashboard_widgets');
-      if (saved) {
-          const parsed = JSON.parse(saved);
-          const hasIncidentAuto = parsed.find((w: Widget) => w.type === 'incidentByAuto');
-          const hasCompletedKPIs = parsed.find((w: Widget) => w.type === 'completedKPIs');
-          const hasAutoManager = parsed.find((w: Widget) => w.type === 'automationsByManager');
-          
-          let merged = [...parsed];
-          if (!hasCompletedKPIs) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'completedKPIs'));
-          if (!hasIncidentAuto) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'incidentByAuto'));
-          if (!hasAutoManager) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'automationsByManager'));
-          if (!parsed.find((w: Widget) => w.type === 'fteByManager')) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'fteByManager'));
-          
-          return merged;
+      try {
+          const saved = localStorage.getItem('nexus_dashboard_widgets');
+          if (saved) {
+              const parsed = JSON.parse(saved);
+              const hasIncidentAuto = parsed.find((w: Widget) => w.type === 'incidentByAuto');
+              const hasCompletedKPIs = parsed.find((w: Widget) => w.type === 'completedKPIs');
+              const hasAutoManager = parsed.find((w: Widget) => w.type === 'automationsByManager');
+              
+              let merged = [...parsed];
+              if (!hasCompletedKPIs) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'completedKPIs'));
+              if (!hasIncidentAuto) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'incidentByAuto'));
+              if (!hasAutoManager) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'automationsByManager'));
+              if (!parsed.find((w: Widget) => w.type === 'fteByManager')) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'fteByManager'));
+              
+              return merged;
+          }
+          return DEFAULT_WIDGETS;
+      } catch (e) {
+          console.error("Error loading widgets", e);
+          return DEFAULT_WIDGETS;
       }
-      return DEFAULT_WIDGETS;
   });
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string[]>([]);
@@ -1797,7 +1809,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
     slide.addText("Relatório One Page Project", { x: 1, y: 2, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
-    slide.addText(`Gerado em: ${new Date().toLocaleDateString()} - Visão Geral`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
     pres.writeFile({ fileName: "Nexus_OnePageReport.pptx" });
   };
 
@@ -1963,10 +1975,13 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   const onDrop = (e: React.DragEvent, colId: string, colType: string) => {
     e.preventDefault(); e.stopPropagation();
     const taskId = e.dataTransfer.getData("taskId");
-    const updatedTasks = tasks.map(t => t); 
+    // Deep copy to ensure state mutation doesn't affect render cycle prematurely
+    const updatedTasks = [...tasks];
     const taskIndex = updatedTasks.findIndex(t => t.id === taskId);
     if (taskIndex === -1) return;
-    const task = updatedTasks[taskIndex];
+    
+    // Create a new object for the modified task
+    const task = { ...updatedTasks[taskIndex] };
     let historyAction = '';
     
     if (colType === 'unassigned') {
@@ -1988,7 +2003,8 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     if (historyAction) {
         const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: historyAction };
         task.history = [...(task.history || []), entry];
-        setTasks([...updatedTasks]);
+        updatedTasks[taskIndex] = task;
+        setTasks(updatedTasks);
         StorageService.saveTasks(updatedTasks);
     }
   };
@@ -2443,7 +2459,13 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
     const handleChange = (e: any) => {
         const { name, value } = e.target;
         if (name === 'assignee' && value && allTasks) { const currentHours = getDevWorkload(value, allTasks, task.id); if (currentHours > 40) { alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`); } }
-        setFormData(prev => ({ ...prev, [name]: value }));
+        
+        let finalValue = value;
+        if (name === 'fteValue') {
+            finalValue = value === '' ? undefined : parseFloat(value);
+        }
+        
+        setFormData(prev => ({ ...prev, [name]: finalValue }));
     };
 
     const handleProjectDataChange = (key: string, value: any) => { setFormData(prev => ({ ...prev, projectData: { ...prev.projectData!, [key]: value } })); };
