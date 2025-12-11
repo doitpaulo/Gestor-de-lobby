@@ -907,6 +907,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     );
 };
 
+// ... ReportsView, RobotManagementView ...
 const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[] }) => {
     // --- Excel Exports ---
     const handleExportGeneral = () => {
@@ -1958,21 +1959,34 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
   // ... same code ...
   const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], assignee: string[]}>({ search: '', type: [], priority: [], assignee: [] });
+  const [kanbanMode, setKanbanMode] = useState<'assignee' | 'status'>('assignee');
+  
   const columns = useMemo(() => {
-      let cols = [ { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' }, ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })), { id: 'completed', title: 'Concluídos', type: 'completed' } ];
-      if (filters.assignee.length > 0) {
-           const showUnassigned = filters.assignee.includes('Não Atribuído');
-           cols = cols.filter(c => {
-               if (c.type === 'completed') return true;
-               if (c.type === 'unassigned') return showUnassigned;
-               return filters.assignee.includes(c.id);
-           });
+      if (kanbanMode === 'assignee') {
+        let cols = [ { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' }, ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })), { id: 'completed', title: 'Concluídos', type: 'completed' } ];
+        if (filters.assignee.length > 0) {
+             const showUnassigned = filters.assignee.includes('Não Atribuído');
+             cols = cols.filter(c => {
+                 if (c.type === 'completed') return true;
+                 if (c.type === 'unassigned') return showUnassigned;
+                 return filters.assignee.includes(c.id);
+             });
+        }
+        return cols;
+      } else {
+        // Status view mode
+        return [
+            { id: 'col-backlog', title: 'Backlog / Prioridades', type: 'status_group', statuses: ['Novo', 'Backlog', 'Pendente'], targetStatus: 'Backlog' },
+            { id: 'col-doing', title: 'Em Produção', type: 'status_group', statuses: ['Em Atendimento', 'Em Progresso'], targetStatus: 'Em Progresso' },
+            { id: 'col-blocked', title: 'Com Bloqueio', type: 'status_group', statuses: ['Aguardando'], targetStatus: 'Aguardando' },
+            { id: 'col-done', title: 'Concluído', type: 'status_group', statuses: ['Resolvido', 'Fechado', 'Concluído'], targetStatus: 'Concluído' }
+        ];
       }
-      return cols;
-  }, [devs, filters.assignee]);
+  }, [devs, filters.assignee, kanbanMode]);
 
   const onDragStart = (e: React.DragEvent, taskId: string) => { e.dataTransfer.setData("taskId", taskId); };
-  const onDrop = (e: React.DragEvent, colId: string, colType: string) => {
+  
+  const onDrop = (e: React.DragEvent, colId: string, colType: string, targetStatus?: string) => {
     e.preventDefault(); e.stopPropagation();
     const taskId = e.dataTransfer.getData("taskId");
     // Deep copy to ensure state mutation doesn't affect render cycle prematurely
@@ -1984,20 +1998,28 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     const task = { ...updatedTasks[taskIndex] };
     let historyAction = '';
     
-    if (colType === 'unassigned') {
-        if (task.assignee) { historyAction = `Removeu atribuição (Estava com ${task.assignee})`; task.assignee = null; }
-        if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Pendente'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Pendente)"; }
-    } 
-    else if (colType === 'dev') {
-        const targetDev = colId;
-        const currentWorkload = getDevWorkload(targetDev, tasks, task.id);
-        if (currentWorkload > 40) { if(!window.confirm(`ALERTA: ${targetDev} já tem ${formatDuration(currentWorkload)} de carga. Deseja atribuir mesmo assim?`)) { return; } }
-        if (task.assignee !== targetDev) { historyAction = `Atribuiu para ${targetDev}`; task.assignee = targetDev; }
-        if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
-        else if (task.status === 'Novo' || task.status === 'Backlog') { task.status = 'Em Atendimento'; }
-    }
-    else if (colType === 'completed') {
-        if (!['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Concluído'; historyAction = `Concluiu tarefa`; }
+    if (kanbanMode === 'assignee') {
+        if (colType === 'unassigned') {
+            if (task.assignee) { historyAction = `Removeu atribuição (Estava com ${task.assignee})`; task.assignee = null; }
+            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Pendente'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Pendente)"; }
+        } 
+        else if (colType === 'dev') {
+            const targetDev = colId;
+            const currentWorkload = getDevWorkload(targetDev, tasks, task.id);
+            if (currentWorkload > 40) { if(!window.confirm(`ALERTA: ${targetDev} já tem ${formatDuration(currentWorkload)} de carga. Deseja atribuir mesmo assim?`)) { return; } }
+            if (task.assignee !== targetDev) { historyAction = `Atribuiu para ${targetDev}`; task.assignee = targetDev; }
+            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
+            else if (task.status === 'Novo' || task.status === 'Backlog') { task.status = 'Em Atendimento'; }
+        }
+        else if (colType === 'completed') {
+            if (!['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Concluído'; historyAction = `Concluiu tarefa`; }
+        }
+    } else {
+        // Status Mode Logic
+        if (targetStatus && task.status !== targetStatus) {
+            historyAction = `Alterou status para ${targetStatus}`;
+            task.status = targetStatus;
+        }
     }
 
     if (historyAction) {
@@ -2024,37 +2046,63 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     });
   }, [tasks, filters]);
 
-  const getTasksForColumn = (colId: string, colType: string) => {
+  const getTasksForColumn = (col: any) => {
       return filteredTasks.filter(t => {
-          const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
-          if (colType === 'completed') return isCompleted;
-          if (isCompleted) return false;
-          if (colType === 'unassigned') return !t.assignee;
-          if (colType === 'dev') return t.assignee === colId;
-          return false;
+          if (kanbanMode === 'assignee') {
+            const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+            if (col.type === 'completed') return isCompleted;
+            if (isCompleted) return false;
+            if (col.type === 'unassigned') return !t.assignee;
+            if (col.type === 'dev') return t.assignee === col.id;
+            return false;
+          } else {
+            // Status Mode filtering
+            return col.statuses.includes(t.status);
+          }
       }).sort((a, b) => (a.boardPosition || 0) - (b.boardPosition || 0));
   };
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex justify-between items-center"><FilterBar filters={filters} setFilters={setFilters} devs={devs} /></div>
+      <div className="flex justify-between items-center bg-slate-800 p-2 rounded-xl border border-slate-700 mb-4">
+          <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700 mr-4">
+              <button onClick={() => setKanbanMode('assignee')} className={`px-3 py-1 text-xs rounded transition-colors ${kanbanMode === 'assignee' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Por Responsável</button>
+              <button onClick={() => setKanbanMode('status')} className={`px-3 py-1 text-xs rounded transition-colors ${kanbanMode === 'status' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Por Status</button>
+          </div>
+      </div>
       <div className="flex-1 overflow-x-auto pb-2">
         <div className="flex gap-4 h-full min-w-max px-2 items-start">
-          {columns.map(col => {
-            const colTasks = getTasksForColumn(col.id, col.type);
-            const isCompletedCol = col.type === 'completed';
+          {columns.map((col: any) => {
+            const colTasks = getTasksForColumn(col);
+            const isCompletedCol = col.type === 'completed' || (col.type === 'status_group' && col.id === 'col-done');
             const isUnassignedCol = col.type === 'unassigned';
+            const isBlockedCol = col.type === 'status_group' && col.id === 'col-blocked';
+            
             let headerColor = "border-slate-700 bg-slate-800/80";
-            if (isCompletedCol) headerColor = "border-emerald-900/50 bg-emerald-900/20";
-            if (isUnassignedCol) headerColor = "border-slate-700 bg-slate-800/50 dashed";
+            let icon = null;
+
+            if (isCompletedCol) { 
+                headerColor = "border-emerald-900/50 bg-emerald-900/20";
+                icon = <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs text-white font-bold">✓</div>;
+            } else if (isUnassignedCol) {
+                headerColor = "border-slate-700 bg-slate-800/50 dashed";
+                icon = <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-xs text-white font-bold">?</div>;
+            } else if (isBlockedCol) {
+                headerColor = "border-rose-900/50 bg-rose-900/20";
+                icon = <div className="w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center text-xs text-white font-bold">!</div>;
+            } else if (col.type === 'dev') {
+                icon = <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-xs text-white font-bold">{col.title.substring(0,2).toUpperCase()}</div>;
+            } else {
+                // Generic Status Column
+                icon = <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-xs text-white font-bold">{col.title.substring(0,1)}</div>;
+            }
 
             return (
-                <div key={col.id} className={`flex-1 min-w-[320px] w-[320px] rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id, col.type)}>
+                <div key={col.id} className={`flex-1 min-w-[320px] w-[320px] rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus)}>
                 <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${headerColor}`}>
                     <div className="flex items-center gap-2">
-                         {col.type === 'dev' && <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-xs text-white font-bold">{col.title.substring(0,2).toUpperCase()}</div>}
-                         {col.type === 'unassigned' && <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center text-xs text-white font-bold">?</div>}
-                         {col.type === 'completed' && <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-xs text-white font-bold">✓</div>}
+                         {icon}
                         <h3 className="font-semibold text-white truncate max-w-[200px]">{col.title}</h3>
                     </div>
                     <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">{colTasks.length}</span>
@@ -2065,7 +2113,14 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
                         <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
                         <div className="flex justify-between items-start mb-2 pl-2"><span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span><Badge type={task.priority} /></div>
                         <h4 className={`text-sm font-medium mb-3 pl-2 line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.summary}</h4>
-                        <div className="flex justify-between items-end pl-2 mt-auto"><div className="flex flex-col gap-1"><Badge type={task.type} /><span className="text-[10px] text-slate-500 mt-1">{task.status}</span></div>{task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded"><IconClock className="w-3 h-3" /> {task.estimatedTime}</div>)}</div>
+                        <div className="flex justify-between items-end pl-2 mt-auto">
+                            <div className="flex flex-col gap-1">
+                                <Badge type={task.type} />
+                                <span className="text-[10px] text-slate-500 mt-1">{task.status}</span>
+                                {kanbanMode === 'status' && <span className="text-[10px] text-indigo-400 font-bold">{task.assignee || 'Sem Dev'}</span>}
+                            </div>
+                            {task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded"><IconClock className="w-3 h-3" /> {task.estimatedTime}</div>)}
+                        </div>
                         </div>
                     ))}
                     {colTasks.length === 0 && (<div className="h-20 flex items-center justify-center text-slate-600 text-xs italic border-2 border-dashed border-slate-700/50 rounded-lg">Arraste tarefas aqui</div>)}
@@ -2395,7 +2450,7 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
         <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"><IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} /></button>
         <div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}><div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div><h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1></div>
         <nav className="flex-1 p-4 space-y-2 mt-4">{menuItems.map(item => (<button key={item.path} onClick={() => navigate(item.path)} title={isCollapsed ? item.label : ''} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${location.pathname === item.path ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${isCollapsed ? 'justify-center px-0' : ''}`}>{item.icon}<span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{item.label}</span></button>))}</nav>
-        <div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div>
+        <div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{!isCollapsed && <><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></>}</div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div>
       </aside>
       <main className="flex-1 overflow-hidden relative flex flex-col">
          <header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800"><div className="pointer-events-auto">{headerContent}</div></header>
