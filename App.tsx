@@ -586,32 +586,48 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
          slide.background = { color: "0f172a" };
          slide.addText("Report Detalhado de Projetos", { x: 1, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
          
-         slide.addText("Total: " + metrics.total, { x: 1, y: 1.5, fontSize: 18, color: 'FFFFFF' });
-         slide.addText("Média Conclusão: " + metrics.avgProgress + "%", { x: 4, y: 1.5, fontSize: 18, color: 'FFFFFF' });
-         slide.addText("Travados: " + metrics.stuckProjects, { x: 7, y: 1.5, fontSize: 18, color: 'FFFFFF' });
+         // KPI Shapes
+         const drawKPI = (label: string, value: string, color: string, x: number) => {
+             slide.addShape(pres.ShapeType.roundRect, { x, y: 1.2, w: 2.5, h: 1.2, fill: { color: '1e293b' }, line: { color, width: 2 } });
+             slide.addText(label, { x, y: 1.4, w: 2.5, fontSize: 12, color: '94a3b8', align: 'center' });
+             slide.addText(value, { x, y: 1.7, w: 2.5, fontSize: 24, color: 'FFFFFF', bold: true, align: 'center' });
+         };
+
+         drawKPI("Total", metrics.total.toString(), '6366f1', 0.5);
+         drawKPI("Média Conclusão", `${metrics.avgProgress}%`, '10b981', 3.2);
+         drawKPI("Travados", metrics.stuckProjects.toString(), 'f59e0b', 5.9);
+         drawKPI("Ativos", metrics.activeProjects.toString(), 'e11d48', 8.6);
  
+         // Charts Slide
          if (phaseData.length > 0) {
               slide.addChart(pres.ChartType.bar, [
                   { name: 'Fases', labels: phaseData.map(p => p.name), values: phaseData.map(p => p.value) }
-              ], { x: 1, y: 2.5, w: '45%', h: '60%', chartColors: ['6366f1'], barDir: 'col', title: 'Distribuição por Fase' });
+              ], { x: 0.5, y: 3, w: 5.5, h: 4, chartColors: ['6366f1'], barDir: 'col', title: 'Projetos por Fase', titleColor: 'ffffff' });
          }
  
          if (healthData.length > 0) {
+              // Strip # from colors for safety
+              const colors = healthData.map(h => h.color.replace('#', ''));
               slide.addChart(pres.ChartType.doughnut, [
                   { name: 'Saúde', labels: healthData.map(h => h.name), values: healthData.map(h => h.value) }
               ], { 
-                  x: 7, y: 2.5, w: '40%', h: '60%', 
+                  x: 6.5, y: 3, w: 5.5, h: 4, 
                   showLegend: true, 
-                  chartColors: healthData.map(h => h.color.replace('#', '')) 
+                  title: 'Saúde do Portfólio',
+                  titleColor: 'ffffff',
+                  chartColors: colors
               });
          }
  
+         // Detail Slide
          slide = pres.addSlide();
          slide.background = { color: "0f172a" };
          slide.addText("Progresso Detalhado por Projeto", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
  
-         const projNames = projectProgressData.map(p => p.name.substring(0, 20) + (p.name.length > 20 ? '...' : ''));
-         const projVals = projectProgressData.map(p => p.progress);
+         // Limit to top 20 for readability in PPT
+         const tasksToShow = projectProgressData.slice(0, 20);
+         const projNames = tasksToShow.map(p => p.name.substring(0, 25) + (p.name.length > 25 ? '...' : ''));
+         const projVals = tasksToShow.map(p => p.progress);
  
          if (projNames.length > 0) {
              slide.addChart(pres.ChartType.bar, [{
@@ -1012,8 +1028,12 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
         const chartLabels = devData.map(d => d.name);
         const chartValues = devData.map(d => d.count);
         
-        slide.addChart(pres.ChartType.bar, [{ name: 'Demandas', labels: chartLabels, values: chartValues }], 
-            { x: 0.5, y: 4, w: '90%', h: 3, chartColors: ['6366f1'], barDir: 'col', valAxisMaxVal: Math.max(...chartValues) + 2 });
+        if (chartLabels.length > 0) {
+            slide.addChart(pres.ChartType.bar, [{ name: 'Demandas', labels: chartLabels, values: chartValues }], 
+                { x: 0.5, y: 4, w: '90%', h: 3, chartColors: ['6366f1'], barDir: 'col', valAxisMaxVal: Math.max(...chartValues) + 2, valAxisLabelColor: 'ffffff', catAxisLabelColor: 'ffffff' });
+        } else {
+             slide.addText("Sem dados de desenvolvedores.", { x: 0.5, y: 4.5, fontSize: 12, color: '94a3b8' });
+        }
 
         pres.writeFile({ fileName: "Nexus_Executivo.pptx" });
     };
@@ -1807,11 +1827,72 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   const exportPPT = () => {
     const pres = new pptxgen();
     pres.layout = 'LAYOUT_WIDE';
+    
+    // Slide 1: Cover
     let slide = pres.addSlide();
     slide.background = { color: "0f172a" };
-    slide.addText("Relatório One Page Project", { x: 1, y: 2, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
-    slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 3, w: '80%', fontSize: 18, color: '94a3b8', align: 'center' });
-    pres.writeFile({ fileName: "Nexus_OnePageReport.pptx" });
+    slide.addText("Dashboard Nexus Project", { x: 0.5, y: 2, w: '90%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 3, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' });
+
+    // Slide 2: KPIs & Cards
+    slide = pres.addSlide();
+    slide.background = { color: "0f172a" };
+    slide.addText("Visão Geral do Portfólio (Demandas Ativas)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
+
+    const drawCard = (label: string, value: string, color: string, x: number) => {
+        slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 3 } });
+        slide.addText(label, { x, y: 1.8, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' });
+        slide.addText(value, { x, y: 2.3, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' });
+    };
+
+    drawCard("Total Ativos", metrics.total.toString(), 'ffffff', 0.5);
+    drawCard("Incidentes", metrics.incidents.toString(), 'f43f5e', 3.5);
+    drawCard("Melhorias", metrics.features.toString(), '10b981', 6.5);
+    drawCard("Automações", metrics.automations.toString(), '6366f1', 9.5);
+
+    // Slide 3: Charts (Priority & Status)
+    slide = pres.addSlide();
+    slide.background = { color: "0f172a" };
+    slide.addText("Volume por Status e Prioridade", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
+
+    if (priorityData.length > 0) {
+        slide.addChart(pres.ChartType.bar, [
+            { name: 'Prioridade', labels: priorityData.map(d => d.name), values: priorityData.map(d => d.value) }
+        ], { x: 0.5, y: 1.5, w: 5, h: 4, chartColors: ['8b5cf6'], title: 'Por Prioridade', titleColor: 'ffffff' });
+    }
+
+    if (statusByTypeData.length > 0) {
+        const statusLabels = statusByTypeData.map(d => d.name);
+        const incVals = statusByTypeData.map(d => d.Incidente);
+        const melVals = statusByTypeData.map(d => d.Melhoria);
+        const autoVals = statusByTypeData.map(d => d['Nova Automação']);
+        
+        slide.addChart(pres.ChartType.bar, [
+            { name: 'Incidentes', labels: statusLabels, values: incVals },
+            { name: 'Melhorias', labels: statusLabels, values: melVals },
+            { name: 'Automações', labels: statusLabels, values: autoVals }
+        ], { x: 6, y: 1.5, w: 7, h: 4, showLegend: true, barDir: 'col', title: 'Por Status', titleColor: 'ffffff', chartColors: ['f43f5e', '10b981', '6366f1'] });
+    }
+
+    // Slide 4: Capacity Table
+    slide = pres.addSlide();
+    slide.background = { color: "0f172a" };
+    slide.addText("Capacidade da Equipe & Sugestões", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
+
+    const tableHeader = ['Desenvolvedor', 'Tarefas', 'Horas Estimadas', 'Dias Estimados', 'Status'].map(t => ({ text: t, options: { bold: true, fill: '334155', color: 'ffffff' } }));
+    const tableRows = capacityData.map(d => {
+        const estimatedDays = Math.ceil(d.totalHours / 8);
+        let statusText = 'Livre';
+        if (d.totalHours > 40) statusText = 'Sobrecarga';
+        else if (d.totalHours > 24) statusText = 'Ocupado';
+        else if (d.totalHours > 8) statusText = 'Moderado';
+        
+        return [d.name, d.activeTasksCount, formatDuration(d.totalHours), `${estimatedDays}d`, statusText];
+    });
+
+    slide.addTable([tableHeader, ...tableRows], { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', border: { pt: 0, pb: 1, color: '475569' } });
+
+    pres.writeFile({ fileName: "Nexus_Dashboard.pptx" });
   };
 
   const renderWidget = (widget: Widget) => {
@@ -2328,7 +2409,11 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
              const tasksToDraw = ganttTasks.slice(0, 15);
              const minDate = new Date(Math.min(...tasksToDraw.map(t => new Date(t.startDate!).getTime())));
              const maxDate = new Date(Math.max(...tasksToDraw.map(t => new Date(t.endDate!).getTime())));
-             const totalDuration = maxDate.getTime() - minDate.getTime();
+             
+             // Add a buffer to total duration to avoid edge clipping
+             const buffer = (maxDate.getTime() - minDate.getTime()) * 0.1; 
+             const totalDuration = (maxDate.getTime() - minDate.getTime()) + buffer || 1; // Prevent div by zero
+             
              const chartX = 0.5; const chartW = 12; // inches
              
              tasksToDraw.forEach((task, idx) => {
