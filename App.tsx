@@ -1,5 +1,7 @@
+
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
   PieChart, Pie, Cell, LabelList, ComposedChart, Line, AreaChart, Area, LineChart 
@@ -174,7 +176,8 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
     primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30",
     secondary: "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600",
     danger: "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-500/30",
-    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30"
+    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30",
+    warning: "bg-amber-500 hover:bg-amber-600 text-black shadow-amber-500/30"
   };
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title} className={`${baseClass} ${variants[variant]} ${className}`}>
@@ -925,6 +928,9 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
 
 // ... ReportsView, RobotManagementView ...
 const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[] }) => {
+    // --- Power BI State ---
+    const [apiKey, setApiKey] = useState<string | null>(StorageService.getApiKey());
+    
     // --- Excel Exports ---
     const handleExportGeneral = () => {
         const data = tasks.map(t => ({
@@ -1038,6 +1044,23 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
         pres.writeFile({ fileName: "Nexus_Executivo.pptx" });
     };
 
+    const handleGenerateKey = () => {
+        const key = StorageService.generateApiKey();
+        setApiKey(key);
+    };
+
+    const powerBiUrl = useMemo(() => {
+        if (!apiKey) return '';
+        return `${window.location.origin}${window.location.pathname}#/powerbi-data?key=${apiKey}`;
+    }, [apiKey]);
+
+    const copyToClipboard = () => {
+        if (powerBiUrl) {
+            navigator.clipboard.writeText(powerBiUrl);
+            alert('URL copiada para a área de transferência!');
+        }
+    };
+
     return (
         <div className="space-y-6 pb-20 animate-fade-in">
             <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
@@ -1082,30 +1105,60 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
                     </div>
                 </div>
 
-                {/* PPT Section */}
-                <div className="space-y-4">
-                    <h3 className="text-xl font-bold text-orange-400 flex items-center gap-2">
-                        <IconChartBar className="w-6 h-6" /> Apresentações Executivas (PPT)
-                    </h3>
-                    <div className="grid grid-cols-1 gap-4">
-                        <Card className="hover:border-orange-500/50 transition-colors group cursor-pointer" onClick={handleExportExecutivePPT}>
-                            <div className="flex items-start justify-between">
-                                <div>
-                                    <h4 className="font-bold text-white group-hover:text-orange-400 transition-colors">Status Report Executivo</h4>
-                                    <p className="text-sm text-slate-400 mt-1">Slides com KPIs macro, volumetria por tipo e carga da equipe. Visão gerencial.</p>
+                {/* PPT & PowerBI Section */}
+                <div className="space-y-6">
+                    <div>
+                        <h3 className="text-xl font-bold text-orange-400 flex items-center gap-2 mb-4">
+                            <IconChartBar className="w-6 h-6" /> Apresentações Executivas (PPT)
+                        </h3>
+                        <div className="grid grid-cols-1 gap-4">
+                            <Card className="hover:border-orange-500/50 transition-colors group cursor-pointer" onClick={handleExportExecutivePPT}>
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <h4 className="font-bold text-white group-hover:text-orange-400 transition-colors">Status Report Executivo</h4>
+                                        <p className="text-sm text-slate-400 mt-1">Slides com KPIs macro, volumetria por tipo e carga da equipe. Visão gerencial.</p>
+                                    </div>
+                                    <div className="p-2 bg-orange-900/20 rounded-lg text-orange-400"><IconDownload className="w-6 h-6" /></div>
                                 </div>
-                                <div className="p-2 bg-orange-900/20 rounded-lg text-orange-400"><IconDownload className="w-6 h-6" /></div>
-                            </div>
-                        </Card>
-                         <Card className="opacity-75 cursor-not-allowed border-slate-700 bg-slate-800/50">
-                            <div className="flex items-start justify-between">
-                                <div>
-                                    <h4 className="font-bold text-slate-500">Book de Projetos (Em breve)</h4>
-                                    <p className="text-sm text-slate-600 mt-1">Detalhamento slide a slide de cada projeto em andamento com cronograma.</p>
-                                </div>
-                                <div className="p-2 bg-slate-900/20 rounded-lg text-slate-600"><IconClock className="w-6 h-6" /></div>
-                            </div>
-                        </Card>
+                            </Card>
+                        </div>
+                    </div>
+
+                    <div>
+                         <h3 className="text-xl font-bold text-yellow-500 flex items-center gap-2 mb-4">
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg>
+                             Integração Power BI
+                         </h3>
+                         <Card className="border-yellow-500/30 bg-yellow-900/5">
+                             <div className="flex justify-between items-start mb-4">
+                                 <div>
+                                     <h4 className="font-bold text-white">Chave de Conexão</h4>
+                                     <p className="text-sm text-slate-400 mt-1">Use este endpoint para conectar o Power BI ao Nexus (Modo Web).</p>
+                                 </div>
+                                 <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${apiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                     {apiKey ? 'Ativo' : 'Inativo'}
+                                 </div>
+                             </div>
+                             
+                             {apiKey ? (
+                                 <div className="space-y-3">
+                                     <div className="bg-slate-900 border border-slate-700 rounded p-3 flex items-center justify-between">
+                                         <code className="text-xs text-slate-300 font-mono break-all">{powerBiUrl}</code>
+                                         <button onClick={copyToClipboard} className="ml-2 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white" title="Copiar URL">
+                                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5" /></svg>
+                                         </button>
+                                     </div>
+                                     <div className="text-xs text-slate-500">
+                                         <strong>Como usar:</strong> No Power BI Desktop, selecione "Obter Dados" &gt; "Web" e cole a URL acima.
+                                     </div>
+                                     <Button variant="warning" onClick={handleGenerateKey} className="w-full text-xs mt-2">Regerar Chave</Button>
+                                 </div>
+                             ) : (
+                                 <div className="text-center py-4">
+                                     <Button variant="primary" onClick={handleGenerateKey}>Gerar Chave de Acesso</Button>
+                                 </div>
+                             )}
+                         </Card>
                     </div>
                 </div>
             </div>
@@ -1113,7 +1166,9 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
     );
 };
 
+// ... RobotManagementView ...
 const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots: any }) => {
+    // ... [Content Omitted for Brevity - Unchanged] ...
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('Todos');
     const [areaFilter, setAreaFilter] = useState('Todas');
@@ -1666,6 +1721,7 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
 };
 
 const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+    // ... [Content Omitted for Brevity - unchanged]
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       try {
           const saved = localStorage.getItem('nexus_dashboard_widgets');
@@ -2518,7 +2574,15 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 }
 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
-  const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
+  const navigate = useNavigate(); 
+  const location = useLocation(); 
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  
+  // If we are on the Power BI Data Route, we do NOT render the layout wrapper
+  if (location.pathname === '/powerbi-data') {
+      return <>{children}</>;
+  }
+
   const menuItems = [ 
       { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
       { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
@@ -2683,6 +2747,41 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
     )
 }
 
+// --- Power BI Data Endpoint View ---
+const PowerBIDataView = () => {
+    const [searchParams] = useSearchParams();
+    const key = searchParams.get('key');
+    const storedKey = StorageService.getApiKey();
+
+    if (!storedKey || key !== storedKey) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400 font-mono flex-col p-4">
+                <div className="text-4xl font-bold text-rose-500 mb-4">403</div>
+                <p>Acesso Negado</p>
+                <p className="text-sm mt-2 opacity-75">Chave de integração inválida ou não configurada.</p>
+            </div>
+        );
+    }
+
+    const data = {
+        generatedAt: new Date().toISOString(),
+        metadata: {
+            app: "Nexus Project",
+            version: "1.0",
+            endpoint: "powerbi-integration"
+        },
+        tasks: StorageService.getTasks(),
+        robots: StorageService.getRobots(),
+        developers: StorageService.getDevs()
+    };
+
+    return (
+        <pre className="p-4 bg-white text-black font-mono text-xs whitespace-pre-wrap h-full overflow-auto">
+            {JSON.stringify(data, null, 2)}
+        </pre>
+    );
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
@@ -2693,6 +2792,9 @@ export default function App() {
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
+
+  // Handle URL Key Auth logic bypass for data route happens in Layout/Routes config, but we need to check user auth for main app.
+  // The PowerBIDataView is public (protected by key), so we put it in Routes.
 
   const handleLogin = (loggedInUser: User) => { setUser(loggedInUser); };
   const handleLogout = () => { StorageService.logout(); setUser(null); };
@@ -2787,25 +2889,35 @@ export default function App() {
   const handleTaskDelete = (id: string) => { if (window.confirm("Tem certeza?")) { const newTasks = tasks.filter(t => t.id !== id); setTasks(newTasks); StorageService.saveTasks(newTasks); setEditingTask(null); } };
   const handleResetData = () => { StorageService.clearTasks(); setTasks([]); alert("Todas as demandas foram apagadas."); };
 
-  if (!user) return <AuthPage onLogin={handleLogin} />;
+  // If we are at the PowerBI Data Route, do not show auth page or layout, just the data view.
+  // We handle this with React Router structure below, but need to check path for conditional rendering of AuthPage
+  const isPowerBiRoute = window.location.hash.includes('powerbi-data');
+
+  if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
+  
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
 
   return (
     <HashRouter>
-      <Layout user={user} onLogout={handleLogout} headerContent={headerActions}>
+      {/* Routes definition handles the "Layout" wrapping internally */}
+      <Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>
         {isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}
         {isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}
         {editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}
         <Routes>
-          <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
-          <Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
-          <Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} />
-          <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
-          <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
-          <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
-          <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
-          <Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} />
-          <Route path="/profile" element={<UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
+          <Route path="/" element={!user ? <Navigate to="/" /> : <DashboardView tasks={tasks} devs={devs} />} />
+          <Route path="/projects" element={!user ? <Navigate to="/" /> : <ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
+          <Route path="/project-report" element={!user ? <Navigate to="/" /> : <ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} />
+          <Route path="/kanban" element={!user ? <Navigate to="/" /> : <KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
+          <Route path="/list" element={!user ? <Navigate to="/" /> : <ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user} />} />
+          <Route path="/gantt" element={!user ? <Navigate to="/" /> : <GanttView tasks={tasks} devs={devs} />} />
+          <Route path="/robots" element={!user ? <Navigate to="/" /> : <RobotManagementView robots={robots} setRobots={setRobots} />} />
+          <Route path="/reports" element={!user ? <Navigate to="/" /> : <ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} />
+          <Route path="/profile" element={!user ? <Navigate to="/" /> : <UserProfile user={user} setUser={setUser} onResetData={handleResetData} />} />
+          
+          {/* Public Data Route (Protected by Key) */}
+          <Route path="/powerbi-data" element={<PowerBIDataView />} />
+          
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Layout>

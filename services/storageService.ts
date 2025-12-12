@@ -8,7 +8,8 @@ const KEYS = {
   USER: 'nexus_user_active', // Active session
   REGISTRY: 'nexus_users_registry', // All registered users
   WORKFLOW: 'nexus_workflow_config_v4',
-  ROBOTS: 'nexus_robots_v1'
+  ROBOTS: 'nexus_robots_v1',
+  API_KEY: 'nexus_integration_key' // New Key
 };
 
 export const StorageService = {
@@ -87,6 +88,17 @@ export const StorageService = {
 
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
       localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
+  },
+
+  // --- API Key / Power BI ---
+  getApiKey: (): string | null => {
+      return localStorage.getItem(KEYS.API_KEY);
+  },
+
+  generateApiKey: (): string => {
+      const key = 'nx-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem(KEYS.API_KEY, key);
+      return key;
   },
 
   // --- Authentication Logic ---
