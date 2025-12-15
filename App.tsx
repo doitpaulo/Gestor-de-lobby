@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
@@ -2199,6 +2197,37 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
       }).sort((a, b) => (a.boardPosition || 0) - (b.boardPosition || 0));
   };
 
+  const getDeadlineInfo = (task: Task) => {
+      if (!task.endDate) return null;
+      
+      const start = task.startDate ? new Date(task.startDate).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}) : 'Inicio?';
+      const endFormatted = new Date(task.endDate).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+      
+      const endDate = new Date(task.endDate);
+      endDate.setHours(23,59,59,999); // End of day
+      const today = new Date();
+      const diffTime = endDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
+      
+      let statusColor = "bg-slate-800/50 text-slate-400 border-slate-700";
+      let label = "No Prazo";
+
+      if (isDone) {
+          statusColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+          label = "Entregue";
+      } else if (diffDays < 0) {
+          statusColor = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+          label = `${Math.abs(diffDays)}d Atraso`;
+      } else if (diffDays <= 3) {
+          statusColor = "bg-orange-500/10 text-orange-400 border-orange-500/30";
+          label = `${diffDays}d Restantes`;
+      }
+
+      return { range: `${start} - ${endFormatted}`, statusColor, label };
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center bg-slate-800 p-2 rounded-xl border border-slate-700 mb-4">
@@ -2245,21 +2274,36 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
                     <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">{colTasks.length}</span>
                 </div>
                 <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar h-full min-h-[100px]">
-                    {colTasks.map(task => (
-                        <div key={task.id} draggable onDragStart={(e) => onDragStart(e, task.id)} onClick={() => onEditTask(task)} className={`p-4 rounded-lg border hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all ${isCompletedCol ? 'bg-slate-800/50 border-slate-700 opacity-70 hover:opacity-100' : 'bg-slate-700 border-slate-600 hover:border-indigo-500'}`}>
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
-                        <div className="flex justify-between items-start mb-2 pl-2"><span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span><Badge type={task.priority} /></div>
-                        <h4 className={`text-sm font-medium mb-3 pl-2 line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.summary}</h4>
-                        <div className="flex justify-between items-end pl-2 mt-auto">
-                            <div className="flex flex-col gap-1">
-                                <Badge type={task.type} />
-                                <span className="text-[10px] text-slate-500 mt-1">{task.status}</span>
-                                {kanbanMode === 'status' && <span className="text-[10px] text-indigo-400 font-bold">{task.assignee || 'Sem Dev'}</span>}
+                    {colTasks.map(task => {
+                        const deadline = getDeadlineInfo(task);
+                        return (
+                            <div key={task.id} draggable onDragStart={(e) => onDragStart(e, task.id)} onClick={() => onEditTask(task)} className={`p-4 rounded-lg border hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all ${isCompletedCol ? 'bg-slate-800/50 border-slate-700 opacity-70 hover:opacity-100' : 'bg-slate-700 border-slate-600 hover:border-indigo-500'}`}>
+                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
+                            <div className="flex justify-between items-start mb-2 pl-2"><span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span><Badge type={task.priority} /></div>
+                            <h4 className={`text-sm font-medium mb-2 pl-2 line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.summary}</h4>
+                            
+                            {/* Date & Deadline Info */}
+                            {deadline && (
+                                <div className={`ml-2 mb-3 flex items-center justify-between px-2 py-1 rounded border text-[10px] ${deadline.statusColor}`}>
+                                    <div className="flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
+                                        <span className="font-mono">{deadline.range}</span>
+                                    </div>
+                                    <span className="font-bold uppercase tracking-wide">{deadline.label}</span>
+                                </div>
+                            )}
+
+                            <div className="flex justify-between items-end pl-2 mt-auto">
+                                <div className="flex flex-col gap-1">
+                                    <Badge type={task.type} />
+                                    <span className="text-[10px] text-slate-500 mt-1">{task.status}</span>
+                                    {kanbanMode === 'status' && <span className="text-[10px] text-indigo-400 font-bold">{task.assignee || 'Sem Dev'}</span>}
+                                </div>
+                                {task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded"><IconClock className="w-3 h-3" /> {task.estimatedTime}</div>)}
                             </div>
-                            {task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded"><IconClock className="w-3 h-3" /> {task.estimatedTime}</div>)}
-                        </div>
-                        </div>
-                    ))}
+                            </div>
+                        )
+                    })}
                     {colTasks.length === 0 && (<div className="h-20 flex items-center justify-center text-slate-600 text-xs italic border-2 border-dashed border-slate-700/50 rounded-lg">Arraste tarefas aqui</div>)}
                 </div>
                 </div>
