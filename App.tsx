@@ -79,7 +79,7 @@ const DEFAULT_WORKFLOW: WorkflowPhase[] = [
         name: 'Desenvolvimento',
         statuses: [
             'Não iniciado', 
-            'Concluído',
+            'Concluído', 
             'Elaborar DoD – BA',
             'Validar DoD – BA / DEV / DEV SR',
             'Elaborar Plano de Teste QA/DEV'
@@ -263,7 +263,7 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
                             className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-700 rounded cursor-pointer"
                         >
                             <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.includes(opt) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-500'}`}>
-                                {selected.includes(opt) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                {selected.includes(opt) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                             </div>
                             <span className="text-sm text-slate-300">{opt}</span>
                         </div>
@@ -1226,25 +1226,226 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     );
 };
 
-// ... Rest of the unchanged components (ReportsView, RobotManagementView, etc.)
-// Omitting for brevity as they remain identical to the provided source.
-
 const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[] }) => {
     const [apiKey, setApiKey] = useState<string | null>(StorageService.getApiKey());
-    const handleExportGeneral = () => { const data = tasks.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Prioridade': t.priority, 'Status': t.status, 'Responsável': t.assignee || 'Não Atribuído', 'Criado Em': t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '', 'Solicitante': t.requester, 'Estimativa': t.estimatedTime || '', 'Tempo Real': t.actualTime || '', 'Início': t.startDate || '', 'Fim': t.endDate || '', 'Gerência': t.managementArea || '', 'FTE': t.fteValue || 0 })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Demandas"); XLSX.writeFile(wb, "Nexus_Geral.xlsx"); };
-    const handleExportBacklog = () => { const backlog = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado', 'Cancelado'].includes(t.status)); const data = backlog.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Status': t.status, 'Prioridade': t.priority, 'Responsável': t.assignee || 'Não Atribuído' })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Backlog"); XLSX.writeFile(wb, "Nexus_Backlog.xlsx"); };
-    const handleExportRobots = () => { const data = robots.map(r => ({ 'Nome': r.name, 'Status': r.status, 'Área': r.area, 'Desenvolvedor': r.developer, 'FTE': r.fte, 'Pasta': r.folder })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Robôs"); XLSX.writeFile(wb, "Nexus_Inventario_RPA.xlsx"); };
-    const handleExportExecutivePPT = () => { const pres = new pptxgen(); pres.layout = 'LAYOUT_WIDE'; const total = tasks.length; const active = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length; const incidents = tasks.filter(t => t.type === 'Incidente' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length; const improvements = tasks.filter(t => t.type === 'Melhoria' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length; const automations = tasks.filter(t => t.type === 'Nova Automação' && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length; let slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Relatório Executivo Mensal", { x: 1, y: 3, fontSize: 36, color: 'FFFFFF', bold: true }); slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 4, fontSize: 18, color: '94a3b8' }); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Visão Geral do Portfólio", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true }); const cardY = 1.5; const cardW = 2.5; const cardH = 1.5; const gap = 0.5; const drawCard = (x:number, title:string, val:number, color:string) => { slide.addShape(pres.ShapeType.roundRect, { x, y: cardY, w: cardW, h: cardH, fill: { color: '1e293b' }, line: { color, width: 2 } }); slide.addText(title, { x, y: cardY + 0.2, w: cardW, fontSize: 14, color: '94a3b8', align: 'center' }); slide.addText(val.toString(), { x, y: cardY + 0.6, w: cardW, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' }); }; drawCard(0.5, "Total Ativos", active, '6366f1'); drawCard(0.5 + cardW + gap, "Incidentes", incidents, 'e11d48'); drawCard(0.5 + (cardW + gap)*2, "Melhorias", improvements, '10b981'); drawCard(0.5 + (cardW + gap)*3, "Automações", automations, '8b5cf6'); slide.addText("Volume por Desenvolvedor (Ativos)", { x: 0.5, y: 3.5, fontSize: 18, color: 'FFFFFF' }); const devData = devs.map(d => { const count = tasks.filter(t => t.assignee === d.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).length; return { name: d.name, count }; }).sort((a,b) => b.count - a.count); const chartLabels = devData.map(d => d.name); const chartValues = devData.map(d => d.count); if (chartLabels.length > 0) { slide.addChart(pres.ChartType.bar, [{ name: 'Demandas', labels: chartLabels, values: chartValues }], { x: 0.5, y: 4, w: '90%', h: 3, chartColors: ['6366f1'], barDir: 'col', valAxisMaxVal: Math.max(...chartValues) + 2, valAxisLabelColor: 'ffffff', catAxisLabelColor: 'ffffff' }); } pres.writeFile({ fileName: "Nexus_Executivo.pptx" }); };
+    const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['general', 'exec_summary', 'chart_status']));
+
+    const toggleModule = (id: string) => {
+        const next = new Set(selectedModules);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedModules(next);
+    };
+
+    const handleCustomExportExcel = () => {
+        if (selectedModules.size === 0) return alert('Selecione ao menos um módulo!');
+        const wb = XLSX.utils.book_new();
+
+        if (selectedModules.has('general')) {
+            const data = tasks.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Prioridade': t.priority, 'Status': t.status, 'Responsável': t.assignee || 'Não Atribuído', 'Criado Em': t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '', 'Solicitante': t.requester, 'Estimativa': t.estimatedTime || '', 'Tempo Real': t.actualTime || '', 'Início': t.startDate || '', 'Fim': t.endDate || '', 'Gerência': t.managementArea || '', 'FTE': t.fteValue || 0 }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Base Geral");
+        }
+        if (selectedModules.has('backlog')) {
+            const backlog = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado', 'Cancelado'].includes(t.status));
+            const data = backlog.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Status': t.status, 'Prioridade': t.priority, 'Responsável': t.assignee || 'Não Atribuído' }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Backlog");
+        }
+        if (selectedModules.has('robots')) {
+            const data = robots.map(r => ({ 'Nome': r.name, 'Status': r.status, 'Área': r.area, 'Desenvolvedor': r.developer, 'FTE': r.fte, 'Pasta': r.folder }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Inventário RPA");
+        }
+        if (selectedModules.has('capacity_table')) {
+            const capacityData = devs.map(dev => {
+                const myTasks = tasks.filter(t => t.assignee === dev.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+                const totalHours = myTasks.reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
+                return { 'Desenvolvedor': dev.name, 'Demandas Ativas': myTasks.length, 'Carga Estimada (h)': totalHours.toFixed(1), 'Dias Úteis Est.': Math.ceil(totalHours / 8) };
+            });
+            const ws = XLSX.utils.json_to_sheet(capacityData);
+            XLSX.utils.book_append_sheet(wb, ws, "Capacidade Equipe");
+        }
+
+        XLSX.writeFile(wb, "Nexus_Report_Personalizado.xlsx");
+    };
+
+    const handleCustomExportPPT = () => {
+        if (selectedModules.size === 0) return alert('Selecione ao menos um módulo!');
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+
+        // Slide de Capa
+        let slide = pres.addSlide();
+        slide.background = { color: "0f172a" };
+        slide.addText("Relatório de Performance Nexus", { x: 1, y: 3, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true });
+        slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 4, fontSize: 18, color: '94a3b8' });
+
+        const activeTasks = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+
+        if (selectedModules.has('exec_summary')) {
+            slide = pres.addSlide();
+            slide.background = { color: "0f172a" };
+            slide.addText("Resumo Executivo do Portfólio", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
+            const metrics = {
+                active: activeTasks.length,
+                inc: activeTasks.filter(t => t.type === 'Incidente').length,
+                mel: activeTasks.filter(t => t.type === 'Melhoria').length,
+                aut: activeTasks.filter(t => t.type === 'Nova Automação').length
+            };
+            const drawCard = (x:number, title:string, val:number, color:string) => {
+                slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
+                slide.addText(title, { x, y: 1.7, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' });
+                slide.addText(val.toString(), { x, y: 2.2, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' });
+            };
+            drawCard(0.5, "Total Ativos", metrics.active, '6366f1');
+            drawCard(3.5, "Incidentes", metrics.inc, 'e11d48');
+            drawCard(6.5, "Melhorias", metrics.mel, '10b981');
+            drawCard(9.5, "Automações", metrics.aut, '8b5cf6');
+        }
+
+        if (selectedModules.has('chart_status')) {
+            slide = pres.addSlide();
+            slide.background = { color: "0f172a" };
+            slide.addText("Distribuição por Status", { x: 0.5, y: 0.5, fontSize: 22, color: 'FFFFFF' });
+            const grouped = ['Novo', 'Pendente', 'Em Progresso', 'Aguardando', 'Backlog'].map(s => {
+                return { name: s, value: activeTasks.filter(t => t.status === s).length };
+            }).filter(d => d.value > 0);
+            if (grouped.length > 0) {
+                slide.addChart(pres.ChartType.bar, [{ name: 'Status', labels: grouped.map(g => g.name), values: grouped.map(g => g.value) }], { x: 0.5, y: 1.5, w: 12, h: 4, barDir: 'col', chartColors: ['6366f1'], valAxisLabelColor: 'ffffff', catAxisLabelColor: 'ffffff' });
+            }
+        }
+
+        if (selectedModules.has('table_capacity')) {
+            slide = pres.addSlide();
+            slide.background = { color: "0f172a" };
+            slide.addText("Capacidade da Equipe (Backlog Ativo)", { x: 0.5, y: 0.5, fontSize: 22, color: 'FFFFFF' });
+            const capData = devs.map(d => {
+                const h = tasks.filter(t => t.assignee === d.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
+                return [d.name, formatDuration(h), `${Math.ceil(h / 8)}d`];
+            });
+            slide.addTable([['Dev', 'Horas', 'Dias Est.'], ...capData], { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', fill: '1e293b', fontSize: 12, border: { color: '334155' } });
+        }
+
+        if (selectedModules.has('chart_fte')) {
+            slide = pres.addSlide();
+            slide.background = { color: "0f172a" };
+            slide.addText("Geração de Valor (FTE) por Área", { x: 0.5, y: 0.5, fontSize: 22, color: 'FFFFFF' });
+            const fteMap: Record<string, number> = {};
+            activeTasks.forEach(t => { const area = t.managementArea || 'N/A'; fteMap[area] = (fteMap[area] || 0) + (Number(t.fteValue) || 0); });
+            const fteData = Object.entries(fteMap).map(([name, value]) => ({ name, value }));
+            if (fteData.length > 0) {
+                slide.addChart(pres.ChartType.bar, [{ name: 'FTE', labels: fteData.map(d => d.name), values: fteData.map(d => d.value) }], { x: 0.5, y: 1.5, w: 12, h: 4, barDir: 'bar', chartColors: ['10b981'], valAxisLabelColor: 'ffffff', catAxisLabelColor: 'ffffff' });
+            }
+        }
+
+        pres.writeFile({ fileName: `Nexus_Apresentacao_${Date.now()}.pptx` });
+    };
+
     const handleGenerateKey = () => { const key = StorageService.generateApiKey(); setApiKey(key); };
     const powerBiUrl = useMemo(() => { if (!apiKey) return ''; return `${window.location.origin}${window.location.pathname}#/powerbi-data?key=${apiKey}`; }, [apiKey]);
     const copyToClipboard = () => { if (powerBiUrl) { navigator.clipboard.writeText(powerBiUrl); alert('URL copiada para a área de transferência!'); } };
 
+    const exportOptions = [
+        { id: 'general', label: 'Base Geral de Demandas', cat: 'Operacional', icon: <IconList className="w-4 h-4" /> },
+        { id: 'backlog', label: 'Relatório de Backlog', cat: 'Operacional', icon: <IconClock className="w-4 h-4" /> },
+        { id: 'robots', label: 'Inventário de Robôs', cat: 'Operacional', icon: <IconRobot className="w-4 h-4" /> },
+        { id: 'capacity_table', label: 'Tabela de Capacidade', cat: 'Operacional', icon: <IconUsers className="w-4 h-4" /> },
+        { id: 'exec_summary', label: 'KPIs do Portfólio (Cards)', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
+        { id: 'chart_status', label: 'Gráfico: Status por Tipo', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
+        { id: 'chart_fte', label: 'Gráfico: FTE por Área', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
+        { id: 'table_capacity', label: 'Tabela: Carga da Equipe', cat: 'Gerencial', icon: <IconUsers className="w-4 h-4" /> },
+    ];
+
     return (
         <div className="space-y-6 pb-20 animate-fade-in">
-            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700"><h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2><p className="text-slate-400">Extração de dados e apresentações automatizadas para gestão.</p></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4"><h3 className="text-xl font-bold text-emerald-400 flex items-center gap-2"><IconList className="w-6 h-6" /> Exportações Operacionais (Excel)</h3><div className="grid grid-cols-1 gap-4"><Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportGeneral}><div className="flex items-start justify-between"><div><h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Base Geral de Demandas</h4><p className="text-sm text-slate-400 mt-1">Extração completa de todas as tarefas, incluindo histórico, datas e responsáveis.</p></div><div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconUpload className="w-6 h-6" /></div></div></Card><Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportBacklog}><div className="flex items-start justify-between"><div><h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Relatório de Backlog</h4><p className="text-sm text-slate-400 mt-1">Apenas itens pendentes, em andamento ou aguardando. Ideal para daily/weekly.</p></div><div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconUpload className="w-6 h-6" /></div></div></Card><Card className="hover:border-emerald-500/50 transition-colors group cursor-pointer" onClick={handleExportRobots}><div className="flex items-start justify-between"><div><h4 className="font-bold text-white group-hover:text-emerald-400 transition-colors">Inventário de Robôs (RPA)</h4><p className="text-sm text-slate-400 mt-1">Lista consolidada de todos os robôs cadastrados, status e FTEs.</p></div><div className="p-2 bg-emerald-900/20 rounded-lg text-emerald-400"><IconUpload className="w-6 h-6" /></div></div></Card></div></div>
-                <div className="space-y-6"><div><h3 className="text-xl font-bold text-orange-400 flex items-center gap-2 mb-4"><IconChartBar className="w-6 h-6" /> Apresentações Executivas (PPT)</h3><div className="grid grid-cols-1 gap-4"><Card className="hover:border-orange-500/50 transition-colors group cursor-pointer" onClick={handleExportExecutivePPT}><div className="flex items-start justify-between"><div><h4 className="font-bold text-white group-hover:text-orange-400 transition-colors">Status Report Executivo</h4><p className="text-sm text-slate-400 mt-1">Slides com KPIs macro, volumetria por tipo e carga da equipe. Visão gerencial.</p></div><div className="p-2 bg-orange-900/20 rounded-lg text-orange-400"><IconUpload className="w-6 h-6" /></div></div></Card></div></div><div><h3 className="text-xl font-bold text-yellow-500 flex items-center gap-2 mb-4"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg>Integração Power BI</h3><Card className="border-yellow-500/30 bg-yellow-900/5"><div className="flex justify-between items-start mb-4"><div><h4 className="font-bold text-white">Chave de Conexão</h4><p className="text-sm text-slate-400 mt-1">Use este endpoint para conectar o Power BI ao Nexus (Modo Web).</p></div><div className={`px-2 py-1 rounded text-xs font-bold uppercase ${apiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>{apiKey ? 'Ativo' : 'Inativo'}</div></div>{apiKey ? (<div className="space-y-3"><div className="bg-slate-900 border border-slate-700 rounded p-3 flex items-center justify-between"><code className="text-xs text-slate-300 font-mono break-all">{powerBiUrl}</code><button onClick={copyToClipboard} className="ml-2 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white" title="Copiar URL"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5" /></svg></button></div><div className="text-xs text-slate-500"><strong>Como usar:</strong> No Power BI Desktop, selecione "Obter Dados" &gt; "Web" e cole a URL acima.</div><Button variant="warning" onClick={handleGenerateKey} className="w-full text-xs mt-2">Regerar Chave</Button></div>) : (<div className="text-center py-4"><Button variant="primary" onClick={handleGenerateKey}>Gerar Chave de Acesso</Button></div>)}</Card></div></div>
+            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                <h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2>
+                <p className="text-slate-400">Extração de dados personalizada para gestão e operações.</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                    <Card className="border-indigo-500/30 bg-indigo-900/5">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                <IconDocument className="w-6 h-6 text-indigo-400" /> Relatório Personalizado
+                            </h3>
+                            <div className="flex gap-2">
+                                <button onClick={() => setSelectedModules(new Set(exportOptions.map(o => o.id)))} className="text-xs text-indigo-400 hover:underline">Selecionar Todos</button>
+                                <button onClick={() => setSelectedModules(new Set())} className="text-xs text-slate-500 hover:underline">Limpar</button>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Operacionais</h4>
+                                <div className="space-y-2">
+                                    {exportOptions.filter(o => o.cat === 'Operacional').map(opt => (
+                                        <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedModules.has(opt.id) ? 'bg-indigo-600/10 border-indigo-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                                            <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
+                                            <div className={`w-5 h-5 rounded flex items-center justify-center border ${selectedModules.has(opt.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600'}`}>
+                                                {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
+                                            </div>
+                                            <span className="text-sm font-medium">{opt.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Gerenciais (PPT)</h4>
+                                <div className="space-y-2">
+                                    {exportOptions.filter(o => o.cat === 'Gerencial').map(opt => (
+                                        <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedModules.has(opt.id) ? 'bg-emerald-600/10 border-emerald-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                                            <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
+                                            <div className={`w-5 h-5 rounded flex items-center justify-center border ${selectedModules.has(opt.id) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
+                                                {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
+                                            </div>
+                                            <span className="text-sm font-medium">{opt.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-4 pt-6 border-t border-slate-700">
+                            <Button variant="success" onClick={handleCustomExportExcel} className="flex-1 min-w-[200px] py-3">
+                                <IconDownload className="w-5 h-5" /> Exportar para Excel (.xlsx)
+                            </Button>
+                            <Button variant="primary" onClick={handleCustomExportPPT} className="flex-1 min-w-[200px] py-3">
+                                <IconDownload className="w-5 h-5" /> Exportar para PowerPoint (.pptx)
+                            </Button>
+                        </div>
+                    </Card>
+                </div>
+
+                <div className="space-y-6">
+                    <h3 className="text-xl font-bold text-yellow-500 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg> Integração Power BI
+                    </h3>
+                    <Card className="border-yellow-500/30 bg-yellow-900/5">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h4 className="font-bold text-white">Chave de Conexão</h4>
+                                <p className="text-sm text-slate-400 mt-1">Sincronização em tempo real via endpoint JSON.</p>
+                            </div>
+                            <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${apiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>{apiKey ? 'Ativo' : 'Inativo'}</div>
+                        </div>
+                        {apiKey ? (
+                            <div className="space-y-3">
+                                <div className="bg-slate-900 border border-slate-700 rounded p-3 flex items-center justify-between">
+                                    <code className="text-xs text-slate-300 font-mono break-all">{powerBiUrl}</code>
+                                    <button onClick={copyToClipboard} className="ml-2 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5" /></svg>
+                                    </button>
+                                </div>
+                                <Button variant="warning" onClick={handleGenerateKey} className="w-full text-xs mt-2">Regerar Chave</Button>
+                            </div>
+                        ) : (
+                            <Button variant="primary" onClick={handleGenerateKey} className="w-full">Gerar Chave de Acesso</Button>
+                        )}
+                    </Card>
+                </div>
             </div>
         </div>
     );
