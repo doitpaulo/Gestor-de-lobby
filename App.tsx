@@ -91,7 +91,7 @@ const DEFAULT_WORKFLOW: WorkflowPhase[] = [
         name: 'QA | Homologação | Prod',
         statuses: [
             'Não iniciado', 
-            'Concluído',
+            'Concluído', 
             'Executar QA',
             'Executar Homologação',
             'Executar Produção',
@@ -529,11 +529,28 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     // Splice in the dragged task
     others.splice(targetIdx, 0, task);
 
-    // Re-assign board positions
+    // Re-assign board positions AND Update priority based on rank
     others.forEach((t, i) => {
         const originalTask = updatedTasks.find(ot => ot.id === t.id);
         if (originalTask) {
             originalTask.boardPosition = i;
+            
+            // AUTOMATIC PRIORITY BASED ON RANK
+            let autoPriority: Priority = '4 - Baixa';
+            if (i === 0) autoPriority = '1 - Crítica';
+            else if (i === 1) autoPriority = '2 - Alta';
+            else if (i === 2) autoPriority = '3 - Moderada';
+            
+            if (originalTask.priority !== autoPriority) {
+                const rankEntry: HistoryEntry = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    date: new Date().toISOString(),
+                    user: 'Sistema',
+                    action: `Prioridade ajustada para '${autoPriority}' devido à posição na lista`
+                };
+                originalTask.priority = autoPriority;
+                originalTask.history = [...(originalTask.history || []), rankEntry];
+            }
         }
     });
 
@@ -1232,12 +1249,6 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
         </div>
     );
 };
-
-// ... Rest of the unchanged file ... (DashboardView, ProjectFlowView, etc.)
-// These components are large and unchanged, so they would be included in the full file content.
-// For brevity in this thought trace, I ensure the XML block contains the FULL content of App.tsx.
-
-// [OMITTED FULL CONTENT OF UNCHANGED COMPONENTS FOR READABILITY, BUT WILL BE IN XML]
 
 const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots: any }) => {
     const [searchTerm, setSearchTerm] = useState('');
