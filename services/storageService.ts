@@ -1,6 +1,5 @@
 
-
-import { Task, Developer, User, WorkflowPhase, Robot } from '../types';
+import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
@@ -9,7 +8,8 @@ const KEYS = {
   REGISTRY: 'nexus_users_registry', // All registered users
   WORKFLOW: 'nexus_workflow_config_v4',
   ROBOTS: 'nexus_robots_v1',
-  API_KEY: 'nexus_integration_key' // New Key
+  API_KEY: 'nexus_integration_key', // New Key
+  DOCUMENTS: 'nexus_docs_config_v1'
 };
 
 export const StorageService = {
@@ -88,6 +88,20 @@ export const StorageService = {
 
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
       localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
+  },
+
+  // --- Documents Config ---
+  getDocumentsConfig: (defaults: DocumentConfig[]): DocumentConfig[] => {
+      try {
+          const data = localStorage.getItem(KEYS.DOCUMENTS);
+          return data ? JSON.parse(data) : defaults;
+      } catch {
+          return defaults;
+      }
+  },
+
+  saveDocumentsConfig: (config: DocumentConfig[]) => {
+      localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(config));
   },
 
   // --- API Key / Power BI ---
@@ -181,7 +195,8 @@ export const StorageService = {
           automationName: newTask.automationName || existing.automationName, // Preserve automation name
           fteValue: existing.fteValue, // Preserve FTE
           managementArea: existing.managementArea, // Preserve Management Area
-          blocker: existing.blocker // Preserve Blocker
+          blocker: existing.blocker, // Preserve Blocker
+          docStatuses: existing.docStatuses // Preserve Document Statuses
         };
 
         taskMap.set(newTask.id, mergedTask);

@@ -9,13 +9,30 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot } from './types';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
 const PRIORITIES = ['1 - Crítica', '2 - Alta', '3 - Moderada', '4 - Baixa'];
 const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog'];
+
+const DEFAULT_DOCS: DocumentConfig[] = [
+    { id: 'doc1', label: 'Planilha BC', active: true },
+    { id: 'doc2', label: 'Desenho Macro', active: true },
+    { id: 'doc3', label: 'Requisito Funcional e Técnico', active: true },
+    { id: 'doc4', label: 'Estudo de Viabilidade / Comitê', active: true },
+    { id: 'doc5', label: 'Informativo de Kick Off', active: true },
+    { id: 'doc6', label: 'Desenho AS-IS', active: true },
+    { id: 'doc7', label: 'Template DOR', active: true },
+    { id: 'doc8', label: 'Desenho TO-BE', active: true },
+    { id: 'doc9', label: 'PDD', active: true },
+    { id: 'doc10', label: 'SDD', active: true },
+    { id: 'doc11', label: 'Plano de Teste Homologação (QA)', active: true },
+    { id: 'doc12', label: 'Plano de Teste Produção (QA)', active: true },
+    { id: 'doc13', label: 'DoD', active: true },
+    { id: 'doc14', label: 'Informativo Go Live', active: true },
+];
 
 const DEFAULT_WORKFLOW: WorkflowPhase[] = [
     {
@@ -425,6 +442,199 @@ const renderCustomBarLabel = (props: any) => {
       {value}
     </text>
   );
+};
+
+// --- NEW SESSION: DocumentPipelineView ---
+const DocumentPipelineView = ({ tasks, setTasks, devs, documentsConfig, setDocumentsConfig, user }: any) => {
+    const [filters, setFilters] = useState<{search: string, assignee: string[]}>({ search: '', assignee: [] });
+    const [isAddDocOpen, setIsAddDocOpen] = useState(false);
+    const [newDocLabel, setNewDocLabel] = useState('');
+
+    const activeDocs = useMemo(() => documentsConfig.filter((d: any) => d.active), [documentsConfig]);
+
+    const filteredProjects = useMemo(() => {
+        return tasks.filter((t: Task) => {
+            const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação';
+            if (!isProjectType) return false;
+            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase());
+            const matchesAssignee = filters.assignee.length === 0 || (t.assignee && filters.assignee.includes(t.assignee));
+            return matchesSearch && matchesAssignee;
+        });
+    }, [tasks, filters]);
+
+    const toggleDocStatus = (taskId: string, docId: string) => {
+        const statuses: ('Pendente' | 'Em andamento' | 'Concluído')[] = ['Pendente', 'Em andamento', 'Concluído'];
+        const updatedTasks = tasks.map((t: Task) => {
+            if (t.id === taskId) {
+                const currentStatuses = t.docStatuses || {};
+                const current = currentStatuses[docId] || 'Pendente';
+                const next = statuses[(statuses.indexOf(current) + 1) % statuses.length];
+                return { ...t, docStatuses: { ...currentStatuses, [docId]: next } };
+            }
+            return t;
+        });
+        setTasks(updatedTasks);
+        StorageService.saveTasks(updatedTasks);
+    };
+
+    const handleAddDocument = () => {
+        if (!newDocLabel) return;
+        const newDoc: DocumentConfig = {
+            id: `custom-doc-${Date.now()}`,
+            label: newDocLabel,
+            active: true
+        };
+        const updatedConfig = [...documentsConfig, newDoc];
+        setDocumentsConfig(updatedConfig);
+        StorageService.saveDocumentsConfig(updatedConfig);
+        setNewDocLabel('');
+        setIsAddDocOpen(false);
+    };
+
+    const handleDeleteDocument = (docId: string) => {
+        if (window.confirm('Tem certeza que deseja remover este documento da esteira?')) {
+            const updatedConfig = documentsConfig.map((d: any) => d.id === docId ? { ...d, active: false } : d);
+            setDocumentsConfig(updatedConfig);
+            StorageService.saveDocumentsConfig(updatedConfig);
+        }
+    };
+
+    const handleExportExcel = () => {
+        const exportData = filteredProjects.map((t: Task) => {
+            const row: any = {
+                'ID': t.id,
+                'Projeto': t.summary,
+                'Tipo': t.type,
+                'Responsável': t.assignee || 'Não Atribuído'
+            };
+            activeDocs.forEach((doc: any) => {
+                row[doc.label] = (t.docStatuses || {})[doc.id] || 'Pendente';
+            });
+            return row;
+        });
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Esteira Documental");
+        XLSX.writeFile(wb, "Nexus_Esteira_Documental.xlsx");
+    };
+
+    const getStatusStyle = (status: string) => {
+        if (status === 'Concluído') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+        if (status === 'Em andamento') return 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30';
+        return 'bg-amber-500/20 text-amber-400 border-amber-500/30'; // Pendente
+    };
+
+    return (
+        <div className="h-full flex flex-col space-y-4 animate-fade-in">
+            <div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div>
+                    <h2 className="text-xl font-bold text-white">Esteira Documental</h2>
+                    <p className="text-sm text-slate-400">Controle dinâmico de entregáveis por projeto</p>
+                </div>
+                <div className="flex gap-2">
+                    <Button onClick={handleExportExcel} variant="success"><IconDownload className="w-4 h-4" /> Exportar</Button>
+                    <Button onClick={() => setIsAddDocOpen(true)} variant="primary"><IconPlus className="w-4 h-4" /> Adicionar Documento</Button>
+                </div>
+            </div>
+
+            <div className="flex gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 items-center">
+                <div className="flex-1 relative">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                    </svg>
+                    <input 
+                        type="text" 
+                        placeholder="Buscar projeto..." 
+                        className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none"
+                        value={filters.search}
+                        onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                    />
+                </div>
+                <MultiSelect 
+                    placeholder="Desenvolvedores"
+                    options={devs.map((d: any) => d.name)}
+                    selected={filters.assignee}
+                    onChange={(val) => setFilters(prev => ({ ...prev, assignee: val }))}
+                />
+            </div>
+
+            <div className="flex-1 overflow-x-auto bg-slate-900/50 rounded-xl border border-slate-700 custom-scrollbar">
+                <table className="w-full text-left text-xs border-collapse min-w-max">
+                    <thead className="bg-slate-800 sticky top-0 z-20 shadow-md">
+                        <tr>
+                            <th className="p-4 border-b border-slate-700 sticky left-0 bg-slate-800 z-30 min-w-[250px]">Projeto</th>
+                            {activeDocs.map((doc: any) => (
+                                <th key={doc.id} className="p-4 border-b border-slate-700 text-center min-w-[150px] group relative">
+                                    <div className="flex items-center justify-center gap-2">
+                                        <span>{doc.label}</span>
+                                        <button onClick={() => handleDeleteDocument(doc.id)} className="opacity-0 group-hover:opacity-100 text-rose-500 hover:text-rose-400 p-1" title="Excluir documento">🗑️</button>
+                                    </div>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {filteredProjects.map((p: Task) => (
+                            <tr key={p.id} className="hover:bg-slate-800/40 border-b border-slate-800/50 transition-colors">
+                                <td className="p-4 sticky left-0 bg-slate-900/95 z-10 border-r border-slate-800">
+                                    <div className="flex flex-col">
+                                        <span className="font-bold text-slate-200 truncate max-w-[200px]" title={p.summary}>{p.summary}</span>
+                                        <div className="flex gap-2 items-center mt-1">
+                                            <span className="text-[10px] font-mono text-slate-500">{p.id}</span>
+                                            <span className="text-[10px] text-indigo-400 font-medium">{p.assignee || 'Sem Dev'}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                {activeDocs.map((doc: any) => {
+                                    const status = (p.docStatuses || {})[doc.id] || 'Pendente';
+                                    return (
+                                        <td key={doc.id} className="p-2 text-center">
+                                            <button 
+                                                onClick={() => toggleDocStatus(p.id, doc.id)}
+                                                className={`w-full py-2 px-3 rounded-lg border text-[10px] font-bold uppercase transition-all hover:brightness-125 ${getStatusStyle(status)}`}
+                                            >
+                                                {status}
+                                            </button>
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {filteredProjects.length === 0 && (
+                    <div className="p-20 text-center text-slate-500 flex flex-col items-center gap-4">
+                        <IconProject className="w-12 h-12 opacity-20" />
+                        <p>Nenhum projeto encontrado para os filtros selecionados.</p>
+                    </div>
+                )}
+            </div>
+
+            {isAddDocOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-md shadow-2xl">
+                        <div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">Novo Documento</h3></div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1">Nome do Documento</label>
+                                <input 
+                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500"
+                                    value={newDocLabel}
+                                    onChange={e => setNewDocLabel(e.target.value)}
+                                    placeholder="Ex: PDD V2, Evidências..."
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3 pt-4">
+                                <Button variant="secondary" onClick={() => setIsAddDocOpen(false)}>Cancelar</Button>
+                                <Button onClick={handleAddDocument} disabled={!newDocLabel}>Adicionar</Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 };
 
 const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
@@ -1590,7 +1800,7 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
   if (location.pathname === '/powerbi-data') return <>{children}</>;
-  const menuItems = [ { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } ];
+  const menuItems = [ { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental' }, { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } ];
   return (<div className="flex h-screen bg-dark-900 text-slate-200 font-sans"><aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}><button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"><IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} /></button><div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}><div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div><h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1></div><nav className="flex-1 p-4 space-y-2 mt-4">{menuItems.map(item => (<button key={item.path} onClick={() => navigate(item.path)} title={isCollapsed ? item.label : ''} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${location.pathname === item.path ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${isCollapsed ? 'justify-center px-0' : ''}`}>{item.icon}<span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{item.label}</span></button>))}</nav><div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{!isCollapsed && <><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></>}</div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div></aside><main className="flex-1 overflow-hidden relative flex flex-col"><header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800"><div className="pointer-events-auto">{headerContent}</div></header><div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" /><div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">{children}</div></main></div>);
 };
 
@@ -1623,6 +1833,7 @@ export default function App() {
   const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
   const [robots, setRobots] = useState<Robot[]>(StorageService.getRobots());
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
+  const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(StorageService.getDocumentsConfig(DEFAULT_DOCS));
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -1641,5 +1852,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

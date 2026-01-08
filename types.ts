@@ -1,5 +1,4 @@
 
-
 export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
 export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog';
@@ -22,6 +21,12 @@ export interface ProjectLifecycleData {
     currentPhaseId: string;
     phaseStatus: string;
     completedActivities: string[]; // List of Activity Names/IDs
+}
+
+export interface DocumentConfig {
+    id: string;
+    label: string;
+    active: boolean;
 }
 
 export interface Task {
@@ -62,6 +67,9 @@ export interface Task {
   
   // Project Lifecycle
   projectData?: ProjectLifecycleData;
+
+  // Esteira Documental
+  docStatuses?: Record<string, 'Pendente' | 'Em andamento' | 'Concluído'>;
 
   // Audit Log
   history?: HistoryEntry[];
