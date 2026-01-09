@@ -181,6 +181,157 @@ const getDevWorkload = (devName: string, tasks: Task[], excludeTaskId?: string):
         .reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
 };
 
+// --- Consolidated Report Logic ---
+
+const ConsolidatedReportService = {
+  exportExcel: (tasks: Task[], robots: Robot[], workflowConfig: WorkflowPhase[], docsConfig: DocumentConfig[], devs: Developer[]) => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Dashboard Summary
+    const activeTasks = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+    const dashData = [
+      { Métrica: 'Total de Demandas Ativas', Valor: activeTasks.length },
+      { Métrica: 'Incidentes Ativos', Valor: activeTasks.filter(t => t.type === 'Incidente').length },
+      { Métrica: 'Melhorias Ativas', Valor: activeTasks.filter(t => t.type === 'Melhoria').length },
+      { Métrica: 'Novas Automações Ativas', Valor: activeTasks.filter(t => t.type === 'Nova Automação').length },
+      { Métrica: 'Total de Robôs Cadastrados', Valor: robots.length },
+      { Métrica: 'Robôs Ativos', Valor: robots.filter(r => r.status === 'ATIVO').length }
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dashData), "Resumo Dashboard");
+
+    // 2. Projetos & Status Global
+    const projectsData = tasks.map(t => ({
+      'ID': t.id,
+      'Tipo': t.type,
+      'Resumo': t.summary,
+      'Status Global': t.status,
+      'Prioridade': t.priority,
+      'Responsável': t.assignee || 'Não Atribuído',
+      'Solicitante': t.requester || 'N/A',
+      'Data Início': t.startDate || '-',
+      'Data Fim Prevista': t.endDate || '-',
+      'Gerência': t.managementArea || 'N/A',
+      'FTE': t.fteValue || 0,
+      'Bloqueio': t.blocker || '-'
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(projectsData), "Base de Projetos");
+
+    // 3. Esteira Documental
+    const activeDocs = docsConfig.filter(d => d.active);
+    const docPipelineData = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação').map(t => {
+      const row: any = { 'Projeto': t.summary, 'Responsável': t.assignee || '-' };
+      activeDocs.forEach(d => {
+        row[d.label] = (t.docStatuses || {})[d.id] || 'Pendente';
+      });
+      return row;
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docPipelineData), "Esteira Documental");
+
+    // 4. Fluxo de Fases (Workflow)
+    const flowData = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação').map(t => {
+      const row: any = { 'Projeto': t.summary };
+      workflowConfig.forEach(phase => {
+        const isCurrent = t.projectData?.currentPhaseId === phase.id;
+        row[phase.name] = isCurrent ? (t.projectData?.phaseStatus || 'Não Iniciado') : 'Aguardando/Concluído';
+      });
+      return row;
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flowData), "Fluxo de Fases");
+
+    // 5. Inventário de Robôs
+    const robotData = robots.map(r => ({
+      'Robô': r.name,
+      'Status': r.status,
+      'Área': r.area,
+      'Desenvolvedor': r.developer,
+      'FTE Gerado': r.fte || 0,
+      'Ticket Origem': r.ticketNumber || '-',
+      'Pasta': r.folder
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(robotData), "Inventário RPA");
+
+    XLSX.writeFile(wb, `Nexus_Consolidado_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`);
+  },
+
+  exportPPT: async (tasks: Task[], robots: Robot[], workflowConfig: WorkflowPhase[], docsConfig: DocumentConfig[], devs: Developer[]) => {
+    const pres = new pptxgen();
+    pres.layout = 'LAYOUT_WIDE';
+    
+    // Theme colors
+    const BG_COLOR = '0f172a';
+    const ACCENT_COLOR = '6366f1';
+    const TEXT_COLOR = 'FFFFFF';
+    const SUBTEXT_COLOR = '94a3b8';
+
+    // Slide 1: Cover
+    let slide = pres.addSlide();
+    slide.background = { color: BG_COLOR };
+    slide.addText("Nexus Project", { x: 0.5, y: 2.5, w: '90%', fontSize: 44, color: TEXT_COLOR, bold: true, align: 'center' });
+    slide.addText("Relatório Consolidado de Gestão Semanal", { x: 0.5, y: 3.5, w: '90%', fontSize: 24, color: ACCENT_COLOR, align: 'center' });
+    slide.addText(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, { x: 0.5, y: 4.5, w: '90%', fontSize: 14, color: SUBTEXT_COLOR, align: 'center' });
+
+    // Slide 2: Executive Dashboard
+    const activeTasks = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+    slide = pres.addSlide();
+    slide.background = { color: BG_COLOR };
+    slide.addText("Visão Executiva do Portfólio", { x: 0.5, y: 0.5, fontSize: 24, color: TEXT_COLOR, bold: true });
+    
+    const drawKPI = (x: number, y: number, label: string, val: string, color: string) => {
+      slide.addShape(pres.ShapeType.roundRect, { x, y, w: 2.8, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
+      slide.addText(label, { x, y: y + 0.2, w: 2.8, fontSize: 12, color: SUBTEXT_COLOR, align: 'center' });
+      slide.addText(val, { x, y: y + 0.6, w: 2.8, fontSize: 32, color: TEXT_COLOR, bold: true, align: 'center' });
+    };
+
+    drawKPI(0.5, 1.5, "Total Ativos", activeTasks.length.toString(), ACCENT_COLOR);
+    drawKPI(3.6, 1.5, "Incidentes", activeTasks.filter(t => t.type === 'Incidente').length.toString(), 'e11d48');
+    drawKPI(6.7, 1.5, "Melhorias", activeTasks.filter(t => t.type === 'Melhoria').length.toString(), '10b981');
+    drawKPI(9.8, 1.5, "Novas Auto.", activeTasks.filter(t => t.type === 'Nova Automação').length.toString(), '8b5cf6');
+
+    // Slide 3: Status da Esteira Documental (Top 10 Projetos)
+    slide = pres.addSlide();
+    slide.background = { color: BG_COLOR };
+    slide.addText("Status da Esteira Documental (Projetos em Andamento)", { x: 0.5, y: 0.5, fontSize: 20, color: TEXT_COLOR, bold: true });
+    
+    const projectDocs = tasks.filter(t => (t.type === 'Melhoria' || t.type === 'Nova Automação') && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).slice(0, 10);
+    const activeDocs = docsConfig.filter(d => d.active).slice(0, 5); // Limit columns for PPT visibility
+    
+    const docTableHeader = ['Projeto', ...activeDocs.map(d => d.label)];
+    const docTableRows = projectDocs.map(p => [
+      p.summary.substring(0, 30),
+      ...activeDocs.map(d => (p.docStatuses || {})[d.id] || 'Pendente')
+    ]);
+
+    slide.addTable([docTableHeader, ...docTableRows], { 
+      x: 0.5, y: 1.2, w: 12, 
+      color: 'cbd5e1', fill: '1e293b', fontSize: 10, 
+      border: { pt: 0, pb: 0.5, color: '334155' } 
+    });
+
+    // Slide 4: Fluxo de Projetos (Gantt Simplificado)
+    slide = pres.addSlide();
+    slide.background = { color: BG_COLOR };
+    slide.addText("Cronograma e Marcos de Entrega", { x: 0.5, y: 0.5, fontSize: 20, color: TEXT_COLOR, bold: true });
+    
+    const ganttData = tasks.filter(t => t.startDate && t.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).slice(0, 12);
+    if (ganttData.length > 0) {
+      const tableData = [['ID', 'Projeto', 'Início', 'Fim', 'Status'], ...ganttData.map(t => [t.id, t.summary, t.startDate, t.endDate, t.status])];
+      slide.addTable(tableData, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: '1e293b' });
+    }
+
+    // Slide 5: Inventário RPA
+    slide = pres.addSlide();
+    slide.background = { color: BG_COLOR };
+    slide.addText("Inventário de Robôs e Geração de Valor", { x: 0.5, y: 0.5, fontSize: 20, color: TEXT_COLOR, bold: true });
+    const rpaSummary = [
+      ['Robô', 'Área', 'Status', 'FTE'],
+      ...robots.slice(0, 15).map(r => [r.name, r.area, r.status, (r.fte || 0).toString()])
+    ];
+    slide.addTable(rpaSummary, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: '1e293b' });
+
+    pres.writeFile({ fileName: `Nexus_Report_Consolidado_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pptx` });
+  }
+};
+
 // --- Components Helpers ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title='' }: any) => {
@@ -1436,7 +1587,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], wor
     );
 };
 
-const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[] }) => {
+const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[], docsConfig: DocumentConfig[] }) => {
     const [apiKey, setApiKey] = useState<string | null>(StorageService.getApiKey());
     const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['general', 'exec_summary', 'chart_status']));
 
@@ -1445,6 +1596,12 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
         if (next.has(id)) next.delete(id);
         else next.add(id);
         setSelectedModules(next);
+    };
+
+    const handleConsolidatedExport = async () => {
+      // Calls both XLSX and PPT consolidated exports
+      ConsolidatedReportService.exportExcel(tasks, robots, workflowConfig, docsConfig, devs);
+      await ConsolidatedReportService.exportPPT(tasks, robots, workflowConfig, docsConfig, devs);
     };
 
     const handleCustomExportExcel = () => {
@@ -1569,9 +1726,14 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig }: { tasks: Task[], d
 
     return (
         <div className="space-y-6 pb-20 animate-fade-in">
-            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-                <h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2>
-                <p className="text-slate-400">Extração de dados personalizada para gestão e operações.</p>
+            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2>
+                    <p className="text-slate-400">Extração de dados personalizada para gestão e operações.</p>
+                </div>
+                <Button onClick={handleConsolidatedExport} variant="success" className="py-3 px-6 text-base animate-pulse hover:animate-none">
+                    <IconDownload className="w-6 h-6" /> Exportar Report Semanal (PPT + Excel)
+                </Button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1852,5 +2014,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
