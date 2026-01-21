@@ -2000,13 +2000,65 @@ export default function App() {
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
+  const [editingDevId, setEditingDevId] = useState<string | null>(null);
+  const [editingDevName, setEditingDevName] = useState('');
+
   const handleLogin = (loggedInUser: User) => setUser(loggedInUser);
   const handleLogout = () => { StorageService.logout(); setUser(null); };
-  const processNewTasks = (newTasks: Task[], typeName: string) => { const merged = StorageService.mergeTasks(newTasks); setTasks(merged); const uniqueAssignees = new Set(newTasks.map(t => t.assignee).filter(Boolean)); const currentDevNames = new Set(devs.map(d => d.name)); const newDevsToAdd: Developer[] = []; uniqueAssignees.forEach(name => { if (name && !currentDevNames.has(name as string)) newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string }); }); if (newDevsToAdd.length > 0) { const updatedDevs = [...devs, ...newDevsToAdd]; setDevs(updatedDevs); StorageService.saveDevs(updatedDevs); } };
+  
+  const processNewTasks = (newTasks: Task[], typeName: string) => { 
+    const merged = StorageService.mergeTasks(newTasks); 
+    setTasks(merged); 
+    const uniqueAssignees = new Set(newTasks.map(t => t.assignee).filter(Boolean)); 
+    const currentDevNames = new Set(devs.map(d => d.name)); 
+    const newDevsToAdd: Developer[] = []; 
+    uniqueAssignees.forEach(name => { 
+      if (name && !currentDevNames.has(name as string)) newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string }); 
+    }); 
+    if (newDevsToAdd.length > 0) { 
+      const updatedDevs = [...devs, ...newDevsToAdd]; 
+      setDevs(updatedDevs); 
+      StorageService.saveDevs(updatedDevs); 
+    } 
+  };
+
   const handleProcessAllUploads = async () => { let allNewTasks: Task[] = []; try { if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; processNewTasks(allNewTasks, 'Todas'); setIsUploadModalOpen(false); alert(`${allNewTasks.length} demandas processadas.`); } catch (e) { alert("Erro ao processar arquivos."); } };
   const handleProcessSingleUpload = async (type: TaskType) => { const file = uploadFiles[type]; if (!file) return; try { const newTasks = await ExcelService.parseFile(file, type); processNewTasks(newTasks, type); alert(`${newTasks.length} demandas de ${type} processadas.`); setUploadFiles(prev => ({ ...prev, [type]: null })); } catch (e) { alert(`Erro ao processar ${type}.`); } };
+  
   const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
   const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
+  
+  const handleStartEditDev = (dev: Developer) => {
+    setEditingDevId(dev.id);
+    setEditingDevName(dev.name);
+  };
+
+  const handleSaveDevEdit = (id: string) => {
+    if (!editingDevName.trim()) return;
+    const oldDev = devs.find(d => d.id === id);
+    if (!oldDev) return;
+    const oldName = oldDev.name;
+    const newName = editingDevName.trim();
+
+    // 1. Update Dev List
+    const updatedDevs = devs.map(d => d.id === id ? { ...d, name: newName } : d);
+    setDevs(updatedDevs);
+    StorageService.saveDevs(updatedDevs);
+
+    // 2. Cascade update to Tasks
+    const updatedTasks = tasks.map(t => t.assignee === oldName ? { ...t, assignee: newName } : t);
+    setTasks(updatedTasks);
+    StorageService.saveTasks(updatedTasks);
+
+    // 3. Cascade update to Robots
+    const updatedRobots = robots.map(r => r.developer === oldName ? { ...r, developer: newName } : r);
+    setRobots(updatedRobots);
+    StorageService.saveRobots(updatedRobots);
+
+    setEditingDevId(null);
+    setEditingDevName('');
+  };
+
   const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: new Date().toISOString(), requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
   const handleTaskUpdate = (updatedTask: Task) => { if (!user) return; if (!updatedTask.id) { alert("O número do chamado é obrigatório."); return; } const taskExists = tasks.some(t => t.id === updatedTask.id); let finalTask = updatedTask; if (taskExists) { const oldTask = tasks.find(t => t.id === updatedTask.id); if (oldTask) { const history = detectChanges(oldTask, updatedTask, user); if (history.length > 0) finalTask.history = [...(oldTask.history || []), ...history]; const isAutomation = updatedTask.type === 'Nova Automação'; const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(updatedTask.status); const wasNotDone = !['Concluído', 'Resolvido', 'Fechado'].includes(oldTask.status); if (isAutomation && isDone && wasNotDone) { const robotName = updatedTask.automationName || updatedTask.summary; if (!robots.some(r => r.name.toLowerCase() === robotName.toLowerCase()) && robotName) { const newRobot: Robot = { id: `rpa-auto-${Date.now()}`, name: robotName, area: updatedTask.managementArea || 'N/A', developer: updatedTask.assignee || 'N/A', folder: updatedTask.projectPath || 'N/A', owners: updatedTask.requester || 'N/A', status: 'ATIVO', ticketNumber: updatedTask.id, fte: updatedTask.fteValue || 0 }; const updatedRobots = [...robots, newRobot]; setRobots(updatedRobots); StorageService.saveRobots(updatedRobots); finalTask.history = [...(finalTask.history || []), { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: 'Sistema', action: `Robô '${robotName}' cadastrado automaticamente na base RPA.` }]; } } } const newTasks = tasks.map(t => t.id === finalTask.id ? finalTask : t); setTasks(newTasks); StorageService.saveTasks(newTasks); } else { finalTask.history = [{ id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: 'Tarefa criada manualmente' }]; const newTasks = [...tasks, finalTask]; setTasks(newTasks); StorageService.saveTasks(newTasks); } setEditingTask(null); };
   const handleTaskDelete = (id: string) => { if (window.confirm("Tem certeza?")) { const newTasks = tasks.filter(t => t.id !== id); setTasks(newTasks); StorageService.saveTasks(newTasks); setEditingTask(null); } };
@@ -2014,5 +2066,106 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
-}
+  
+  return (
+    <HashRouter>
+      <Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>
+        {isUploadModalOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl">
+              <h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3>
+              <div className="space-y-6">
+                {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
+                  <div key={type} className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <label className="block text-sm text-slate-400 mb-1">{type}</label>
+                      <input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" />
+                    </div>
+                    <Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4">
+                <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button>
+                <Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isManageDevsOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full shadow-2xl animate-fade-in">
+              <h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3>
+              <ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">
+                {devs.map(d => (
+                  <li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700 transition-all hover:border-slate-500">
+                    {editingDevId === d.id ? (
+                      <div className="flex items-center gap-2 w-full">
+                        <input 
+                          autoFocus
+                          value={editingDevName}
+                          onChange={(e) => setEditingDevName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveDevEdit(d.id)}
+                          className="flex-1 bg-slate-800 border border-indigo-500 rounded px-2 py-1 text-sm text-white outline-none"
+                        />
+                        <button onClick={() => handleSaveDevEdit(d.id)} className="text-emerald-500 hover:text-emerald-400 p-1" title="Salvar">
+                          <IconCheck className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setEditingDevId(null)} className="text-rose-500 hover:text-rose-400 p-1" title="Cancelar">✕</button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-sm text-white truncate max-w-[200px]">{d.name}</span>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleStartEditDev(d)} className="text-indigo-400 hover:text-indigo-300 p-1" title="Editar nome">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                            </svg>
+                          </button>
+                          <button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400 p-1" title="Excluir">✕</button>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2 p-2 bg-slate-900 rounded-lg border border-slate-700">
+                <input id="newDevInput" type="text" placeholder="Adicionar novo dev..." className="flex-1 bg-transparent px-3 text-sm text-white outline-none" onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const input = e.target as HTMLInputElement;
+                    handleAddDev(input.value);
+                    input.value = '';
+                  }
+                }} />
+                <Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1 px-3">+</Button>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editingTask && (
+          <TaskModal 
+            task={editingTask} 
+            developers={devs} 
+            allTasks={tasks} 
+            workflowConfig={workflowConfig} 
+            onClose={() => setEditingTask(null)} 
+            onSave={handleTaskUpdate} 
+            onDelete={handleTaskDelete} 
+          />
+        )}
+
+        <Routes>
+          <Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} />
+          <Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} />
+          <Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} />
+          <Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} />
+          <Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} />
+          <Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} />
+          <Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} />
+          <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
+          <Route path="/reports"
