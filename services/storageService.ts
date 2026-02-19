@@ -1,5 +1,5 @@
 
-import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig } from '../types';
+import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
@@ -9,7 +9,8 @@ const KEYS = {
   WORKFLOW: 'nexus_workflow_config_v4',
   ROBOTS: 'nexus_robots_v1',
   API_KEY: 'nexus_integration_key', // New Key
-  DOCUMENTS: 'nexus_docs_config_v1'
+  DOCUMENTS: 'nexus_docs_config_v1',
+  SPRINTS: 'nexus_sprints_v1'
 };
 
 export const StorageService = {
@@ -162,6 +163,20 @@ export const StorageService = {
       registry[index] = updatedUser;
       localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
     }
+  },
+
+  // --- Sprints ---
+  getSprints: (): Sprint[] => {
+    try {
+      const data = localStorage.getItem(KEYS.SPRINTS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  saveSprints: (sprints: Sprint[]) => {
+    localStorage.setItem(KEYS.SPRINTS, JSON.stringify(sprints));
   },
   
   // Intelligent Merge Logic

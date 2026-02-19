@@ -88,6 +88,24 @@ export interface Robot {
     ticketNumber?: string; // NÚMERO DO CHAMADO
 }
 
+export interface SprintTask {
+  taskId: string;
+  plannedHours: number;
+  actualHours: number;
+  status: string;
+}
+
+export interface Sprint {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'Planejada' | 'Em Execução' | 'Concluída';
+  tasks: SprintTask[];
+  goals?: string;
+  notes?: string;
+}
+
 export interface Developer {
   id: string;
   name: string;

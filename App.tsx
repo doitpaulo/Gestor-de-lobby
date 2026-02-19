@@ -9,8 +9,8 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument } from './components/Icons';
+import { Task, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask } from './types';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -301,10 +301,10 @@ const ConsolidatedReportService = {
       ...activeDocs.map(d => (p.docStatuses || {})[d.id] || 'Pendente')
     ]);
 
-    slide.addTable([docTableHeader, ...docTableRows], { 
+    slide.addTable([docTableHeader, ...docTableRows] as any, { 
       x: 0.5, y: 1.2, w: 12, 
-      color: 'cbd5e1', fill: '1e293b', fontSize: 10, 
-      border: { pt: 0, pb: 0.5, color: '334155' } 
+      color: 'cbd5e1', fill: { color: '1e293b' }, fontSize: 10, 
+      border: { type: 'solid', color: '334155', pt: 0.5 } 
     });
 
     // Slide 4: Fluxo de Projetos (Gantt Simplificado)
@@ -315,7 +315,7 @@ const ConsolidatedReportService = {
     const ganttData = tasks.filter(t => t.startDate && t.endDate && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).slice(0, 12);
     if (ganttData.length > 0) {
       const tableData = [['ID', 'Projeto', 'Início', 'Fim', 'Status'], ...ganttData.map(t => [t.id, t.summary, t.startDate, t.endDate, t.status])];
-      slide.addTable(tableData, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: '1e293b' });
+      slide.addTable(tableData as any, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: { color: '1e293b' } });
     }
 
     // Slide 5: Inventário RPA
@@ -326,7 +326,7 @@ const ConsolidatedReportService = {
       ['Robô', 'Área', 'Status', 'FTE'],
       ...robots.slice(0, 15).map(r => [r.name, r.area, r.status, (r.fte || 0).toString()])
     ];
-    slide.addTable(rpaSummary, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: '1e293b' });
+    slide.addTable(rpaSummary as any, { x: 0.5, y: 1.2, w: 12, fontSize: 10, color: 'cbd5e1', fill: { color: '1e293b' } });
 
     pres.writeFile({ fileName: `Nexus_Report_Consolidado_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pptx` });
   }
@@ -780,6 +780,432 @@ const DocumentPipelineView = ({ tasks, setTasks, devs, documentsConfig, setDocum
                                 <Button variant="secondary" onClick={() => setIsAddDocOpen(false)}>Cancelar</Button>
                                 <Button onClick={handleAddDocument} disabled={!newDocLabel}>Adicionar</Button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- NEW SESSION: SprintsView ---
+const SprintsView = ({ tasks, sprints, setSprints, devs, user }: any) => {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingSprint, setEditingSprint] = useState<Sprint | null>(null);
+    const [selectedSprint, setSelectedSprint] = useState<Sprint | null>(null);
+    const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
+
+    const handleSaveSprint = (e: React.FormEvent) => {
+        e.preventDefault();
+        const form = e.target as HTMLFormElement;
+        const formData = new FormData(form);
+        
+        const sprintData: Sprint = {
+            id: editingSprint?.id || `sprint-${Date.now()}`,
+            name: formData.get('name') as string,
+            startDate: formData.get('startDate') as string,
+            endDate: formData.get('endDate') as string,
+            status: formData.get('status') as any,
+            goals: formData.get('goals') as string,
+            notes: formData.get('notes') as string,
+            tasks: editingSprint?.tasks || []
+        };
+
+        let updatedSprints;
+        if (editingSprint) {
+            updatedSprints = sprints.map((s: Sprint) => s.id === editingSprint.id ? sprintData : s);
+        } else {
+            updatedSprints = [...sprints, sprintData];
+        }
+
+        setSprints(updatedSprints);
+        StorageService.saveSprints(updatedSprints);
+        setIsModalOpen(false);
+        setEditingSprint(null);
+    };
+
+    const handleDeleteSprint = (id: string) => {
+        if (window.confirm('Tem certeza que deseja excluir esta Sprint?')) {
+            const updated = sprints.filter((s: Sprint) => s.id !== id);
+            setSprints(updated);
+            StorageService.saveSprints(updated);
+            if (selectedSprint?.id === id) setSelectedSprint(null);
+        }
+    };
+
+    const handleAddTaskToSprint = (taskId: string) => {
+        if (!selectedSprint) return;
+        if (selectedSprint.tasks.find(t => t.taskId === taskId)) return;
+
+        const newTask: SprintTask = {
+            taskId,
+            plannedHours: 0,
+            actualHours: 0,
+            status: 'Pendente'
+        };
+
+        const updatedSprint = {
+            ...selectedSprint,
+            tasks: [...selectedSprint.tasks, newTask]
+        };
+
+        const updatedSprints = sprints.map((s: Sprint) => s.id === selectedSprint.id ? updatedSprint : s);
+        setSprints(updatedSprints);
+        StorageService.saveSprints(updatedSprints);
+        setSelectedSprint(updatedSprint);
+        setIsAddTaskModalOpen(false);
+    };
+
+    const handleUpdateSprintTask = (taskId: string, field: string, value: any) => {
+        if (!selectedSprint) return;
+        const updatedTasks = selectedSprint.tasks.map((t: SprintTask) => 
+            t.taskId === taskId ? { ...t, [field]: value } : t
+        );
+        const updatedSprint = { ...selectedSprint, tasks: updatedTasks };
+        const updatedSprints = sprints.map((s: Sprint) => s.id === selectedSprint.id ? updatedSprint : s);
+        setSprints(updatedSprints);
+        StorageService.saveSprints(updatedSprints);
+        setSelectedSprint(updatedSprint);
+    };
+
+    const handleRemoveTaskFromSprint = (taskId: string) => {
+        if (!selectedSprint) return;
+        const updatedTasks = selectedSprint.tasks.filter((t: SprintTask) => t.taskId !== taskId);
+        const updatedSprint = { ...selectedSprint, tasks: updatedTasks };
+        const updatedSprints = sprints.map((s: Sprint) => s.id === selectedSprint.id ? updatedSprint : s);
+        setSprints(updatedSprints);
+        StorageService.saveSprints(updatedSprints);
+        setSelectedSprint(updatedSprint);
+    };
+
+    const exportSprintPPT = (type: 'opening' | 'closing') => {
+        if (!selectedSprint) return;
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+        const BG_COLOR = '0f172a';
+        const ACCENT_COLOR = '6366f1';
+        const TEXT_COLOR = 'FFFFFF';
+
+        // Cover
+        let slide = pres.addSlide();
+        slide.background = { color: BG_COLOR };
+        slide.addText(type === 'opening' ? "Abertura de Sprint CoE" : "Fechamento de Sprint CoE", { x: 0.5, y: 2, w: '90%', fontSize: 44, color: TEXT_COLOR, bold: true, align: 'center' });
+        slide.addText(selectedSprint.name, { x: 0.5, y: 3, w: '90%', fontSize: 32, color: ACCENT_COLOR, align: 'center' });
+        slide.addText(`${selectedSprint.startDate} até ${selectedSprint.endDate}`, { x: 0.5, y: 4, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' });
+
+        // Goals
+        slide = pres.addSlide();
+        slide.background = { color: BG_COLOR };
+        slide.addText("Objetivos da Sprint", { x: 0.5, y: 0.5, fontSize: 24, color: TEXT_COLOR, bold: true });
+        slide.addText(selectedSprint.goals || "Nenhum objetivo definido", { x: 0.5, y: 1.2, w: 12, fontSize: 18, color: 'cbd5e1' });
+
+        // Tasks Table
+        slide = pres.addSlide();
+        slide.background = { color: BG_COLOR };
+        slide.addText(type === 'opening' ? "Planejamento de Atividades" : "Resultado de Atividades", { x: 0.5, y: 0.5, fontSize: 24, color: TEXT_COLOR, bold: true });
+        
+        const tableHeader = ['ID', 'Tarefa', 'Responsável', 'Horas Planejadas'];
+        if (type === 'closing') tableHeader.push('Horas Reais', 'Status');
+
+        const tableRows = selectedSprint.tasks.map(st => {
+            const task = tasks.find((t: any) => t.id === st.taskId);
+            const row = [
+                st.taskId,
+                task?.summary || 'N/A',
+                task?.assignee || 'N/A',
+                st.plannedHours.toString()
+            ];
+            if (type === 'closing') {
+                row.push(st.actualHours.toString(), st.status);
+            }
+            return row;
+        });
+
+        slide.addTable([tableHeader, ...tableRows] as any, { 
+            x: 0.5, y: 1.2, w: 12, 
+            fontSize: 10, color: 'cbd5e1', fill: { color: '1e293b' },
+            border: { type: 'solid', color: '334155', pt: 0.5 }
+        });
+
+        // Summary Slide
+        slide = pres.addSlide();
+        slide.background = { color: BG_COLOR };
+        slide.addText("Resumo da Sprint", { x: 0.5, y: 0.5, fontSize: 24, color: TEXT_COLOR, bold: true });
+        
+        const totalPlanned = selectedSprint.tasks.reduce((acc, t) => acc + t.plannedHours, 0);
+        const totalActual = selectedSprint.tasks.reduce((acc, t) => acc + t.actualHours, 0);
+        const completedCount = selectedSprint.tasks.filter(t => t.status === 'Concluído').length;
+
+        const summaryData = [
+            ["Métrica", "Valor"],
+            ["Total de Tarefas", selectedSprint.tasks.length.toString()],
+            ["Total de Horas Planejadas", `${totalPlanned}h`],
+        ];
+        if (type === 'closing') {
+            summaryData.push(["Total de Horas Reais", `${totalActual}h`]);
+            summaryData.push(["Tarefas Concluídas", completedCount.toString()]);
+            summaryData.push(["Produtividade", `${((totalActual / totalPlanned) * 100 || 0).toFixed(1)}%`]);
+        }
+
+        slide.addTable(summaryData as any, { x: 0.5, y: 1.2, w: 6, fontSize: 14, color: 'cbd5e1', fill: { color: '1e293b' } });
+
+        if (type === 'closing' && selectedSprint.notes) {
+            slide.addText("Observações / Lições Aprendidas", { x: 7, y: 0.5, fontSize: 20, color: TEXT_COLOR, bold: true });
+            slide.addText(selectedSprint.notes, { x: 7, y: 1.2, w: 5.5, fontSize: 12, color: 'cbd5e1' });
+        }
+
+        pres.writeFile({ fileName: `Sprint_${selectedSprint.name.replace(/\s/g, '_')}_${type}.pptx` });
+    };
+
+    return (
+        <div className="h-full flex flex-col space-y-4 animate-fade-in">
+            <div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <div>
+                    <h2 className="text-xl font-bold text-white">Gestão de Sprints</h2>
+                    <p className="text-sm text-slate-400">Planejamento e acompanhamento de ciclos CoE</p>
+                </div>
+                <Button onClick={() => { setEditingSprint(null); setIsModalOpen(true); }} variant="primary">
+                    <IconPlus className="w-4 h-4" /> Nova Sprint
+                </Button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 overflow-hidden">
+                {/* Sprint List */}
+                <Card className="lg:col-span-1 flex flex-col h-full overflow-hidden">
+                    <h3 className="text-lg font-bold text-white mb-4">Sprints</h3>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                        {sprints.length === 0 ? (
+                            <div className="text-center py-10 text-slate-500">Nenhuma sprint cadastrada.</div>
+                        ) : (
+                            sprints.map((s: Sprint) => (
+                                <div 
+                                    key={s.id} 
+                                    onClick={() => setSelectedSprint(s)}
+                                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedSprint?.id === s.id ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700 hover:border-slate-500'}`}
+                                >
+                                    <div className="flex justify-between items-start mb-2">
+                                        <h4 className="font-bold text-white">{s.name}</h4>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                            {s.status}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
+                                        <IconClock className="w-3 h-3" />
+                                        <span>{s.startDate} - {s.endDate}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-xs text-slate-500">{s.tasks.length} tarefas</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} className="text-slate-400 hover:text-white p-1">✏️</button>
+                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </Card>
+
+                {/* Sprint Detail */}
+                <Card className="lg:col-span-2 flex flex-col h-full overflow-hidden">
+                    {selectedSprint ? (
+                        <div className="flex flex-col h-full">
+                            <div className="flex justify-between items-start border-b border-slate-700 pb-4 mb-4">
+                                <div>
+                                    <h3 className="text-2xl font-bold text-white">{selectedSprint.name}</h3>
+                                    <p className="text-sm text-slate-400">{selectedSprint.startDate} até {selectedSprint.endDate}</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button onClick={() => exportSprintPPT('opening')} variant="secondary" className="text-xs">
+                                        <IconDownload className="w-3 h-3" /> PPT Abertura
+                                    </Button>
+                                    <Button onClick={() => exportSprintPPT('closing')} variant="primary" className="text-xs">
+                                        <IconDownload className="w-3 h-3" /> PPT Fechamento
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4 mb-6">
+                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Horas Planejadas</p>
+                                    <p className="text-xl font-bold text-indigo-400">{selectedSprint.tasks.reduce((acc, t) => acc + t.plannedHours, 0)}h</p>
+                                </div>
+                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Horas Reais</p>
+                                    <p className="text-xl font-bold text-emerald-400">{selectedSprint.tasks.reduce((acc, t) => acc + t.actualHours, 0)}h</p>
+                                </div>
+                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Conclusão</p>
+                                    <p className="text-xl font-bold text-white">
+                                        {selectedSprint.tasks.length > 0 ? Math.round((selectedSprint.tasks.filter(t => t.status === 'Concluído').length / selectedSprint.tasks.length) * 100) : 0}%
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-bold text-white">Tarefas da Sprint</h4>
+                                <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-1">
+                                    <IconPlus className="w-3 h-3" /> Adicionar Tarefa
+                                </Button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-900 sticky top-0 z-10">
+                                        <tr>
+                                            <th className="p-3 border-b border-slate-700">Tarefa</th>
+                                            <th className="p-3 border-b border-slate-700 w-24 text-center">Planejado</th>
+                                            <th className="p-3 border-b border-slate-700 w-24 text-center">Real</th>
+                                            <th className="p-3 border-b border-slate-700 w-32">Status</th>
+                                            <th className="p-3 border-b border-slate-700 w-10"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {selectedSprint.tasks.map(st => {
+                                            const task = tasks.find((t: any) => t.id === st.taskId);
+                                            return (
+                                                <tr key={st.taskId} className="border-b border-slate-800 hover:bg-slate-800/30">
+                                                    <td className="p-3">
+                                                        <div className="flex flex-col">
+                                                            <span className="font-bold text-slate-200">{task?.summary || 'Tarefa não encontrada'}</span>
+                                                            <span className="text-[10px] text-slate-500">{st.taskId} | {task?.assignee || 'Sem Dev'}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input 
+                                                            type="number" 
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-center text-white"
+                                                            value={st.plannedHours}
+                                                            onChange={(e) => handleUpdateSprintTask(st.taskId, 'plannedHours', parseFloat(e.target.value) || 0)}
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input 
+                                                            type="number" 
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-center text-white"
+                                                            value={st.actualHours}
+                                                            onChange={(e) => handleUpdateSprintTask(st.taskId, 'actualHours', parseFloat(e.target.value) || 0)}
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <select 
+                                                            className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white"
+                                                            value={st.status}
+                                                            onChange={(e) => handleUpdateSprintTask(st.taskId, 'status', e.target.value)}
+                                                        >
+                                                            <option value="Pendente">Pendente</option>
+                                                            <option value="Em Progresso">Em Progresso</option>
+                                                            <option value="Concluído">Concluído</option>
+                                                            <option value="Cancelado">Cancelado</option>
+                                                        </select>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <button onClick={() => handleRemoveTaskFromSprint(st.taskId)} className="text-rose-500 hover:text-rose-400">✕</button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                                {selectedSprint.tasks.length === 0 && (
+                                    <div className="text-center py-20 text-slate-600">Nenhuma tarefa adicionada a esta sprint.</div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-4">
+                            <IconSprint className="w-16 h-16 opacity-10" />
+                            <p>Selecione uma sprint para ver os detalhes</p>
+                        </div>
+                    )}
+                </Card>
+            </div>
+
+            {/* Sprint Modal */}
+            {isModalOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <form onSubmit={handleSaveSprint} className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg shadow-2xl">
+                        <div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingSprint ? 'Editar Sprint' : 'Nova Sprint'}</h3></div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1">Nome da Sprint</label>
+                                <input name="name" defaultValue={editingSprint?.name} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" placeholder="Ex: Sprint 01 - Janeiro" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Data Início</label>
+                                    <input type="date" name="startDate" defaultValue={editingSprint?.startDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Data Fim</label>
+                                    <input type="date" name="endDate" defaultValue={editingSprint?.endDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1">Status</label>
+                                <select name="status" defaultValue={editingSprint?.status || 'Planejada'} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
+                                    <option value="Planejada">Planejada</option>
+                                    <option value="Em Execução">Em Execução</option>
+                                    <option value="Concluída">Concluída</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1">Objetivos</label>
+                                <textarea name="goals" defaultValue={editingSprint?.goals} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="O que pretendemos entregar nesta sprint?" />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-400 mb-1">Observações (Fechamento)</label>
+                                <textarea name="notes" defaultValue={editingSprint?.notes} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="Lições aprendidas, motivos de atraso, etc." />
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-slate-700 flex justify-end gap-3">
+                            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+                            <Button type="submit">Salvar Sprint</Button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {/* Add Task Modal */}
+            {isAddTaskModalOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+                        <div className="p-6 border-b border-slate-700 flex justify-between items-center">
+                            <h3 className="text-xl font-bold text-white">Adicionar Tarefa à Sprint</h3>
+                            <button onClick={() => setIsAddTaskModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+                        </div>
+                        <div className="p-4 bg-slate-900/50 border-b border-slate-700">
+                            <input 
+                                type="text" 
+                                placeholder="Filtrar tarefas..." 
+                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white outline-none"
+                                onChange={(e) => {
+                                    const val = e.target.value.toLowerCase();
+                                    const rows = document.querySelectorAll('.task-row');
+                                    rows.forEach((row: any) => {
+                                        const text = row.innerText.toLowerCase();
+                                        row.style.display = text.includes(val) ? '' : 'none';
+                                    });
+                                }}
+                            />
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                            {tasks.filter((t: Task) => !selectedSprint?.tasks.find(st => st.taskId === t.id)).map((t: Task) => (
+                                <div 
+                                    key={t.id} 
+                                    onClick={() => handleAddTaskToSprint(t.id)}
+                                    className="task-row p-3 bg-slate-900 border border-slate-700 rounded-lg hover:border-indigo-500 cursor-pointer flex justify-between items-center group transition-all"
+                                >
+                                    <div>
+                                        <p className="text-sm font-bold text-white">{t.summary}</p>
+                                        <p className="text-xs text-slate-500">{t.id} | {t.assignee || 'Sem Dev'} | {t.status}</p>
+                                    </div>
+                                    <IconPlus className="w-4 h-4 text-slate-500 group-hover:text-indigo-400" />
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-slate-700 flex justify-end">
+                            <Button variant="secondary" onClick={() => setIsAddTaskModalOpen(false)}>Fechar</Button>
                         </div>
                     </div>
                 </div>
@@ -1248,7 +1674,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                  slide.addText("Cronograma (Cont.)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
             }
             const chunk = [tableData[0], ...tableData.slice(i + 1, i + 1 + ROWS_PER_SLIDE)];
-            slide.addTable(chunk, { x: 0.5, y: 1.5, w: '90%', colW: [1.5, 5, 1.5, 1.5, 2], color: 'cbd5e1', fontSize: 10, border: { pt: 0, pb: 0.5, color: '334155' } });
+            slide.addTable(chunk as any, { x: 0.5, y: 1.5, w: '90%', colW: [1.5, 5, 1.5, 1.5, 2], color: 'cbd5e1', fontSize: 10, border: { type: 'solid', color: '334155', pt: 0.5 } });
         }
 
         if (ganttTasks.length > 0) {
@@ -1691,7 +2117,7 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
                 const h = tasks.filter(t => t.assignee === d.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
                 return [d.name, formatDuration(h), `${Math.ceil(h / 8)}d`];
             });
-            slide.addTable([['Dev', 'Horas', 'Dias Est.'], ...capData], { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', fill: '1e293b', fontSize: 12, border: { color: '334155' } });
+            slide.addTable([['Dev', 'Horas', 'Dias Est.'], ...capData] as any, { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', fill: { color: '1e293b' }, fontSize: 12, border: { type: 'solid', color: '334155', pt: 0.5 } });
         }
 
         if (selectedModules.has('chart_fte')) {
@@ -1904,7 +2330,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   const moveWidget = (index: number, direction: 'up' | 'down') => { const newWidgets = [...widgets]; if (direction === 'up' && index > 0) { [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]]; } else if (direction === 'down' && index < newWidgets.length - 1) { [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]]; } setWidgets(newWidgets); };
   const toggleVisibility = (id: string) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w)); };
   const changeVisualStyle = (id: string, style: any) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visualStyle: style } : w)); };
-  const exportPPT = () => { const pres = new pptxgen(); pres.layout = 'LAYOUT_WIDE'; let slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Dashboard Nexus Project", { x: 0.5, y: 2, w: '90%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' }); slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 3, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' }); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Visão Geral do Portfólio (Demandas Ativas)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const drawCard = (label: string, value: string, color: string, x: number) => { slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 3 } }); slide.addText(label, { x, y: 1.8, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' }); slide.addText(value, { x, y: 2.3, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' }); }; drawCard("Total Ativos", metrics.total.toString(), 'ffffff', 0.5); drawCard("Incidentes", metrics.incidents.toString(), 'f43f5e', 3.5); drawCard("Melhorias", metrics.features.toString(), '10b981', 6.5); drawCard("Automações", metrics.automations.toString(), '6366f1', 9.5); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Volume por Status e Prioridade", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); if (priorityData.length > 0) { slide.addChart(pres.ChartType.bar, [ { name: 'Prioridade', labels: priorityData.map(d => d.name), values: priorityData.map(d => d.value) } ], { x: 0.5, y: 1.5, w: 5, h: 4, chartColors: ['8b5cf6'], title: 'Por Prioridade', titleColor: 'ffffff' }); } if (statusByTypeData.length > 0) { const statusLabels = statusByTypeData.map(d => d.name); const incVals = statusByTypeData.map(d => d.Incidente); const melVals = statusByTypeData.map(d => d.Melhoria); const autoVals = statusByTypeData.map(d => d['Nova Automação']); slide.addChart(pres.ChartType.bar, [ { name: 'Incidentes', labels: statusLabels, values: incVals }, { name: 'Melhorias', labels: statusLabels, values: melVals }, { name: 'Automações', labels: statusLabels, values: autoVals } ], { x: 6, y: 1.5, w: 7, h: 4, showLegend: true, barDir: 'col', title: 'Por Status', titleColor: 'ffffff', chartColors: ['f43f5e', '10b981', '6366f1'] }); } slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Capacidade da Equipe & Sugestões", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const tableHeader = ['Desenvolvedor', 'Tarefas', 'Horas Estimadas', 'Dias Estimados', 'Status'].map(t => ({ text: t, options: { bold: true, fill: '334155', color: 'ffffff' } })); const tableRows = capacityData.map(d => { const estimatedDays = Math.ceil(d.totalHours / 8); let statusText = 'Livre'; if (d.totalHours > 40) statusText = 'Sobrecarga'; else if (d.totalHours > 24) statusText = 'Ocupado'; else if (d.totalHours > 8) statusText = 'Moderado'; return [d.name, d.activeTasksCount, formatDuration(d.totalHours), `${estimatedDays}d`, statusText]; }); slide.addTable([tableHeader, ...tableRows], { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', border: { pt: 0, pb: 1, color: '475569' } }); pres.writeFile({ fileName: "Nexus_Dashboard.pptx" }); };
+  const exportPPT = () => { const pres = new pptxgen(); pres.layout = 'LAYOUT_WIDE'; let slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Dashboard Nexus Project", { x: 0.5, y: 2, w: '90%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' }); slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 3, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' }); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Visão Geral do Portfólio (Demandas Ativas)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const drawCard = (label: string, value: string, color: string, x: number) => { slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 3 } }); slide.addText(label, { x, y: 1.8, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' }); slide.addText(value, { x, y: 2.3, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' }); }; drawCard("Total Ativos", metrics.total.toString(), 'ffffff', 0.5); drawCard("Incidentes", metrics.incidents.toString(), 'f43f5e', 3.5); drawCard("Melhorias", metrics.features.toString(), '10b981', 6.5); drawCard("Automações", metrics.automations.toString(), '6366f1', 9.5); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Volume por Status e Prioridade", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); if (priorityData.length > 0) { slide.addChart(pres.ChartType.bar, [ { name: 'Prioridade', labels: priorityData.map(d => d.name), values: priorityData.map(d => d.value) } ], { x: 0.5, y: 1.5, w: 5, h: 4, chartColors: ['8b5cf6'], title: 'Por Prioridade', titleColor: 'ffffff' }); } if (statusByTypeData.length > 0) { const statusLabels = statusByTypeData.map(d => d.name); const incVals = statusByTypeData.map(d => d.Incidente); const melVals = statusByTypeData.map(d => d.Melhoria); const autoVals = statusByTypeData.map(d => d['Nova Automação']); slide.addChart(pres.ChartType.bar, [ { name: 'Incidentes', labels: statusLabels, values: incVals }, { name: 'Melhorias', labels: statusLabels, values: melVals }, { name: 'Automações', labels: statusLabels, values: autoVals } ], { x: 6, y: 1.5, w: 7, h: 4, showLegend: true, barDir: 'col', title: 'Por Status', titleColor: 'ffffff', chartColors: ['f43f5e', '10b981', '6366f1'] }); } slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Capacidade da Equipe & Sugestões", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const tableHeader = ['Desenvolvedor', 'Tarefas', 'Horas Estimadas', 'Dias Estimados', 'Status'].map(t => ({ text: t, options: { bold: true, fill: '334155', color: 'ffffff' } })); const tableRows = capacityData.map(d => { const estimatedDays = Math.ceil(d.totalHours / 8); let statusText = 'Livre'; if (d.totalHours > 40) statusText = 'Sobrecarga'; else if (d.totalHours > 24) statusText = 'Ocupado'; else if (d.totalHours > 8) statusText = 'Moderado'; return [d.name, d.activeTasksCount, formatDuration(d.totalHours), `${estimatedDays}d`, statusText]; }); slide.addTable([tableHeader, ...tableRows] as any, { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', border: { type: 'solid', color: '475569', pt: 0.5 } }); pres.writeFile({ fileName: "Nexus_Dashboard.pptx" }); };
 
   const renderWidget = (widget: Widget) => {
       const style = widget.visualStyle || 'bar';
@@ -1962,7 +2388,18 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
   if (location.pathname === '/powerbi-data') return <>{children}</>;
-  const menuItems = [ { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental' }, { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } ];
+  const menuItems = [ 
+    { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
+    { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
+    { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental' }, 
+    { path: '/sprints', icon: <IconSprint className="w-5 h-5" />, label: 'Sprints (CoE)' },
+    { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, 
+    { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, 
+    { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
+    { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, 
+    { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, 
+    { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } 
+  ];
   return (<div className="flex h-screen bg-dark-900 text-slate-200 font-sans"><aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}><button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"><IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} /></button><div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}><div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div><h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1></div><nav className="flex-1 p-4 space-y-2 mt-4">{menuItems.map(item => (<button key={item.path} onClick={() => navigate(item.path)} title={isCollapsed ? item.label : ''} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${location.pathname === item.path ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${isCollapsed ? 'justify-center px-0' : ''}`}>{item.icon}<span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{item.label}</span></button>))}</nav><div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{!isCollapsed && <><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></>}</div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div></aside><main className="flex-1 overflow-hidden relative flex flex-col"><header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800"><div className="pointer-events-auto">{headerContent}</div></header><div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" /><div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">{children}</div></main></div>);
 };
 
@@ -1994,6 +2431,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
   const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
   const [robots, setRobots] = useState<Robot[]>(StorageService.getRobots());
+  const [sprints, setSprints] = useState<Sprint[]>(StorageService.getSprints());
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
   const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(StorageService.getDocumentsConfig(DEFAULT_DOCS));
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -2014,5 +2452,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
