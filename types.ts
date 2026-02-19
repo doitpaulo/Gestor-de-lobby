@@ -73,6 +73,19 @@ export interface Task {
 
   // Audit Log
   history?: HistoryEntry[];
+
+  // Sub-tasks
+  subTasks?: SubTask[];
+}
+
+export interface SubTask {
+  id: string;
+  title: string;
+  assignee: string | null;
+  estimatedHours: number;
+  actualHours: number;
+  status: 'Pendente' | 'Em Andamento' | 'Concluído';
+  phase: string;
 }
 
 export interface Robot {

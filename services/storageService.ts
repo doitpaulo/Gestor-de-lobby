@@ -211,7 +211,8 @@ export const StorageService = {
           fteValue: existing.fteValue, // Preserve FTE
           managementArea: existing.managementArea, // Preserve Management Area
           blocker: existing.blocker, // Preserve Blocker
-          docStatuses: existing.docStatuses // Preserve Document Statuses
+          docStatuses: existing.docStatuses, // Preserve Document Statuses
+          subTasks: existing.subTasks // Preserve Sub-tasks
         };
 
         taskMap.set(newTask.id, mergedTask);
