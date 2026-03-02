@@ -178,6 +178,37 @@ export const StorageService = {
   saveSprints: (sprints: Sprint[]) => {
     localStorage.setItem(KEYS.SPRINTS, JSON.stringify(sprints));
   },
+
+  // --- Backup & Restore ---
+  getFullBackup: () => {
+    const backup: Record<string, any> = {};
+    Object.entries(KEYS).forEach(([keyName, storageKey]) => {
+      const data = localStorage.getItem(storageKey);
+      if (data) {
+        try {
+          backup[keyName] = JSON.parse(data);
+        } catch {
+          backup[keyName] = data;
+        }
+      }
+    });
+    return backup;
+  },
+
+  restoreBackup: (backup: Record<string, any>) => {
+    try {
+      Object.entries(backup).forEach(([keyName, data]) => {
+        const storageKey = (KEYS as any)[keyName];
+        if (storageKey && data !== undefined && data !== null) {
+          localStorage.setItem(storageKey, typeof data === 'string' ? data : JSON.stringify(data));
+        }
+      });
+      return true;
+    } catch (e) {
+      console.error("Error restoring backup", e);
+      return false;
+    }
+  },
   
   // Intelligent Merge Logic
   mergeTasks: (newTasks: Task[]) => {
