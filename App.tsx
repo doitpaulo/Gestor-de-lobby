@@ -839,15 +839,37 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
     const [statusFilter, setStatusFilter] = useState('Todos');
     const [dateFilter, setDateFilter] = useState('');
 
-    const filteredSprints = sprints.filter((s: Sprint) => {
-        const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesStatus = statusFilter === 'Todos' || 
-                             (statusFilter === 'Abertas' && (s.status === 'Planejada' || s.status === 'Em Execução')) ||
-                             (statusFilter === 'Fechadas' && s.status === 'Concluída') ||
-                             s.status === statusFilter;
-        const matchesDate = !dateFilter || (s.startDate <= dateFilter && s.endDate >= dateFilter);
-        return matchesSearch && matchesStatus && matchesDate;
-    });
+    // Auto-select current or most recent sprint
+    useEffect(() => {
+        if (!selectedSprint && sprints.length > 0) {
+            const current = sprints.find(s => s.status === 'Em Execução');
+            if (current) {
+                setSelectedSprint(current);
+            } else if (sprints.length > 0) {
+                const sorted = [...sprints].sort((a, b) => b.endDate.localeCompare(a.endDate));
+                setSelectedSprint(sorted[0]);
+            }
+        }
+    }, [sprints, selectedSprint]);
+
+    const filteredSprints = useMemo(() => {
+        const filtered = sprints.filter((s: Sprint) => {
+            const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesStatus = statusFilter === 'Todos' || 
+                                 (statusFilter === 'Abertas' && (s.status === 'Planejada' || s.status === 'Em Execução')) ||
+                                 (statusFilter === 'Fechadas' && s.status === 'Concluída') ||
+                                 s.status === statusFilter;
+            const matchesDate = !dateFilter || (s.startDate <= dateFilter && s.endDate >= dateFilter);
+            return matchesSearch && matchesStatus && matchesDate;
+        });
+
+        // Sort: "Em Execução" first, then by date descending
+        return [...filtered].sort((a, b) => {
+            if (a.status === 'Em Execução' && b.status !== 'Em Execução') return -1;
+            if (a.status !== 'Em Execução' && b.status === 'Em Execução') return 1;
+            return b.endDate.localeCompare(a.endDate);
+        });
+    }, [sprints, searchTerm, statusFilter, dateFilter]);
 
     const handleSaveSprint = (e: React.FormEvent) => {
         e.preventDefault();
@@ -1248,7 +1270,12 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                     className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedSprint?.id === s.id ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700 hover:border-slate-500'}`}
                                 >
                                     <div className="flex justify-between items-start mb-2">
-                                        <h4 className="font-bold text-white">{s.name}</h4>
+                                        <div className="flex items-center gap-2">
+                                            <h4 className="font-bold text-white">{s.name}</h4>
+                                            {s.status === 'Em Execução' && (
+                                                <span className="text-[8px] bg-indigo-500 text-white px-1 rounded font-bold animate-pulse">ATUAL</span>
+                                            )}
+                                        </div>
                                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
                                             {s.status}
                                         </span>
@@ -3159,6 +3186,31 @@ export default function App() {
   };
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  // Automatic Sprint Status Management
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    let changed = false;
+    const updatedSprints = sprints.map(s => {
+      // If sprint ended, mark as Concluída
+      if (s.endDate < today && s.status !== 'Concluída') {
+        changed = true;
+        return { ...s, status: 'Concluída' as const };
+      }
+      // If sprint should be active, mark as Em Execução
+      if (s.startDate <= today && s.endDate >= today && s.status === 'Planejada') {
+        changed = true;
+        return { ...s, status: 'Em Execução' as const };
+      }
+      return s;
+    });
+
+    if (changed) {
+      setSprints(updatedSprints);
+      StorageService.saveSprints(updatedSprints);
+    }
+  }, [sprints]);
+
 
   useEffect(() => {
     if (tasks.length > 0) {
