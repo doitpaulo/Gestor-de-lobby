@@ -190,22 +190,20 @@ const formatDuration = (hours: number): string => {
 
 const getSprintNameFromDate = (dateStr: string | undefined): string => {
     if (!dateStr) return "";
-    const date = new Date(dateStr);
+    // Use T12:00:00 to ensure the date is parsed correctly regardless of local timezone
+    const date = new Date(dateStr + 'T12:00:00');
     if (isNaN(date.getTime())) return "";
     
-    // Get week number (ISO-8601)
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    // Calculate week of the month (1 to 5)
+    const day = date.getDate();
+    const weekOfMonth = Math.ceil(day / 7);
     
-    // Get month and year
+    // Get month and year (mmm-aaaa)
     const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     const month = monthNames[date.getMonth()];
     const year = date.getFullYear();
     
-    return `Sprint Semana ${weekNo.toString().padStart(2, '0')} / ${month}-${year}`;
+    return `Sprint Semana ${weekOfMonth} - ${month}-${year}`;
 };
 
 const getDevWorkload = (devName: string, tasks: Task[], excludeTaskId?: string): number => {
@@ -838,6 +836,7 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('Todos');
     const [dateFilter, setDateFilter] = useState('');
+    const [taskDevFilter, setTaskDevFilter] = useState('Todos');
 
     // Auto-select current or most recent sprint
     useEffect(() => {
@@ -1263,36 +1262,54 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                         {filteredSprints.length === 0 ? (
                             <div className="text-center py-10 text-slate-500">Nenhuma sprint encontrada com os filtros.</div>
                         ) : (
-                            filteredSprints.map((s: Sprint) => (
-                                <div 
-                                    key={s.id} 
-                                    onClick={() => setSelectedSprint(s)}
-                                    className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedSprint?.id === s.id ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700 hover:border-slate-500'}`}
-                                >
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <h4 className="font-bold text-white">{s.name}</h4>
-                                            {s.status === 'Em Execução' && (
-                                                <span className="text-[8px] bg-indigo-500 text-white px-1 rounded font-bold animate-pulse">ATUAL</span>
+                            (() => {
+                                let lastMonth = '';
+                                return filteredSprints.map((s: Sprint) => {
+                                    const date = new Date(s.endDate + 'T12:00:00');
+                                    const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+                                    const currentMonth = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+                                    const showHeader = currentMonth !== lastMonth;
+                                    lastMonth = currentMonth;
+
+                                    return (
+                                        <React.Fragment key={s.id}>
+                                            {showHeader && (
+                                                <div className="pt-4 pb-2 first:pt-0">
+                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{currentMonth}</span>
+                                                    <div className="h-px bg-slate-800 mt-1"></div>
+                                                </div>
                                             )}
-                                        </div>
-                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                                            {s.status}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
-                                        <IconClock className="w-3 h-3" />
-                                        <span>{s.startDate} - {s.endDate}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-xs text-slate-500">{s.tasks.length} tarefas</span>
-                                        <div className="flex gap-2">
-                                            <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} className="text-slate-400 hover:text-white p-1">✏️</button>
-                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))
+                                            <div 
+                                                onClick={() => setSelectedSprint(s)}
+                                                className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedSprint?.id === s.id ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700 hover:border-slate-500'}`}
+                                            >
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <h4 className="font-bold text-white">{s.name}</h4>
+                                                        {s.status === 'Em Execução' && (
+                                                            <span className="text-[8px] bg-indigo-500 text-white px-1 rounded font-bold animate-pulse">ATUAL</span>
+                                                        )}
+                                                    </div>
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                                        {s.status}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
+                                                    <IconClock className="w-3 h-3" />
+                                                    <span>{s.startDate} - {s.endDate}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-slate-500">{s.tasks.length} tarefas</span>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} className="text-slate-400 hover:text-white p-1">✏️</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()
                         )}
                     </div>
                 </Card>
@@ -1333,11 +1350,27 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                 </div>
                             </div>
 
-                            <div className="flex justify-between items-center mb-4">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                                 <h4 className="font-bold text-white">Tarefas da Sprint</h4>
-                                <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-1">
-                                    <IconPlus className="w-3 h-3" /> Adicionar Tarefa
-                                </Button>
+                                <div className="flex items-center gap-4 w-full md:w-auto">
+                                    <div className="flex items-center gap-2 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-1.5">
+                                        <IconUsers className="w-4 h-4 text-slate-500" />
+                                        <select 
+                                            className="bg-transparent text-xs text-white outline-none border-none cursor-pointer"
+                                            value={taskDevFilter}
+                                            onChange={(e) => setTaskDevFilter(e.target.value)}
+                                        >
+                                            <option value="Todos">Todos os Devs</option>
+                                            {devs.map((d: any) => (
+                                                <option key={d.id} value={d.name}>{d.name}</option>
+                                            ))}
+                                            <option value="Sem Dev">Sem Dev</option>
+                                        </select>
+                                    </div>
+                                    <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-2">
+                                        <IconPlus className="w-3 h-3" /> Adicionar Tarefa
+                                    </Button>
+                                </div>
                             </div>
 
                             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -1352,8 +1385,15 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {selectedSprint.tasks.map(st => {
-                                            const task = tasks.find((t: any) => t.id === st.taskId);
+                                        {selectedSprint.tasks
+                                            .filter(st => {
+                                                if (taskDevFilter === 'Todos') return true;
+                                                const task = tasks.find((t: any) => t.id === st.taskId);
+                                                if (taskDevFilter === 'Sem Dev') return !task?.assignee;
+                                                return task?.assignee === taskDevFilter;
+                                            })
+                                            .map(st => {
+                                                const task = tasks.find((t: any) => t.id === st.taskId);
                                             return (
                                                 <tr key={st.taskId} className="border-b border-slate-800 hover:bg-slate-800/30">
                                                     <td className="p-3">
