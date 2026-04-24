@@ -110,6 +110,10 @@ export const StorageService = {
       return localStorage.getItem(KEYS.API_KEY);
   },
 
+  saveApiKey: (key: string) => {
+      localStorage.setItem(KEYS.API_KEY, key);
+  },
+
   generateApiKey: (): string => {
       const key = 'nx-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       localStorage.setItem(KEYS.API_KEY, key);

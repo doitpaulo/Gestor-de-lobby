@@ -10,7 +10,7 @@ import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -2604,6 +2604,186 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
     const handleExport = () => { const ws = XLSX.utils.json_to_sheet(filteredRobots.map(r => ({ 'NOME DO ROBÔ': r.name, 'PASTA QUE ESTÁ ARMAZENADO': r.folder, 'SITUAÇÃO': r.status, 'DESENVOLVEDOR': r.developer, 'OWNERS': r.owners, 'ÁREA': r.area, 'FTE': r.fte || 0, 'CHAMADO': r.ticketNumber || '' }))); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Robôs"); XLSX.writeFile(wb, "Nexus_Robots_Base.xlsx"); };
     return (<div className="space-y-6 h-full flex flex-col pb-20"><div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div><h2 className="text-xl font-bold text-white">Gestão de RPAs</h2><p className="text-sm text-slate-400">Base de conhecimento e status dos robôs</p></div><div className="flex gap-2 items-center flex-wrap"><div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2"><input type="file" id="robotUpload" className="hidden" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} /><label htmlFor="robotUpload" className="text-xs text-slate-400 cursor-pointer hover:text-white py-2 px-1">{file ? file.name : 'Selecionar Planilha...'}</label>{file && <button onClick={handleFileUpload} className="text-xs text-emerald-400 font-bold hover:underline px-2">Importar</button>}</div><Button variant="success" onClick={handleExport} className="text-xs py-2"><IconUpload className="w-4 h-4" /> Exportar</Button><Button onClick={() => { setEditingRobot(null); setIsModalOpen(true); }} className="text-xs py-2"><IconPlus className="w-4 h-4" /> Novo Robô</Button></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Distribuição por Status</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label>{statusData.map((entry, index) => <Cell key={index} fill={entry.name === 'ATIVO' ? '#10b981' : entry.name === 'DESATIVO' ? '#f43f5e' : '#f59e0b'} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize:'10px'}} /></PieChart></ResponsiveContainer></div></Card><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Robôs por Área</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><BarChart data={areaData} layout="vertical" margin={{ left: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" hide /><YAxis type="category" dataKey="name" stroke="#94a3b8" width={100} tick={{fontSize: 10}} /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20}><LabelList dataKey="value" position="right" fill="#fff" fontSize={10} /></Bar></BarChart></ResponsiveContainer></div></Card></div><div className="flex flex-col md:flex-row gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div className="relative flex-1"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg><input type="text" placeholder="Buscar robô..." className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{statuses.map(s => <option key={s} value={s}>{s === 'Todos' ? 'Status: Todos' : s}</option>)}</select><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none max-w-[200px]" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>{areas.map(a => <option key={a} value={a}>{a === 'Todas' ? 'Área: Todas' : a}</option>)}</select></div><div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col"><div className="overflow-auto custom-scrollbar flex-1"><table className="w-full text-left text-sm"><thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md"><tr><th className="p-4">Nome do Robô</th><th className="p-4">Situação</th><th className="p-4">Área</th><th className="p-4">Chamado</th><th className="p-4">FTE</th><th className="p-4">Desenvolvedor</th><th className="p-4">Pasta</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-700">{filteredRobots.map(robot => (<tr key={robot.id} className="hover:bg-slate-800/50 transition-colors group"><td className="p-4 font-medium text-white">{robot.name}</td><td className="p-4"><span className={`px-2 py-0.5 text-[10px] rounded font-bold uppercase ${robot.status === 'ATIVO' ? 'bg-emerald-500/20 text-emerald-400' : robot.status === 'DESATIVO' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>{robot.status}</span></td><td className="p-4 text-slate-300">{robot.area}</td><td className="p-4 text-slate-400 font-mono text-xs">{robot.ticketNumber || '-'}</td><td className="p-4 text-slate-300">{robot.fte || '-'}</td><td className="p-4 text-slate-400">{robot.developer}</td><td className="p-4 text-xs text-slate-500 font-mono truncate max-w-[150px]" title={robot.folder}>{robot.folder}</td><td className="p-4 text-right"><button onClick={() => { setEditingRobot(robot); setIsModalOpen(true); }} className="text-indigo-400 hover:text-indigo-300 mr-3">Editar</button><button onClick={() => handleDeleteRobot(robot.id)} className="text-rose-400 hover:text-rose-300">Excluir</button></td></tr>))}</tbody></table>{filteredRobots.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum robô encontrado.</div>}</div></div>{isModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg shadow-2xl"><div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingRobot ? 'Editar Robô' : 'Novo Robô'}</h3></div><div className="p-6 space-y-4"><form id="robotForm" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const data = new FormData(form); handleSaveRobot({ id: editingRobot?.id || '', name: data.get('name') as string, folder: data.get('folder') as string, status: data.get('status') as string, developer: data.get('developer') as string, owners: data.get('owners') as string, area: data.get('area') as string, fte: parseFloat(data.get('fte') as string) || undefined, ticketNumber: data.get('ticketNumber') as string }); }}><div className="space-y-4"><div><label className="block text-xs text-slate-400 mb-1">Nome do Robô</label><input name="name" defaultValue={editingRobot?.name} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Área</label><input name="area" defaultValue={editingRobot?.area} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Situação</label><select name="status" defaultValue={editingRobot?.status || 'ATIVO'} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500"><option value="ATIVO">ATIVO</option><option value="DESATIVO">DESATIVO</option><option value="EM DESENVOLVIMENTO">EM DESENVOLVIMENTO</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label><input name="developer" defaultValue={editingRobot?.developer} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Owners</label><input name="owners" defaultValue={editingRobot?.owners} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1">Nº Chamado</label><input name="ticketNumber" defaultValue={editingRobot?.ticketNumber} placeholder="Ex: R12345" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">FTE</label><input type="number" step="0.01" name="fte" defaultValue={editingRobot?.fte} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div><label className="block text-xs text-slate-400 mb-1">Pasta de Armazenamento</label><input name="folder" defaultValue={editingRobot?.folder} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="flex justify-end gap-3 mt-6"><Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button><Button type="submit">Salvar</Button></div></form></div></div></div>)}</div>); };
 
+const AutomationTotemView = ({ tasks, setTasks, robots }: any) => {
+    const [logs, setLogs] = useState([
+        { id: '1', time: new Date().toLocaleTimeString(), message: 'Robô "Nexus_Auto_01" iniciou processamento de fila.', status: 'info' },
+        { id: '2', time: new Date().toLocaleTimeString(), message: 'Demanda INC10293 cadastrada via integração SAP.', status: 'success' },
+        { id: '3', time: new Date().toLocaleTimeString(), message: 'Falha ao atualizar Relatório Financeiro: Timeout no servidor.', status: 'error' },
+        { id: '4', time: new Date().toLocaleTimeString(), message: 'Relatório de Sprints atualizado com sucesso.', status: 'success' },
+    ]);
+    const [apiKey] = useState(StorageService.getApiKey() || 'NEXUS-' + Math.random().toString(36).substr(2, 12).toUpperCase());
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    useEffect(() => {
+        if (!StorageService.getApiKey()) StorageService.saveApiKey(apiKey);
+    }, [apiKey]);
+
+    const handleRefreshReports = () => {
+        setIsRefreshing(true);
+        const newLog = { id: Date.now().toString(), time: new Date().toLocaleTimeString(), message: 'Solicitação de atualização de relatórios enviada para a fila RPA.', status: 'info' };
+        setLogs(prev => [newLog, ...prev]);
+        setTimeout(() => setIsRefreshing(false), 2000);
+    };
+
+    const automationQueue = useMemo(() => {
+        return tasks.filter((t: Task) => (t.status === 'Novo' || t.status === 'Pendente') && (t.type === 'Melhoria' || t.type === 'Nova Automação')).slice(0, 5);
+    }, [tasks]);
+
+    return (
+        <div className="space-y-6 animate-fade-in pb-10">
+            <div className="flex justify-between items-center bg-slate-800 p-5 rounded-2xl border border-slate-700 shadow-xl">
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center border border-indigo-500/30">
+                        <IconTerminal className="w-7 h-7 text-indigo-400" />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-white tracking-tight">Totem de Automação</h2>
+                        <p className="text-sm text-slate-400">Cockpit de controle e integração RPA (Robotic Process Automation)</p>
+                    </div>
+                </div>
+                <div className="flex bg-slate-900 border border-slate-700 rounded-xl p-2 items-center gap-3">
+                    <div className="px-3">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Status do Hub</p>
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                            <span className="text-xs text-emerald-400 font-mono font-bold">ONLINE</span>
+                        </div>
+                    </div>
+                    <div className="h-8 w-px bg-slate-700"></div>
+                    <div className="px-3">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Filas Ativas</p>
+                        <span className="text-xs text-white font-mono font-bold">4 Integradas</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-6">
+                    <Card className="flex flex-col h-[350px]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                                <IconList className="w-4 h-4 text-indigo-400" /> Fila de Demandas para Automação
+                            </h3>
+                            <span className="text-[10px] bg-slate-900 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-mono">Pendente: {automationQueue.length}</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+                            {automationQueue.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-500 italic text-sm">
+                                    Nenhuma demanda pendente na fila de automação.
+                                </div>
+                            ) : (
+                                automationQueue.map((task: any) => (
+                                    <div key={task.id} className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 flex justify-between items-center hover:border-indigo-500/50 transition-all group">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`p-2 rounded-lg ${task.type === 'Incidente' ? 'bg-rose-500/10 text-rose-400' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                                                <IconProject className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-slate-500 font-mono mb-0.5">{task.id}</p>
+                                                <h4 className="text-sm font-medium text-slate-200 group-hover:text-white transition-colors">{task.summary}</h4>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${task.priority.includes('Crítica') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
+                                                {task.priority.split(' - ')[1]}
+                                            </span>
+                                            <p className="text-[10px] text-indigo-400 mt-1 font-bold">AGUARDANDO ROBÔ</p>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-slate-700/50 flex justify-center">
+                            <Button variant="secondary" className="text-[10px] py-1 px-4">Ver Fila Completa</Button>
+                        </div>
+                    </Card>
+
+                    <Card className="flex flex-col h-[350px]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                                <IconTerminal className="w-4 h-4 text-emerald-400" /> Console de Live Feed (Logs RPA)
+                            </h3>
+                            <button onClick={() => setLogs([])} className="text-[10px] text-slate-500 hover:text-rose-400 transition-colors uppercase font-bold">Limpar Console</button>
+                        </div>
+                        <div className="flex-1 bg-black/40 rounded-xl p-4 font-mono text-xs overflow-y-auto custom-scrollbar space-y-2 border border-slate-700/50">
+                            {logs.map(log => (
+                                <div key={log.id} className="flex gap-3">
+                                    <span className="text-slate-600 shrink-0">[{log.time}]</span>
+                                    <span className={`${log.status === 'success' ? 'text-emerald-400' : log.status === 'error' ? 'text-rose-400' : 'text-indigo-300'}`}>
+                                        {log.status === 'error' ? '>> ERR: ' : log.status === 'success' ? '>> OK: ' : '>> INF: '}
+                                        {log.message}
+                                    </span>
+                                </div>
+                            ))}
+                            <div className="animate-pulse text-indigo-500">_</div>
+                        </div>
+                    </Card>
+                </div>
+
+                <div className="space-y-6">
+                    <Card className="bg-indigo-900/10 border-indigo-500/30">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-indigo-500/20 rounded-lg">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-indigo-400">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-bold text-white uppercase tracking-wider">Chave de Integração</h4>
+                                <p className="text-[10px] text-slate-500 uppercase font-medium">Nexus API Token</p>
+                            </div>
+                        </div>
+                        <div className="bg-black/30 border border-indigo-500/20 rounded-lg p-3 group relative overflow-hidden">
+                            <p className="text-sm font-mono text-indigo-300 break-all">{apiKey}</p>
+                            <button 
+                                onClick={() => { navigator.clipboard.writeText(apiKey); alert('Chave copiada!'); }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3 h-3 text-white"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" /></svg>
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-3 italic leading-relaxed">Use esta chave no Header "X-Nexus-API-Key" para autenticar as requisições do seu robô.</p>
+                    </Card>
+
+                    <Card>
+                        <h4 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
+                             <IconDocument className="w-4 h-4 text-emerald-400" /> Atualização de Relatórios
+                        </h4>
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center p-3 bg-slate-900 rounded-xl border border-slate-700">
+                                <span className="text-xs text-slate-300 font-medium">Relatório Operacional</span>
+                                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">ATUALIZADO</span>
+                            </div>
+                            <div className="flex justify-between items-center p-3 bg-slate-900 rounded-xl border border-slate-700">
+                                <span className="text-xs text-slate-300 font-medium">Dashboard CoE (BI)</span>
+                                <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded">PENDENTE</span>
+                            </div>
+                            <div className="flex justify-between items-center p-3 bg-slate-900 rounded-xl border border-slate-700">
+                                <span className="text-xs text-slate-300 font-medium">Base de Conhecimento</span>
+                                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">ATUALIZADO</span>
+                            </div>
+                            <Button 
+                                onClick={handleRefreshReports} 
+                                disabled={isRefreshing}
+                                variant="primary" 
+                                className="w-full justify-center group"
+                            >
+                                <IconClock className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                                {isRefreshing ? 'Enviando...' : 'Solicitar Atualização'}
+                            </Button>
+                        </div>
+                    </Card>
+
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 text-center">
+                        <p className="text-xs text-slate-500 mb-2 font-medium">Deseja automatizar o cadastro?</p>
+                        <a href="#/powerbi-data" className="text-indigo-400 text-[10px] font-bold hover:underline uppercase tracking-wider">Ver Documentação de Dados</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig, sprints, setSprints, syncTaskWithSprints }: any) => {
     const [isConfigOpen, setIsConfigOpen] = useState(false);
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ search: '', type: [], priority: [], status: [], assignee: [] });
@@ -2939,6 +3119,7 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
     { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
     { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, 
     { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, 
+    { path: '/totem', icon: <IconTerminal className="w-5 h-5" />, label: 'Totem RPA' },
     { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } 
   ];
   return (<div className="flex h-screen bg-dark-900 text-slate-200 font-sans"><aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}><button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"><IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} /></button><div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}><div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div><h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1></div><nav className="flex-1 p-4 space-y-2 mt-4">{menuItems.map(item => (<button key={item.path} onClick={() => navigate(item.path)} title={isCollapsed ? item.label : ''} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${location.pathname === item.path ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${isCollapsed ? 'justify-center px-0' : ''}`}>{item.icon}<span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{item.label}</span></button>))}</nav><div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{!isCollapsed && <><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></>}</div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div></aside><main className="flex-1 overflow-hidden relative flex flex-col"><header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800"><div className="pointer-events-auto">{headerContent}</div></header><div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" /><div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">{children}</div></main></div>);
@@ -3381,5 +3562,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
