@@ -2154,7 +2154,28 @@ function getWeekNumber(d: Date): number {
     return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
 }
 
+const getNumericFte = (value: any): number => {
+    if (value === undefined || value === null || value === '') return 0.20;
+    const num = parseFloat(String(value));
+    return isNaN(num) ? 0.20 : num;
+};
+
+const formatFte = (value: any): string => {
+    const num = getNumericFte(value);
+    return num.toFixed(2).replace('.', ',');
+};
+
+const formatFteDot = (value: any): string => {
+    const num = getNumericFte(value);
+    return num.toFixed(2);
+};
+
 const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[], sprints?: Sprint[] }) => {
+    const safeTasks = tasks || [];
+    const safeDevs = devs || [];
+    const safeWorkflowConfig = workflowConfig || [];
+    const safeSprints = sprints || [];
+
     // 1. FILTERS STATE
     const [filters, setFilters] = useState({
         search: '',
@@ -2171,26 +2192,26 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     // 2. EXTRACT UNIQUE VALUES FOR COCKPIT FILTERS
     const uniqueClients = useMemo(() => {
         const clients = new Set<string>();
-        (tasks || []).forEach(t => { if (t && t.subcategory) clients.add(t.subcategory); });
+        safeTasks.forEach(t => { if (t && t.subcategory) clients.add(t.subcategory); });
         return Array.from(clients).sort();
-    }, [tasks]);
+    }, [safeTasks]);
 
     const uniqueAreas = useMemo(() => {
         const areas = new Set<string>();
-        (tasks || []).forEach(t => { if (t && t.managementArea) areas.add(t.managementArea); });
+        safeTasks.forEach(t => { if (t && t.managementArea) areas.add(t.managementArea); });
         return Array.from(areas).sort();
-    }, [tasks]);
+    }, [safeTasks]);
 
     const uniqueStatuses = useMemo(() => {
         const statuses = new Set<string>();
-        (tasks || []).forEach(t => { if (t && t.status) statuses.add(t.status); });
+        safeTasks.forEach(t => { if (t && t.status) statuses.add(t.status); });
         return Array.from(statuses).sort();
-    }, [tasks]);
+    }, [safeTasks]);
 
     // 3. APPLY REACTIVE EXECUTIVE FILTRATION
     const filteredProjects = useMemo(() => {
         // Resolve tasks for the selected sprint if applicable
-        const foundSprint = filters.sprint !== 'Todos' ? s_find(sprints || [], filters.sprint) : null;
+        const foundSprint = filters.sprint !== 'Todos' ? s_find(safeSprints, filters.sprint) : null;
         const sprintTaskIds = foundSprint && foundSprint.tasks 
             ? foundSprint.tasks.map(t => t && t.taskId).filter(Boolean) 
             : [];
@@ -2199,7 +2220,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             return arr.find(s => s && s.id === sprId);
         }
 
-        return (tasks || []).filter(t => {
+        return safeTasks.filter(t => {
             if (!t) return false;
             const tSummary = String(t.summary || '').toLowerCase();
             const tId = String(t.id || '').toLowerCase();
@@ -2218,7 +2239,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
 
             return matchesSearch && matchesDev && matchesType && matchesStatus && matchesSprint && matchesClient && matchesArea;
         });
-    }, [tasks, filters, sprints]);
+    }, [safeTasks, filters, safeSprints]);
 
     // Helper for priority weighting
     const getPriorityWeight = (priority: string | any) => {
@@ -2250,14 +2271,14 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             if (!p) return;
             const status = (p.status || '').toLowerCase();
             const phaseId = p.projectData?.currentPhaseId;
-            const phaseName = ((workflowConfig || []).find(w => w && w.id === phaseId)?.name || '').toLowerCase();
+            const phaseName = (safeWorkflowConfig.find(w => w && w.id === phaseId)?.name || '').toLowerCase();
 
             // Completed / Concluídos
             if (['concluido', 'concluído', 'resolvido', 'fechado'].includes(status)) {
                 completed++;
             } else {
                 // Active FTE sum
-                totalFteAllocated += (p.fteValue || 0.20);
+                totalFteAllocated += getNumericFte(p.fteValue);
                 
                 // Blocked / Bloqueados
                 if (status === 'aguardando' || status === 'pendente' || p.blocker) {
@@ -2278,7 +2299,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
         });
 
         // Developer Capacity metrics
-        const totalCapacity = (devs || []).length * 1.0; // Assume 1.0 FTE per registered resource is standard capacity
+        const totalCapacity = safeDevs.length * 1.0; // Assume 1.0 FTE per registered resource is standard capacity
         const availableCapacity = Math.max(0, totalCapacity - totalFteAllocated);
 
         return {
@@ -2292,36 +2313,37 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             totalCapacity,
             availableCapacity
         };
-    }, [sortedQueue, workflowConfig, devs]);
+    }, [sortedQueue, safeWorkflowConfig, safeDevs]);
 
     // 5. CALCULATE CAPACITY & PROJECT DIVISIONS PER DEVELOPER
     const developerAllocation = useMemo(() => {
-        return devs.map(dev => {
+        return safeDevs.map(dev => {
+            if (!dev) return { id: '', name: '', activeCount: 0, usedFte: 0, availableFte: 1.0, backlog: [], inProgress: [], inQA: [] };
             // Get non-completed tasks assigned to dev
             const activeProjects = filteredProjects.filter(p => 
-                p.assignee === dev.name && 
+                p && p.assignee === dev.name && 
                 !['Concluído', 'Resolvido', 'Fechado'].includes(p.status)
             );
 
-            const usedFte = activeProjects.reduce((acc, p) => acc + (p.fteValue || 0.20), 0);
+            const usedFte = activeProjects.reduce((acc, p) => acc + getNumericFte(p.fteValue), 0);
             const availableFte = Math.max(0, 1.0 - usedFte);
 
             // Backlog list
             const backlog = activeProjects.filter(p => 
-                ['Novo', 'Backlog', 'Pendente'].includes(p.status) && 
+                p && ['Novo', 'Backlog', 'Pendente'].includes(p.status) && 
                 !(p.projectData?.currentPhaseId && ['2', '3', '4'].includes(p.projectData.currentPhaseId))
             );
 
             // In Progress list
             const inProgress = activeProjects.filter(p => 
-                ['Em Progresso', 'Em Atendimento'].includes(p.status) || 
-                (p.projectData?.currentPhaseId === '2')
+                p && (['Em Progresso', 'Em Atendimento'].includes(p.status) || 
+                (p.projectData?.currentPhaseId === '2'))
             );
 
             // QA / Homologation list
             const inQA = activeProjects.filter(p => 
-                (p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId)) ||
-                ['Resolvido'].includes(p.status)
+                p && ((p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId)) ||
+                ['Resolvido'].includes(p.status))
             );
 
             return {
@@ -2335,7 +2357,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                 inQA
             };
         });
-    }, [devs, filteredProjects]);
+    }, [safeDevs, filteredProjects]);
 
     // 6. PMO ADVISORY & INSIGHTS (DELIVERABLE 9)
     const pmoInsights = useMemo(() => {
@@ -2344,7 +2366,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
         // Check overcommitted resources
         developerAllocation.forEach(d => {
             if (d.usedFte > 1.0) {
-                insights.push(`Sobrecarga detectada para ${d.name}: Alocado com ${(d.usedFte).toFixed(2)} FTE. Recomendamos reatribuir demandas secundárias.`);
+                insights.push(`Sobrecarga detectada para ${d.name}: Alocado com ${formatFteDot(d.usedFte)} FTE. Recomendamos reatribuir demandas secundárias.`);
             }
         });
 
@@ -2390,7 +2412,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                 { title: 'Em Desenvolvimento', value: metrics.inDevelopment.toString(), color: '6366f1' },
                 { title: 'Em Homologação / QA', value: (metrics.inQA + metrics.inHomologation).toString(), color: 'FBBF24' },
                 { title: 'Bloqueados', value: metrics.blocked.toString(), color: 'F43F5E' },
-                { title: 'FTE Total Alocado', value: metrics.totalFteAllocated.toFixed(2), color: '10B981' }
+                { title: 'FTE Total Alocado', value: formatFteDot(metrics.totalFteAllocated), color: '10B981' }
             ];
 
             cards.forEach((c, idx) => {
@@ -2406,7 +2428,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             const headers = ['Projeto', 'FTE', 'Prioridade', 'Status', 'Data Prevista'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 10 } }));
             const rows = topProjects.map(p => [
                 p.summary,
-                (p.fteValue || 0.20).toFixed(2),
+                formatFteDot(p.fteValue),
                 getPriorityDisplayName(p.priority),
                 p.status,
                 formatDateSafely(p.endDate)
@@ -2425,8 +2447,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             const rows = developerAllocation.map(d => [
                 d.name,
                 d.activeCount.toString(),
-                d.usedFte.toFixed(2),
-                d.availableFte.toFixed(2),
+                formatFteDot(d.usedFte),
+                formatFteDot(d.availableFte),
                 d.usedFte > 1.0 ? 'Atenção: Sobrecarga' : d.usedFte > 0.7 ? 'Capacidade Limite' : d.usedFte > 0.2 ? 'Produtivo' : 'Ocioso'
             ]);
             slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
@@ -2448,7 +2470,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     t.id,
                     t.summary,
                     getPriorityDisplayName(t.priority),
-                    (t.fteValue || 0.20).toFixed(2),
+                    formatFteDot(t.fteValue),
                     t.managementArea || 'Global'
                 ]);
                 slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
@@ -2470,7 +2492,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                 const rows = qaTasks.map(p => [
                     p.summary,
                     p.assignee || 'Sem Responsável',
-                    (p.fteValue || 0.20).toFixed(2),
+                    formatFteDot(p.fteValue),
                     p.projectData?.phaseStatus || 'Verificação Interna',
                     formatDateSafely(p.endDate)
                 ]);
@@ -2495,7 +2517,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     t.summary,
                     t.managementArea || 'Geral',
                     t.assignee || '-',
-                    (t.fteValue || 0.5).toFixed(2)
+                    formatFteDot(t.fteValue || 0.5)
                 ]);
                 slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
             }
@@ -2551,7 +2573,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             'Título do Projeto': t.summary,
             'Prioridade': t.priority,
             'Status de Fluxo': t.status,
-            'FTE Alocado': t.fteValue || 0.20,
+            'FTE Alocado': getNumericFte(t.fteValue),
             'Developer Responsável': t.assignee || 'Sem Alocação',
             'Data Estimada Termino': t.endDate || '-',
             'Gargalos / Blocker': t.blocker || '-'
@@ -2562,8 +2584,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
         const capSheetData = developerAllocation.map(d => ({
             'Nome': d.name,
             'Count Projetos Ativos': d.activeCount,
-            'FTE Utilizados': d.usedFte,
-            'FTE Disponível': d.availableFte,
+            'FTE Utilizados': getNumericFte(d.usedFte),
+            'FTE Disponível': getNumericFte(d.availableFte),
             'Estado de Processamento': d.usedFte > 1.0 ? 'Excedido' : d.usedFte > 0.8 ? 'Operando no Limite' : 'Ideal'
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(capSheetData), "Capacidade do Time");
@@ -2740,7 +2762,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                             onChange={e => setFilters(prev => ({ ...prev, sprint: e.target.value }))}
                         >
                             <option value="Todos">Todas</option>
-                            {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            {safeSprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                     </div>
 
@@ -2812,13 +2834,13 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
 
                 <Card className="bg-[#0A1136] border border-teal-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
                     <span className="text-[10px] text-[#2dd4bf] font-bold uppercase tracking-wider block mb-1">FTE Alocado</span>
-                    <span className="text-3xl font-extrabold text-[#2dd4bf] font-mono">{metrics.totalFteAllocated.toFixed(2)}</span>
+                    <span className="text-3xl font-extrabold text-[#2dd4bf] font-mono">{formatFteDot(metrics.totalFteAllocated)}</span>
                     <span className="text-[9px] text-slate-400 mt-2 block">Esforço Ativo</span>
                 </Card>
 
                 <Card className="bg-[#0A1136] border border-indigo-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Capac. Livre</span>
-                    <span className="text-3xl font-extrabold text-slate-200 font-mono">{metrics.availableCapacity.toFixed(2)}</span>
+                    <span className="text-3xl font-extrabold text-slate-200 font-mono">{formatFteDot(metrics.availableCapacity)}</span>
                     <span className="text-[9px] text-slate-500 mt-2 block">Massa de Equipe</span>
                 </Card>
             </div>
@@ -2881,7 +2903,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     {task.summary}
                                                 </td>
                                                 <td className="py-3 text-center font-mono font-bold text-emerald-400 hover:scale-105 transition-transform">
-                                                    {(task.fteValue || 0.20).toFixed(2).replace('.', ',')}
+                                                    {formatFte(task.fteValue)}
                                                 </td>
                                                 <td className="py-3 text-center">
                                                     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase 
@@ -2928,7 +2950,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     {task.summary}
                                                 </td>
                                                 <td className="py-3 text-center font-mono font-bold text-[#38BDF8]">
-                                                    {(task.fteValue || 0.20).toFixed(2).replace('.', ',')}
+                                                    {formatFte(task.fteValue)}
                                                 </td>
                                                 <td className="py-3 text-xs text-rose-300 max-w-[180px] truncate" title={task.blocker || ''}>
                                                     {task.blocker ? (
@@ -2999,7 +3021,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         <div className="flex justify-between text-[10px] font-bold">
                                             <span className="text-slate-400">Utilização de FTE</span>
                                             <span className={isOverload ? 'text-rose-400 font-extrabold animate-pulse' : 'text-[#38BDF8] font-extrabold'}>
-                                                {d.usedFte.toFixed(2)} FTE
+                                                {formatFteDot(d.usedFte)} FTE
                                             </span>
                                         </div>
                                         <div className="w-full bg-indigo-950 h-2 rounded-full overflow-hidden">
@@ -3011,7 +3033,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         </div>
                                         <div className="flex justify-between text-[8px] text-slate-400 font-mono pt-1">
                                             <span>Ocupado: {usagePercentage}%</span>
-                                            <span>Disponível: {d.availableFte.toFixed(2)} FTE</span>
+                                            <span>Disponível: {formatFteDot(d.availableFte)} FTE</span>
                                         </div>
                                         {isOverload && (
                                             <div className="bg-rose-950/40 rounded p-1.5 mt-2 border border-rose-900/50 text-[9px] text-rose-300 text-center font-bold">
@@ -3036,7 +3058,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 {d.backlog.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-indigo-950/30 p-1.5 rounded border border-indigo-900/20">
                                                         <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
-                                                        <span className="font-mono font-bold text-slate-500 text-[9px]">FTE: {(p.fteValue || 0.20).toFixed(2).replace('.', ',')}</span>
+                                                        <span className="font-mono font-bold text-slate-500 text-[9px]">FTE: {formatFte(p.fteValue)}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -3056,7 +3078,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 {d.inProgress.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-sky-950/20 p-1.5 rounded border border-sky-900/30">
                                                         <span className="truncate max-w-[120px] text-slate-200 font-medium animate-fade-in" title={p.summary}>{p.summary}</span>
-                                                        <span className="font-mono font-bold text-[#38BDF8] text-[9px]">FTE: {(p.fteValue || 0.20).toFixed(2).replace('.', ',')}</span>
+                                                        <span className="font-mono font-bold text-[#38BDF8] text-[9px]">FTE: {formatFte(p.fteValue)}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -3076,7 +3098,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 {d.inQA.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-amber-950/20 p-1.5 rounded border border-amber-900/30">
                                                         <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
-                                                        <span className="font-mono font-bold text-amber-400 text-[9px]">FTE: {(p.fteValue || 0.2).toFixed(2).replace('.', ',')}</span>
+                                                        <span className="font-mono font-bold text-amber-400 text-[9px]">FTE: {formatFte(p.fteValue)}</span>
                                                     </div>
                                                 ))}
                                             </div>
@@ -3141,7 +3163,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         { title: 'DESENVOLVIMENTO', val: metrics.inDevelopment },
                                         { title: 'EM QA', val: metrics.inQA },
                                         { title: 'BLOQUEADOS', val: metrics.blocked },
-                                        { title: 'FTE ESTIMADO', val: metrics.totalFteAllocated.toFixed(2) }
+                                        { title: 'FTE ESTIMADO', val: formatFteDot(metrics.totalFteAllocated) }
                                     ].map((k, i) => (
                                         <div key={i} className="bg-indigo-950/60 p-3 rounded-lg border border-indigo-900/50 text-center">
                                             <span className="text-[9px] text-[#38BDF8] font-bold block mb-1">{k.title}</span>
@@ -3165,7 +3187,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 {sortedQueue.slice(0,3).map(p => (
                                                     <tr key={p.id}>
                                                         <td className="py-1 flex items-center gap-1"><span className="text-[9px] bg-slate-900 font-mono text-slate-500 inline-block px-1 rounded">{p.id}</span> {p.summary}</td>
-                                                        <td className="text-center text-emerald-400 font-mono">{(p.fteValue || 0.20).toFixed(2)}</td>
+                                                        <td className="text-center text-emerald-400 font-mono">{formatFteDot(p.fteValue)}</td>
                                                         <td>{getPriorityDisplayName(p.priority)}</td>
                                                         <td><span className="text-[9px] text-[#38BDF8] font-bold">{p.status}</span></td>
                                                     </tr>
@@ -3200,8 +3222,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 <tr key={d.id}>
                                                     <td className="py-2.5 font-bold">{d.name}</td>
                                                     <td className="text-center font-mono">{d.activeCount}</td>
-                                                    <td className="text-center font-mono font-bold text-indigo-400">{d.usedFte.toFixed(2)} FTE</td>
-                                                    <td className="text-center font-mono text-slate-400">{d.availableFte.toFixed(2)} FTE</td>
+                                                    <td className="text-center font-mono font-bold text-indigo-400">{formatFteDot(d.usedFte)} FTE</td>
+                                                    <td className="text-center font-mono text-slate-400">{formatFteDot(d.availableFte)} FTE</td>
                                                     <td>
                                                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${d.usedFte > 1.0 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
                                                             {d.usedFte > 1.0 ? 'Sobrecarga' : d.usedFte > 0.70 ? 'Capacidade Limite' : 'Ideal'}
@@ -3238,7 +3260,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 <tr key={t.id}>
                                                     <td className="py-2.5 font-mono text-slate-400">{t.id}</td>
                                                     <td className="font-medium truncate max-w-[200px]">{t.summary}</td>
-                                                    <td className="text-center font-mono text-[#38BDF8]">{(t.fteValue || 0.20).toFixed(2)}</td>
+                                                    <td className="text-center font-mono text-[#38BDF8]">{formatFteDot(t.fteValue)}</td>
                                                     <td>
                                                         <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${String(t.priority || '').includes('1') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
                                                             {getPriorityDisplayName(t.priority)}
@@ -3276,7 +3298,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                 <tr key={p.id}>
                                                     <td className="py-2.5 font-bold truncate max-w-[240px]">{p.summary}</td>
                                                     <td>{p.assignee || 'Sem Responsável'}</td>
-                                                    <td className="text-center font-mono text-slate-400">{(p.fteValue || 0.20).toFixed(2)}</td>
+                                                    <td className="text-center font-mono text-slate-400">{formatFteDot(p.fteValue)}</td>
                                                     <td><span className="text-[10px] text-amber-400">{p.projectData?.phaseStatus || p.status}</span></td>
                                                     <td className="font-mono text-[9px] text-slate-500">{formatDateSafely(p.endDate)}</td>
                                                 </tr>
@@ -3344,7 +3366,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     <td className="font-bold text-slate-200 truncate max-w-[200px]">{t.summary}</td>
                                                     <td>{t.managementArea || 'Geral'}</td>
                                                     <td>{t.assignee || '-'}</td>
-                                                    <td className="text-center font-mono font-bold text-[#10B981]">{(t.fteValue || 0.50).toFixed(2)}</td>
+                                                    <td className="text-center font-mono font-bold text-[#10B981]">{formatFteDot(t.fteValue || 0.50)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
