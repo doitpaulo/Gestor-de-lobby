@@ -1360,11 +1360,11 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                             value={taskDevFilter}
                                             onChange={(e) => setTaskDevFilter(e.target.value)}
                                         >
-                                            <option value="Todos">Todos os Devs</option>
+                                            <option value="Todos" className="bg-slate-800 text-slate-100">Todos os Devs</option>
                                             {devs.map((d: any) => (
-                                                <option key={d.id} value={d.name}>{d.name}</option>
+                                                <option key={d.id} value={d.name} className="bg-slate-800 text-slate-100">{d.name}</option>
                                             ))}
-                                            <option value="Sem Dev">Sem Dev</option>
+                                            <option value="Sem Dev" className="bg-slate-800 text-slate-100">Sem Dev</option>
                                         </select>
                                     </div>
                                     <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-2">
@@ -1427,10 +1427,10 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                                             value={st.status}
                                                             onChange={(e) => handleUpdateSprintTask(st.taskId, 'status', e.target.value)}
                                                         >
-                                                            <option value="Pendente">Pendente</option>
-                                                            <option value="Em Progresso">Em Progresso</option>
-                                                            <option value="Concluído">Concluído</option>
-                                                            <option value="Cancelado">Cancelado</option>
+                                                            <option value="Pendente" className="bg-slate-800 text-slate-100">Pendente</option>
+                                                            <option value="Em Progresso" className="bg-slate-800 text-slate-100">Em Progresso</option>
+                                                            <option value="Concluído" className="bg-slate-800 text-slate-100">Concluído</option>
+                                                            <option value="Cancelado" className="bg-slate-800 text-slate-100">Cancelado</option>
                                                         </select>
                                                     </td>
                                                     <td className="p-3">
@@ -1481,9 +1481,9 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                             <div>
                                 <label className="block text-xs text-slate-400 mb-1">Status</label>
                                 <select name="status" defaultValue={editingSprint?.status || 'Planejada'} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
-                                    <option value="Planejada">Planejada</option>
-                                    <option value="Em Execução">Em Execução</option>
-                                    <option value="Concluída">Concluída</option>
+                                    <option value="Planejada" className="bg-slate-800 text-slate-100">Planejada</option>
+                                    <option value="Em Execução" className="bg-slate-800 text-slate-100">Em Execução</option>
+                                    <option value="Concluída" className="bg-slate-800 text-slate-100">Concluída</option>
                                 </select>
                             </div>
                             <div>
@@ -1714,11 +1714,20 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 
   const getDeadlineInfo = (task: Task) => {
       if (!task.endDate) return null;
-      const start = task.startDate ? new Date(task.startDate).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'}) : 'Inicio?';
-      const endFormatted = new Date(task.endDate).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
-      const endDate = new Date(task.endDate);
-      endDate.setHours(23,59,59,999);
-      const today = new Date();
+      try {
+          const endDate = new Date(task.endDate);
+          if (isNaN(endDate.getTime())) return null;
+          endDate.setHours(23,59,59,999);
+          
+          let start = 'Inicio?';
+          if (task.startDate) {
+              const startDate = new Date(task.startDate);
+              if (!isNaN(startDate.getTime())) {
+                  start = startDate.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+              }
+          }
+          const endFormatted = endDate.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+          const today = new Date();
       const diffTime = endDate.getTime() - today.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
@@ -1735,6 +1744,9 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
           label = `${diffDays}d Restantes`;
       }
       return { range: `${start} - ${endFormatted}`, statusColor, label };
+      } catch {
+          return null;
+      }
   };
 
   return (
@@ -1974,8 +1986,8 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
             'Tipo': t.type,
             'Tarefa': t.summary,
             'Responsável': t.assignee || 'N/A',
-            'Início': t.startDate ? new Date(t.startDate).toLocaleDateString() : '',
-            'Fim': t.endDate ? new Date(t.endDate).toLocaleDateString() : '',
+            'Início': formatDateSafely(t.startDate),
+            'Fim': formatDateSafely(t.endDate),
             'Status': t.status
         }));
         const ws = XLSX.utils.json_to_sheet(exportData);
@@ -1990,15 +2002,15 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
         let slide = pres.addSlide();
         slide.background = { color: "0f172a" };
         slide.addText("Cronograma de Demandas", { x: 0.5, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
-        slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 1.0, fontSize: 14, color: '94a3b8' });
+        slide.addText(`Gerado em: ${formatDateSafely(new Date())}`, { x: 0.5, y: 1.0, fontSize: 14, color: '94a3b8' });
 
         const tableData: any[] = [
             ['ID', 'Tarefa', 'Início', 'Fim', 'Status'].map(h => ({ text: h, options: { bold: true, fill: '1e293b', color: 'ffffff' } })),
             ...ganttTasks.map(t => [
                 t.id, 
                 t.summary, 
-                t.startDate ? new Date(t.startDate).toLocaleDateString() : '-', 
-                t.endDate ? new Date(t.endDate).toLocaleDateString() : '-',
+                formatDateSafely(t.startDate), 
+                formatDateSafely(t.endDate),
                 t.status
             ])
         ];
@@ -2078,7 +2090,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                                  if (['Concluído', 'Resolvido'].includes(task.status)) color = "bg-emerald-600 border-emerald-500 opacity-60";
                                  else if (task.priority === '1 - Crítica') color = "bg-rose-600 border-rose-500";
                                  else if (task.type === 'Melhoria') color = "bg-teal-600 border-teal-500";
-                                 return (<div key={task.id} className="h-10 border-b border-slate-700/30 relative w-full group hover:bg-white/5 transition-colors">{pos && (<div className={`absolute top-2 h-6 rounded-md shadow-lg border ${color} bg-opacity-90 hover:bg-opacity-100 transition-all cursor-pointer z-10 flex items-center px-2 overflow-hidden`} style={{ left: pos.left, width: pos.width }}><span className="text-[10px] font-bold text-white whitespace-nowrap sticky left-2 drop-shadow-md">{task.assignee ? `${task.assignee.split(' ')[0]}: ` : ''}{task.summary}</span><div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-800 border border-slate-600 text-white text-xs p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none w-max z-50"><p className="font-bold">{task.summary}</p><p className="text-[10px] text-slate-400">{new Date(task.startDate!).toLocaleDateString()} - {new Date(task.endDate!).toLocaleDateString()}</p></div></div>)}</div>)
+                                 return (<div key={task.id} className="h-10 border-b border-slate-700/30 relative w-full group hover:bg-white/5 transition-colors">{pos && (<div className={`absolute top-2 h-6 rounded-md shadow-lg border ${color} bg-opacity-90 hover:bg-opacity-100 transition-all cursor-pointer z-10 flex items-center px-2 overflow-hidden`} style={{ left: pos.left, width: pos.width }}><span className="text-[10px] font-bold text-white whitespace-nowrap sticky left-2 drop-shadow-md">{task.assignee ? `${task.assignee.split(' ')[0]}: ` : ''}{task.summary}</span><div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-800 border border-slate-600 text-white text-xs p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none w-max z-50"><p className="font-bold">{task.summary}</p><p className="text-[10px] text-slate-400">{formatDateSafely(task.startDate)} - {formatDateSafely(task.endDate)}</p></div></div>)}</div>)
                              })}
                          </div>
                     </div>
@@ -2088,6 +2100,47 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
       </div>
     )
 }
+
+const formatDateSafely = (dateStr: string | Date | undefined | null): string => {
+    if (!dateStr) return '-';
+    if (dateStr instanceof Date) {
+        return isNaN(dateStr.getTime()) ? '-' : dateStr.toLocaleDateString('pt-BR');
+    }
+    const cleanStr = String(dateStr).trim();
+    if (cleanStr === '' || cleanStr === '-' || cleanStr.toLowerCase() === 'n/a' || cleanStr.toLowerCase() === 'undefined' || cleanStr.toLowerCase() === 'null') {
+        return '-';
+    }
+    try {
+        const d = new Date(cleanStr);
+        if (isNaN(d.getTime())) {
+            const parts = cleanStr.split(/[-/]/);
+            if (parts.length === 3) {
+                if (parts[0].length === 2 && parts[2].length === 4) {
+                    const parsedDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+                    if (!isNaN(parsedDate.getTime())) {
+                        return parsedDate.toLocaleDateString('pt-BR');
+                    }
+                }
+                if (parts[0].length === 4 && parts[2].length === 2) {
+                    const parsedDate = new Date(`${parts[0]}-${parts[1]}-${parts[2]}`);
+                    if (!isNaN(parsedDate.getTime())) {
+                        return parsedDate.toLocaleDateString('pt-BR');
+                    }
+                }
+            }
+            return cleanStr;
+        }
+        return d.toLocaleDateString('pt-BR');
+    } catch {
+        return cleanStr;
+    }
+};
+
+const getPriorityDisplayName = (priority: string | undefined | null): string => {
+    if (!priority) return '-';
+    const parts = String(priority).split(' - ');
+    return parts[1] || parts[0] || '-';
+};
 
 function getWeekNumber(d: Date): number {
     const target = new Date(d.valueOf());
@@ -2118,19 +2171,19 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     // 2. EXTRACT UNIQUE VALUES FOR COCKPIT FILTERS
     const uniqueClients = useMemo(() => {
         const clients = new Set<string>();
-        tasks.forEach(t => { if (t.subcategory) clients.add(t.subcategory); });
+        (tasks || []).forEach(t => { if (t && t.subcategory) clients.add(t.subcategory); });
         return Array.from(clients).sort();
     }, [tasks]);
 
     const uniqueAreas = useMemo(() => {
         const areas = new Set<string>();
-        tasks.forEach(t => { if (t.managementArea) areas.add(t.managementArea); });
+        (tasks || []).forEach(t => { if (t && t.managementArea) areas.add(t.managementArea); });
         return Array.from(areas).sort();
     }, [tasks]);
 
     const uniqueStatuses = useMemo(() => {
         const statuses = new Set<string>();
-        tasks.forEach(t => { if (t.status) statuses.add(t.status); });
+        (tasks || []).forEach(t => { if (t && t.status) statuses.add(t.status); });
         return Array.from(statuses).sort();
     }, [tasks]);
 
@@ -2138,13 +2191,23 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     const filteredProjects = useMemo(() => {
         // Resolve tasks for the selected sprint if applicable
         const sprintTaskIds = filters.sprint !== 'Todos' 
-            ? sprints.find(s => s.id === filters.sprint)?.tasks.map(t => t.taskId) || []
+            ? s_find(sprints || [], filters.sprint)?.tasks.map(t => t.taskId) || []
             : [];
 
-        return tasks.filter(t => {
-            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
-                                  t.id.toLowerCase().includes(filters.search.toLowerCase()) || 
-                                  (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+        function s_find(arr: Sprint[], sprId: string) {
+            return arr.find(s => s && s.id === sprId);
+        }
+
+        return (tasks || []).filter(t => {
+            if (!t) return false;
+            const tSummary = String(t.summary || '').toLowerCase();
+            const tId = String(t.id || '').toLowerCase();
+            const tRequester = String(t.requester || '').toLowerCase();
+            const fSearch = String(filters.search || '').toLowerCase();
+
+            const matchesSearch = tSummary.includes(fSearch) || 
+                                  tId.includes(fSearch) || 
+                                  tRequester.includes(fSearch);
             const matchesDev = filters.dev === 'Todos' || t.assignee === filters.dev;
             const matchesType = filters.type === 'Todos' || t.type === filters.type;
             const matchesStatus = filters.status === 'Todos' || t.status === filters.status;
@@ -2157,17 +2220,18 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     }, [tasks, filters, sprints]);
 
     // Helper for priority weighting
-    const getPriorityWeight = (priority: string) => {
-        if (!priority) return 0;
-        if (priority.includes('1') || priority.toLowerCase().includes('crítica') || priority.toLowerCase().includes('critica')) return 4;
-        if (priority.includes('2') || priority.toLowerCase().includes('alta')) return 3;
-        if (priority.includes('3') || priority.toLowerCase().includes('moderada')) return 2;
+    const getPriorityWeight = (priority: string | any) => {
+        const pStr = String(priority || '').toLowerCase();
+        if (!pStr) return 0;
+        if (pStr.includes('1') || pStr.includes('crítica') || pStr.includes('critica')) return 4;
+        if (pStr.includes('2') || pStr.includes('alta')) return 3;
+        if (pStr.includes('3') || pStr.includes('moderada')) return 2;
         return 1;
     };
 
     // Sort Queue automatically by priority
     const sortedQueue = useMemo(() => {
-        return [...filteredProjects].sort((a, b) => getPriorityWeight(b.priority) - getPriorityWeight(a.priority));
+        return [...filteredProjects].sort((a, b) => getPriorityWeight(b ? b.priority : '') - getPriorityWeight(a ? a.priority : ''));
     }, [filteredProjects]);
 
     // 4. CALCULATE COCKPIT KPIs & METRICS (REAL-TIME)
@@ -2182,9 +2246,10 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
         let totalFteAllocated = 0;
 
         sortedQueue.forEach(p => {
+            if (!p) return;
             const status = (p.status || '').toLowerCase();
             const phaseId = p.projectData?.currentPhaseId;
-            const phaseName = (workflowConfig.find(w => w.id === phaseId)?.name || '').toLowerCase();
+            const phaseName = ((workflowConfig || []).find(w => w && w.id === phaseId)?.name || '').toLowerCase();
 
             // Completed / Concluídos
             if (['concluido', 'concluído', 'resolvido', 'fechado'].includes(status)) {
@@ -2212,7 +2277,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
         });
 
         // Developer Capacity metrics
-        const totalCapacity = devs.length * 1.0; // Assume 1.0 FTE per registered resource is standard capacity
+        const totalCapacity = (devs || []).length * 1.0; // Assume 1.0 FTE per registered resource is standard capacity
         const availableCapacity = Math.max(0, totalCapacity - totalFteAllocated);
 
         return {
@@ -2341,9 +2406,9 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             const rows = topProjects.map(p => [
                 p.summary,
                 (p.fteValue || 0.20).toFixed(2),
-                p.priority.split(' - ')[1] || p.priority,
+                getPriorityDisplayName(p.priority),
                 p.status,
-                p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'
+                formatDateSafely(p.endDate)
             ]);
             slide.addTable([headers, ...rows] as any, { x: 0.5, y: 3.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
         }
@@ -2381,7 +2446,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                 const rows = backlogTasks.map(t => [
                     t.id,
                     t.summary,
-                    t.priority.split(' - ')[1] || t.priority,
+                    getPriorityDisplayName(t.priority),
                     (t.fteValue || 0.20).toFixed(2),
                     t.managementArea || 'Global'
                 ]);
@@ -2406,7 +2471,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     p.assignee || 'Sem Responsável',
                     (p.fteValue || 0.20).toFixed(2),
                     p.projectData?.phaseStatus || 'Verificação Interna',
-                    p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'
+                    formatDateSafely(p.endDate)
                 ]);
                 slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
             }
@@ -2875,7 +2940,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     )}
                                                 </td>
                                                 <td className="py-3 text-center font-mono text-slate-400 text-[10px]">
-                                                    {task.endDate ? new Date(task.endDate).toLocaleDateString() : '-'}
+                                                    {formatDateSafely(task.endDate)}
                                                 </td>
                                             </tr>
                                         ))
@@ -3100,7 +3165,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     <tr key={p.id}>
                                                         <td className="py-1 flex items-center gap-1"><span className="text-[9px] bg-slate-900 font-mono text-slate-500 inline-block px-1 rounded">{p.id}</span> {p.summary}</td>
                                                         <td className="text-center text-emerald-400 font-mono">{(p.fteValue || 0.20).toFixed(2)}</td>
-                                                        <td>{p.priority.split(' - ')[1] || p.priority}</td>
+                                                        <td>{getPriorityDisplayName(p.priority)}</td>
                                                         <td><span className="text-[9px] text-[#38BDF8] font-bold">{p.status}</span></td>
                                                     </tr>
                                                 ))}
@@ -3174,8 +3239,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     <td className="font-medium truncate max-w-[200px]">{t.summary}</td>
                                                     <td className="text-center font-mono text-[#38BDF8]">{(t.fteValue || 0.20).toFixed(2)}</td>
                                                     <td>
-                                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${t.priority.includes('1') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
-                                                            {t.priority.split(' - ')[1] || t.priority}
+                                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${String(t.priority || '').includes('1') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
+                                                            {getPriorityDisplayName(t.priority)}
                                                         </span>
                                                     </td>
                                                     <td>{t.managementArea || 'Corporativo'}</td>
@@ -3212,7 +3277,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                                     <td>{p.assignee || 'Sem Responsável'}</td>
                                                     <td className="text-center font-mono text-slate-400">{(p.fteValue || 0.20).toFixed(2)}</td>
                                                     <td><span className="text-[10px] text-amber-400">{p.projectData?.phaseStatus || p.status}</span></td>
-                                                    <td className="font-mono text-[9px] text-slate-500">{p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'}</td>
+                                                    <td className="font-mono text-[9px] text-slate-500">{formatDateSafely(p.endDate)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -3639,8 +3704,8 @@ const AutomationTotemView = ({ tasks, setTasks, robots }: any) => {
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${task.priority.includes('Crítica') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
-                                                {task.priority.split(' - ')[1]}
+                                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${String(task.priority || '').includes('Crítica') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
+                                                {getPriorityDisplayName(task.priority)}
                                             </span>
                                             <p className="text-[10px] text-indigo-400 mt-1 font-bold">AGUARDANDO ROBÔ</p>
                                         </div>
