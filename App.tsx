@@ -957,7 +957,7 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
     };
 
     const handleExportSprintData = () => {
-        const exportData = sprints.flatMap(s => s.tasks.map(st => {
+        const exportData = (sprints || []).flatMap(s => (s && s.tasks || []).map(st => {
             const task = tasks.find((t: any) => t.id === st.taskId);
             return {
                 'Sprint': s.name,
@@ -2190,8 +2190,9 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     // 3. APPLY REACTIVE EXECUTIVE FILTRATION
     const filteredProjects = useMemo(() => {
         // Resolve tasks for the selected sprint if applicable
-        const sprintTaskIds = filters.sprint !== 'Todos' 
-            ? s_find(sprints || [], filters.sprint)?.tasks.map(t => t.taskId) || []
+        const foundSprint = filters.sprint !== 'Todos' ? s_find(sprints || [], filters.sprint) : null;
+        const sprintTaskIds = foundSprint && foundSprint.tasks 
+            ? foundSprint.tasks.map(t => t && t.taskId).filter(Boolean) 
             : [];
 
         function s_find(arr: Sprint[], sprId: string) {
@@ -2349,8 +2350,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
 
         // Check severe blockages
         const highPriorityBlocked = sortedQueue.filter(p => 
-            p.blocker && 
-            (p.priority.includes('1') || p.priority.includes('2'))
+            p && p.blocker && 
+            (String(p.priority || '').includes('1') || String(p.priority || '').includes('2'))
         );
         if (highPriorityBlocked.length > 0) {
             insights.push(`Existem ${highPriorityBlocked.length} projetos críticos bloqueados! Verifique impedimentos listados na Fila de Demandas.`);
@@ -3009,8 +3010,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                             ></div>
                                         </div>
                                         <div className="flex justify-between text-[8px] text-slate-400 font-mono pt-1">
-                                            <span>Ocupado: ${usagePercentage}%</span>
-                                            <span>Disponível: ${d.availableFte.toFixed(2)} FTE</span>
+                                            <span>Ocupado: {usagePercentage}%</span>
+                                            <span>Disponível: {d.availableFte.toFixed(2)} FTE</span>
                                         </div>
                                         {isOverload && (
                                             <div className="bg-rose-950/40 rounded p-1.5 mt-2 border border-rose-900/50 text-[9px] text-rose-300 text-center font-bold">

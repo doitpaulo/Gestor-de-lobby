@@ -173,7 +173,14 @@ export const StorageService = {
   getSprints: (): Sprint[] => {
     try {
       const data = localStorage.getItem(KEYS.SPRINTS);
-      return data ? JSON.parse(data) : [];
+      const parsed = data ? JSON.parse(data) : [];
+      if (Array.isArray(parsed)) {
+        return parsed.map((s: any) => ({
+          ...s,
+          tasks: s && Array.isArray(s.tasks) ? s.tasks : []
+        }));
+      }
+      return [];
     } catch {
       return [];
     }
