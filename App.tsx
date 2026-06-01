@@ -2318,7 +2318,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     // 5. CALCULATE CAPACITY & PROJECT DIVISIONS PER DEVELOPER
     const developerAllocation = useMemo(() => {
         return safeDevs.map(dev => {
-            if (!dev) return { id: '', name: '', activeCount: 0, usedFte: 0, availableFte: 1.0, backlog: [], inProgress: [], inQA: [] };
+            if (!dev) return { id: '', name: '', activeCount: 0, usedFte: 0, availableFte: 1.0, backlog: [], inProgress: [], inQA: [], blocked: [] };
             // Get non-completed tasks assigned to dev
             const activeProjects = filteredProjects.filter(p => 
                 p && p.assignee === dev.name && 
@@ -2328,21 +2328,28 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             const usedFte = activeProjects.reduce((acc, p) => acc + getNumericFte(p.fteValue), 0);
             const availableFte = Math.max(0, 1.0 - usedFte);
 
+            const isBlocked = (p: any): boolean => {
+                if (!p) return false;
+                return p.status === 'Aguardando' || p.status === 'Pendente' || !!p.blocker;
+            };
+
+            const blocked = activeProjects.filter(p => p && isBlocked(p));
+
             // Backlog list
             const backlog = activeProjects.filter(p => 
-                p && ['Novo', 'Backlog', 'Pendente'].includes(p.status) && 
+                p && !isBlocked(p) && ['Novo', 'Backlog'].includes(p.status) && 
                 !(p.projectData?.currentPhaseId && ['2', '3', '4'].includes(p.projectData.currentPhaseId))
             );
 
             // In Progress list
             const inProgress = activeProjects.filter(p => 
-                p && (['Em Progresso', 'Em Atendimento'].includes(p.status) || 
+                p && !isBlocked(p) && (['Em Progresso', 'Em Atendimento'].includes(p.status) || 
                 (p.projectData?.currentPhaseId === '2'))
             );
 
             // QA / Homologation list
             const inQA = activeProjects.filter(p => 
-                p && ((p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId)) ||
+                p && !isBlocked(p) && ((p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId)) ||
                 ['Resolvido'].includes(p.status))
             );
 
@@ -2354,7 +2361,8 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                 availableFte,
                 backlog,
                 inProgress,
-                inQA
+                inQA,
+                blocked
             };
         });
     }, [safeDevs, filteredProjects]);
@@ -2990,7 +2998,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                         return (
                             <div 
                                 key={d.id} 
-                                className={`rounded-2xl p-5 border shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[460px] transition-all duration-300 hover:scale-[1.02]
+                                className={`rounded-2xl p-5 border shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[510px] transition-all duration-300 hover:scale-[1.02]
                                 ${isOverload 
                                     ? 'bg-rose-950/20 border-rose-500/40 shadow-rose-950/20' 
                                     : 'bg-[#0A1136] border-indigo-900/60 shadow-indigo-950/50'}`}
@@ -3043,7 +3051,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                     </div>
                                 </div>
 
-                                {/* CARD COLUMNS DIVISIONS (BACKLOG, EM ANDAMENTO, IN QA) */}
+                                {/* CARD COLUMNS DIVISIONS (BACKLOG, EM ANDAMENTO, IN QA, BLOQUEIOS) */}
                                 <div className="space-y-4 mt-4 flex-1">
                                     {/* Division 1: BACKLOG */}
                                     <div className="space-y-1">
@@ -3054,7 +3062,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         {d.backlog.length === 0 ? (
                                             <span className="text-[10px] text-slate-600 block italic">Lista de espera vazia</span>
                                         ) : (
-                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                            <div className="space-y-1 max-h-[70px] overflow-y-auto custom-scrollbar">
                                                 {d.backlog.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-indigo-950/30 p-1.5 rounded border border-indigo-900/20">
                                                         <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
@@ -3074,7 +3082,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         {d.inProgress.length === 0 ? (
                                             <span className="text-[10px] text-slate-600 block italic">Nenhum em andamento</span>
                                         ) : (
-                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                            <div className="space-y-1 max-h-[70px] overflow-y-auto custom-scrollbar">
                                                 {d.inProgress.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-sky-950/20 p-1.5 rounded border border-sky-900/30">
                                                         <span className="truncate max-w-[120px] text-slate-200 font-medium animate-fade-in" title={p.summary}>{p.summary}</span>
@@ -3094,11 +3102,42 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                                         {d.inQA.length === 0 ? (
                                             <span className="text-[10px] text-slate-600 block italic">Vazio ou em homologação</span>
                                         ) : (
-                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                            <div className="space-y-1 max-h-[70px] overflow-y-auto custom-scrollbar">
                                                 {d.inQA.map(p => (
                                                     <div key={p.id} className="flex justify-between items-center text-[10px] bg-amber-950/20 p-1.5 rounded border border-amber-900/30">
                                                         <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
                                                         <span className="font-mono font-bold text-amber-400 text-[9px]">FTE: {formatFte(p.fteValue)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Division 4: BLOQUEIOS / IMPEDIMENTOS */}
+                                    <div className="space-y-1">
+                                        <h5 className="text-[10px] font-extrabold text-rose-400 uppercase tracking-wider border-b border-rose-950 pb-1 flex justify-between">
+                                            <span>🚨 BLOQUEIOS / IMPEDIMENTOS</span>
+                                            <span className="font-mono text-rose-300">{d.blocked.length}</span>
+                                        </h5>
+                                        {d.blocked.length === 0 ? (
+                                            <span className="text-[10px] text-slate-600 block italic">Sem impedimentos ativos</span>
+                                        ) : (
+                                            <div className="space-y-1 max-h-[70px] overflow-y-auto custom-scrollbar">
+                                                {d.blocked.map(p => (
+                                                    <div key={p.id} className="flex flex-col text-[10px] bg-rose-950/20 p-1.5 rounded border border-rose-900/30 space-y-1">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="truncate max-w-[120px] text-rose-200 font-bold" title={p.summary}>{p.summary}</span>
+                                                            <span className="font-mono font-bold text-rose-300 text-[9px]">FTE: {formatFte(p.fteValue)}</span>
+                                                        </div>
+                                                        {p.blocker ? (
+                                                            <div className="text-[8px] text-rose-300 bg-rose-950/50 px-1.5 py-0.5 rounded italic truncate" title={p.blocker}>
+                                                                Motivo: {p.blocker}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-[8px] text-amber-300 bg-amber-950/20 px-1.5 py-0.5 rounded italic truncate">
+                                                                Status: {p.status}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
