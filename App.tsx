@@ -2089,263 +2089,1218 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
     )
 }
 
-function getWeekNumber(d: Date) { d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7)); var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1)); return Math.ceil(( ( (d.getTime() - yearStart.getTime()) / 86400000) + 1)/7); }
+function getWeekNumber(d: Date): number {
+    const target = new Date(d.valueOf());
+    const dayNr = (d.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    const firstThursday = target.valueOf();
+    target.setMonth(0, 1);
+    if (target.getDay() !== 4) {
+        target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+    }
+    return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+}
 
-const ProjectReportView = ({ tasks, workflowConfig, devs }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[] }) => {
-    const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ 
-        search: '', 
-        type: [], 
-        priority: [], 
-        status: [], 
-        assignee: [] 
+const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { tasks: Task[], workflowConfig: WorkflowPhase[], devs: Developer[], sprints?: Sprint[] }) => {
+    // 1. FILTERS STATE
+    const [filters, setFilters] = useState({
+        search: '',
+        dev: 'Todos',
+        type: 'Todos',
+        status: 'Todos',
+        sprint: 'Todos',
+        client: 'Todos',
+        area: 'Todos'
     });
 
-    const [widgets, setWidgets] = useState<Widget[]>(() => {
-        try {
-            const saved = localStorage.getItem('nexus_report_widgets');
-            const DEFAULT_REPORT_WIDGETS: Widget[] = [
-                { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
-                { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
-                { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
-                { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
-                { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
-            ];
-            
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                const hasForecast = parsed.find((w: Widget) => w.type === 'deliveryForecast');
-                if (!hasForecast) {
-                    parsed.push(DEFAULT_REPORT_WIDGETS.find(w => w.type === 'deliveryForecast'));
-                } else {
-                    const w = parsed.find((w: Widget) => w.type === 'deliveryForecast');
-                    if (w) w.title = 'Previsão de Entregas & Bloqueios';
-                }
-                return parsed;
-            }
-            return DEFAULT_REPORT_WIDGETS;
-        } catch (e) {
-            return [
-                { id: 'rw1', type: 'kpis', title: 'KPIs do Portfólio', size: 'full', visible: true },
-                { id: 'rw2', type: 'phaseChart', title: 'Projetos Ativos por Fase', size: 'half', visible: true, visualStyle: 'bar' },
-                { id: 'rw3', type: 'healthChart', title: 'Saúde do Portfólio', size: 'half', visible: true, visualStyle: 'pie' },
-                { id: 'rw4', type: 'detailChart', title: 'Progresso Detalhado por Projeto', size: 'full', visible: true, visualStyle: 'bar' },
-                { id: 'rw5', type: 'deliveryForecast', title: 'Previsão de Entregas & Bloqueios', size: 'half', visible: true },
-            ];
-        }
-    });
-    const [isEditMode, setIsEditMode] = useState(false);
+    const [activeSlide, setActiveSlide] = useState(0); // 0 to 5 for Slide Preview Player
 
-    useEffect(() => {
-        localStorage.setItem('nexus_report_widgets', JSON.stringify(widgets));
-    }, [widgets]);
+    // 2. EXTRACT UNIQUE VALUES FOR COCKPIT FILTERS
+    const uniqueClients = useMemo(() => {
+        const clients = new Set<string>();
+        tasks.forEach(t => { if (t.subcategory) clients.add(t.subcategory); });
+        return Array.from(clients).sort();
+    }, [tasks]);
 
+    const uniqueAreas = useMemo(() => {
+        const areas = new Set<string>();
+        tasks.forEach(t => { if (t.managementArea) areas.add(t.managementArea); });
+        return Array.from(areas).sort();
+    }, [tasks]);
+
+    const uniqueStatuses = useMemo(() => {
+        const statuses = new Set<string>();
+        tasks.forEach(t => { if (t.status) statuses.add(t.status); });
+        return Array.from(statuses).sort();
+    }, [tasks]);
+
+    // 3. APPLY REACTIVE EXECUTIVE FILTRATION
     const filteredProjects = useMemo(() => {
+        // Resolve tasks for the selected sprint if applicable
+        const sprintTaskIds = filters.sprint !== 'Todos' 
+            ? sprints.find(s => s.id === filters.sprint)?.tasks.map(t => t.taskId) || []
+            : [];
+
         return tasks.filter(t => {
-            const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação';
-            if (!isProjectType) return false;
-            const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
-            if (filters.status.length === 0 && isCompleted) return false;
-            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase()) || (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
-            const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
-            const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
-            const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
-            let matchesAssignee = true;
-            if (filters.assignee.length > 0) {
-                const hasUnassigned = filters.assignee.includes('Não Atribuído');
-                if (hasUnassigned) { matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee); } 
-                else { matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee); }
-            }
-            return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
-        });
-    }, [tasks, filters]);
+            const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
+                                  t.id.toLowerCase().includes(filters.search.toLowerCase()) || 
+                                  (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+            const matchesDev = filters.dev === 'Todos' || t.assignee === filters.dev;
+            const matchesType = filters.type === 'Todos' || t.type === filters.type;
+            const matchesStatus = filters.status === 'Todos' || t.status === filters.status;
+            const matchesSprint = filters.sprint === 'Todos' || sprintTaskIds.includes(t.id);
+            const matchesClient = filters.client === 'Todos' || t.subcategory === filters.client;
+            const matchesArea = filters.area === 'Todos' || t.managementArea === filters.area;
 
+            return matchesSearch && matchesDev && matchesType && matchesStatus && matchesSprint && matchesClient && matchesArea;
+        });
+    }, [tasks, filters, sprints]);
+
+    // Helper for priority weighting
+    const getPriorityWeight = (priority: string) => {
+        if (!priority) return 0;
+        if (priority.includes('1') || priority.toLowerCase().includes('crítica') || priority.toLowerCase().includes('critica')) return 4;
+        if (priority.includes('2') || priority.toLowerCase().includes('alta')) return 3;
+        if (priority.includes('3') || priority.toLowerCase().includes('moderada')) return 2;
+        return 1;
+    };
+
+    // Sort Queue automatically by priority
+    const sortedQueue = useMemo(() => {
+        return [...filteredProjects].sort((a, b) => getPriorityWeight(b.priority) - getPriorityWeight(a.priority));
+    }, [filteredProjects]);
+
+    // 4. CALCULATE COCKPIT KPIs & METRICS (REAL-TIME)
     const metrics = useMemo(() => {
-        const total = filteredProjects.length;
-        const getProgress = (task: Task) => {
-            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) return 100;
-            const currentId = task.projectData?.currentPhaseId;
-            let index = workflowConfig.findIndex(w => w.id === currentId);
-            if (index === -1) index = 0;
-            const status = task.projectData?.phaseStatus?.toLowerCase() || '';
-            const isCompleted = status.includes('concluído') || status.includes('concluido') || status.includes('finalizado');
-            const completedPhases = index + (isCompleted ? 1 : 0);
-            return Math.min(100, Math.round((completedPhases / workflowConfig.length) * 100));
-        };
-        const completedProjects = filteredProjects.filter(p => p.status === 'Concluído' || p.status === 'Resolvido').length;
-        const totalProgress = filteredProjects.reduce((acc, p) => acc + getProgress(p), 0);
-        const avgProgress = total > 0 ? Math.round(totalProgress / total) : 0;
-        const stuckProjects = filteredProjects.filter(p => {
-             const s = (p.projectData?.phaseStatus || '').toLowerCase();
-             return s.includes('aguardando') || s.includes('despriorizado') || s.includes('cancelado');
-        }).length;
-        const activeProjects = total - completedProjects - stuckProjects;
-        return { total, avgProgress, stuckProjects, activeProjects, completedProjects, getProgress };
-    }, [filteredProjects, workflowConfig]);
+        const total = sortedQueue.length;
+        
+        let inDevelopment = 0;
+        let inQA = 0;
+        let inHomologation = 0;
+        let completed = 0;
+        let blocked = 0;
+        let totalFteAllocated = 0;
 
-    const phaseData = useMemo(() => {
-        return workflowConfig.map(phase => {
-            const count = filteredProjects.filter(p => {
-                const isProjectDone = ['Concluído', 'Resolvido', 'Fechado'].includes(p.status);
-                if (isProjectDone) return false; 
-                return (p.projectData?.currentPhaseId || '1') === phase.id;
-            }).length;
-            return { name: phase.name, value: count };
+        sortedQueue.forEach(p => {
+            const status = (p.status || '').toLowerCase();
+            const phaseId = p.projectData?.currentPhaseId;
+            const phaseName = (workflowConfig.find(w => w.id === phaseId)?.name || '').toLowerCase();
+
+            // Completed / Concluídos
+            if (['concluido', 'concluído', 'resolvido', 'fechado'].includes(status)) {
+                completed++;
+            } else {
+                // Active FTE sum
+                totalFteAllocated += (p.fteValue || 0.20);
+                
+                // Blocked / Bloqueados
+                if (status === 'aguardando' || status === 'pendente' || p.blocker) {
+                    blocked++;
+                }
+
+                // QA / Homologação / Desenvolvimento (Mutually exclusive classification for executive clarity)
+                if (status.includes('progresso') || status.includes('atendimento') || phaseName.includes('desenvolvimento') || phaseName.includes('dev')) {
+                    inDevelopment++;
+                } else if (phaseName.includes('qa') || phaseName.includes('teste') || status.includes('teste')) {
+                    inQA++;
+                } else if (phaseName.includes('homolog') || phaseName.includes('valida') || phaseName.includes('uat')) {
+                    inHomologation++;
+                } else {
+                    inDevelopment++; // fallback definition
+                }
+            }
         });
-    }, [filteredProjects, workflowConfig]);
 
-    const projectProgressData = useMemo(() => {
-        return filteredProjects.map(p => {
-             const currentId = p.projectData?.currentPhaseId;
-             const phase = workflowConfig.find(w => w.id === currentId) || workflowConfig[0];
-             return { name: p.summary, phase: phase.name, progress: metrics.getProgress(p), dev: p.assignee || 'N/A' }
-        }).sort((a,b) => b.progress - a.progress);
-    }, [filteredProjects, workflowConfig, metrics]);
+        // Developer Capacity metrics
+        const totalCapacity = devs.length * 1.0; // Assume 1.0 FTE per registered resource is standard capacity
+        const availableCapacity = Math.max(0, totalCapacity - totalFteAllocated);
 
-    const healthData = useMemo(() => {
-        return [ { name: 'Em Andamento', value: metrics.activeProjects, color: '#10b981' }, { name: 'Travados / Aguardando', value: metrics.stuckProjects, color: '#f59e0b' }, { name: 'Concluídos', value: metrics.completedProjects, color: '#6366f1' } ].filter(d => d.value > 0);
-    }, [metrics]);
-
-    const handleExportReportPPT = () => {
-         const pres = new pptxgen();
-         pres.layout = 'LAYOUT_WIDE';
-         let slide = pres.addSlide();
-         slide.background = { color: "0f172a" };
-         slide.addText("Report Detalhado de Projetos", { x: 1, y: 0.5, fontSize: 24, color: 'FFFFFF', bold: true });
-         const drawKPI = (label: string, value: string, color: string, x: number) => {
-             slide.addShape(pres.ShapeType.roundRect, { x, y: 1.2, w: 2.5, h: 1.2, fill: { color: '1e293b' }, line: { color, width: 2 } });
-             slide.addText(label, { x, y: 1.4, w: 2.5, fontSize: 12, color: '94a3b8', align: 'center' });
-             slide.addText(value, { x, y: 1.7, w: 2.5, fontSize: 24, color: 'FFFFFF', bold: true, align: 'center' });
-         };
-         drawKPI("Total", metrics.total.toString(), '6366f1', 0.5);
-         drawKPI("Média Conclusão", `${metrics.avgProgress}%`, '10b981', 3.2);
-         drawKPI("Travados", metrics.stuckProjects.toString(), 'f59e0b', 5.9);
-         drawKPI("Ativos", metrics.activeProjects.toString(), 'e11d48', 8.6);
-         if (phaseData.length > 0) { slide.addChart(pres.ChartType.bar, [ { name: 'Fases', labels: phaseData.map(p => p.name), values: phaseData.map(p => p.value) } ], { x: 0.5, y: 3, w: 5.5, h: 4, chartColors: ['6366f1'], barDir: 'col', title: 'Projetos por Fase', titleColor: 'ffffff' }); }
-         if (healthData.length > 0) { const colors = healthData.map(h => h.color.replace('#', '')); slide.addChart(pres.ChartType.doughnut, [ { name: 'Saúde', labels: healthData.map(h => h.name), values: healthData.map(h => h.value) } ], { x: 6.5, y: 3, w: 5.5, h: 4, showLegend: true, title: 'Saúde do Portfólio', titleColor: 'ffffff', chartColors: colors }); }
-         slide = pres.addSlide();
-         slide.background = { color: "0f172a" };
-         slide.addText("Progresso Detalhado por Projeto", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
-         const tasksToShow = projectProgressData.slice(0, 20);
-         const projNames = tasksToShow.map(p => p.name.substring(0, 25) + (p.name.length > 25 ? '...' : ''));
-         const projVals = tasksToShow.map(p => p.progress);
-         if (projNames.length > 0) { slide.addChart(pres.ChartType.bar, [{ name: '% Conclusão', labels: projNames, values: projVals }], { x: 0.5, y: 1, w: '90%', h: '85%', barDir: 'bar', valAxisMaxVal: 100, chartColors: ['10b981'], catAxisLabelColor: '94a3b8', valAxisLabelColor: '94a3b8' }); }
-         pres.writeFile({ fileName: "Nexus_ProjectReport_Detail.pptx" });
-     }
-
-    const toggleSize = (id: string) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, size: w.size === 'full' ? 'half' : 'full' } : w)); };
-    const toggleVisibility = (id: string) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w)); };
-    const moveWidget = (index: number, direction: 'up' | 'down') => {
-        const newWidgets = [...widgets];
-        if (direction === 'up' && index > 0) { [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]]; } 
-        else if (direction === 'down' && index < newWidgets.length - 1) { [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]]; }
-        setWidgets(newWidgets);
-    };
-    const changeVisualStyle = (id: string, style: any) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visualStyle: style } : w)); };
-
-    const renderWidget = (widget: Widget) => {
-        if (widget.type === 'kpis') {
-            return (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
-                    <Card className="bg-indigo-900/10 border-indigo-500/30 flex flex-col justify-center">
-                        <span className="text-indigo-400 text-xs font-bold uppercase">Total</span>
-                        <span className="text-3xl text-white font-bold">{metrics.total}</span>
-                    </Card>
-                    <Card className="bg-emerald-900/10 border-emerald-500/30 flex flex-col justify-center">
-                        <span className="text-emerald-400 text-xs font-bold uppercase">Média Avanço</span>
-                        <span className="text-3xl text-white font-bold">{metrics.avgProgress}%</span>
-                    </Card>
-                    <Card className="bg-amber-900/10 border-amber-500/30 flex flex-col justify-center">
-                        <span className="text-amber-400 text-xs font-bold uppercase">Travados</span>
-                        <span className="text-3xl text-white font-bold">{metrics.stuckProjects}</span>
-                    </Card>
-                    <Card className="bg-rose-900/10 border-rose-500/30 flex flex-col justify-center">
-                        <span className="text-rose-400 text-xs font-bold uppercase">Ativos</span>
-                        <span className="text-3xl text-white font-bold">{metrics.activeProjects}</span>
-                    </Card>
-                </div>
-            );
-        }
-
-        if (widget.type === 'deliveryForecast') {
-            const today = new Date();
-            today.setHours(0,0,0,0);
-            const forecastData = filteredProjects
-                .filter(p => (p.endDate || p.blocker) && !['Concluído', 'Resolvido', 'Fechado'].includes(p.status))
-                .map(p => {
-                    let diffDays = 0; let statusColor = "bg-slate-500/20 text-slate-400 border border-slate-500/30"; let statusText = "Sem data";
-                    if (p.endDate) {
-                        const end = new Date(p.endDate!); end.setHours(0,0,0,0);
-                        const diffTime = end.getTime() - today.getTime();
-                        diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        statusColor = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"; statusText = "No Prazo";
-                        if (diffDays < 0) { statusColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30"; statusText = "Atrasado"; } 
-                        else if (diffDays <= 7) { statusColor = "bg-orange-500/20 text-orange-400 border border-orange-500/30"; statusText = "Crítico"; } 
-                        else if (diffDays <= 15) { statusColor = "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"; statusText = "Atenção"; }
-                    }
-                    if (p.status === 'Aguardando' || p.status === 'Pendente') { statusColor = "bg-rose-500/20 text-rose-400 border border-rose-500/30"; statusText = "Bloqueado"; }
-                    return { ...p, diffDays, statusColor, statusText };
-                })
-                .sort((a, b) => { if (a.statusText === 'Bloqueado' && b.statusText !== 'Bloqueado') return -1; if (a.statusText !== 'Bloqueado' && b.statusText === 'Bloqueado') return 1; return a.diffDays - b.diffDays; });
-
-            return (
-                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2 max-h-[300px]">
-                    {forecastData.length === 0 ? (<div className="text-center text-slate-500 py-10">Nenhum projeto com data de entrega futura ou bloqueio.</div>) : (
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-slate-400 uppercase bg-slate-900/50 sticky top-0"><tr><th className="p-2 rounded-l">Projeto</th><th className="p-2 text-center">Data Fim</th><th className="p-2 text-center">Dias Restantes</th><th className="p-2 text-center">Status</th><th className="p-2 rounded-r">Bloqueios</th></tr></thead>
-                            <tbody className="divide-y divide-slate-700/50">
-                                {forecastData.map(p => (
-                                    <tr key={p.id} className="hover:bg-slate-700/30 transition-colors">
-                                        <td className="p-2"><div className="font-medium text-slate-200 truncate max-w-[150px]" title={p.summary}>{p.summary}</div><div className="text-xs text-slate-500">{p.assignee || 'Sem Dev'}</div></td>
-                                        <td className="p-2 text-center text-slate-400 font-mono text-xs">{p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'}</td>
-                                        <td className="p-2 text-center font-bold text-slate-300">{p.endDate ? `${p.diffDays}d` : '-'}</td>
-                                        <td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${p.statusColor}`}>{p.statusText}</span></td>
-                                        <td className="p-2 text-xs text-rose-300 max-w-[150px] truncate" title={p.blocker || ''}>{p.blocker || '-'}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
-            );
-        }
-
-        const renderChart = () => {
-            const style = widget.visualStyle || 'bar';
-            if (widget.type === 'phaseChart') {
-                if (style === 'pie') return (<PieChart><Pie data={phaseData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#6366f1" label>{phaseData.map((entry, index) => <Cell key={`cell-${index}`} fill={['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899'][index % 5]} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Legend /></PieChart>);
-                return (<BarChart data={phaseData} layout="vertical" margin={{ left: 40 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" /><YAxis type="category" dataKey="name" stroke="#94a3b8" width={120} tick={{fontSize: 10}} /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={30}><LabelList dataKey="value" position="right" fill="#fff" /></Bar></BarChart>);
-            }
-            if (widget.type === 'healthChart') {
-                 if (style === 'bar') return (<BarChart data={healthData}><CartesianGrid strokeDasharray="3 3" stroke="#334155" /><XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="value" radius={[4, 4, 0, 0]}>{healthData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}</Bar></BarChart>);
-                 return (<PieChart><Pie data={healthData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="value" label>{healthData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Legend /></PieChart>);
-            }
-            if (widget.type === 'detailChart') {
-                return (<BarChart data={projectProgressData} layout="vertical" margin={{ left: 20 }} barSize={20}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" domain={[0, 100]} stroke="#94a3b8" /><YAxis dataKey="name" type="category" width={150} stroke="#94a3b8" tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="progress" fill="#10b981" radius={[0, 4, 4, 0]}><LabelList dataKey="progress" position="right" fill="#fff" fontSize={10} formatter={(val: any) => `${val}%`} /></Bar></BarChart>)
-            }
-            return null;
+        return {
+            total,
+            inDevelopment,
+            inQA,
+            inHomologation,
+            completed,
+            blocked,
+            totalFteAllocated,
+            totalCapacity,
+            availableCapacity
         };
-        return (
-            <div className="h-full flex flex-col">
-                 <div className="flex justify-between items-center mb-4">
-                     <h3 className="text-lg font-bold text-white">{widget.title}</h3>
-                     {isEditMode && widget.type !== 'kpis' && widget.type !== 'deliveryForecast' && (<select className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none" value={widget.visualStyle || 'bar'} onChange={(e) => changeVisualStyle(widget.id, e.target.value)}><option value="bar">Barras</option><option value="pie">Pizza</option></select>)}
-                 </div>
-                 <div className="flex-1 min-h-[300px]"><ResponsiveContainer width="100%" height="100%">{renderChart() as any}</ResponsiveContainer></div>
-             </div>
-        )
+    }, [sortedQueue, workflowConfig, devs]);
+
+    // 5. CALCULATE CAPACITY & PROJECT DIVISIONS PER DEVELOPER
+    const developerAllocation = useMemo(() => {
+        return devs.map(dev => {
+            // Get non-completed tasks assigned to dev
+            const activeProjects = filteredProjects.filter(p => 
+                p.assignee === dev.name && 
+                !['Concluído', 'Resolvido', 'Fechado'].includes(p.status)
+            );
+
+            const usedFte = activeProjects.reduce((acc, p) => acc + (p.fteValue || 0.20), 0);
+            const availableFte = Math.max(0, 1.0 - usedFte);
+
+            // Backlog list
+            const backlog = activeProjects.filter(p => 
+                ['Novo', 'Backlog', 'Pendente'].includes(p.status) && 
+                !(p.projectData?.currentPhaseId && ['2', '3', '4'].includes(p.projectData.currentPhaseId))
+            );
+
+            // In Progress list
+            const inProgress = activeProjects.filter(p => 
+                ['Em Progresso', 'Em Atendimento'].includes(p.status) || 
+                (p.projectData?.currentPhaseId === '2')
+            );
+
+            // QA / Homologation list
+            const inQA = activeProjects.filter(p => 
+                (p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId)) ||
+                ['Resolvido'].includes(p.status)
+            );
+
+            return {
+                id: dev.id,
+                name: dev.name,
+                activeCount: activeProjects.length,
+                usedFte,
+                availableFte,
+                backlog,
+                inProgress,
+                inQA
+            };
+        });
+    }, [devs, filteredProjects]);
+
+    // 6. PMO ADVISORY & INSIGHTS (DELIVERABLE 9)
+    const pmoInsights = useMemo(() => {
+        const insights: string[] = [];
+        
+        // Check overcommitted resources
+        developerAllocation.forEach(d => {
+            if (d.usedFte > 1.0) {
+                insights.push(`Sobrecarga detectada para ${d.name}: Alocado com ${(d.usedFte).toFixed(2)} FTE. Recomendamos reatribuir demandas secundárias.`);
+            }
+        });
+
+        // Check severe blockages
+        const highPriorityBlocked = sortedQueue.filter(p => 
+            p.blocker && 
+            (p.priority.includes('1') || p.priority.includes('2'))
+        );
+        if (highPriorityBlocked.length > 0) {
+            insights.push(`Existem ${highPriorityBlocked.length} projetos críticos bloqueados! Verifique impedimentos listados na Fila de Demandas.`);
+        }
+
+        // Capacity utilization check
+        const capacityUtilizationRate = metrics.totalCapacity > 0 ? (metrics.totalFteAllocated / metrics.totalCapacity) * 100 : 0;
+        if (capacityUtilizationRate > 90) {
+            insights.push(`Gargalo de Equipe Geral: Portfólio operando a ${capacityUtilizationRate.toFixed(1)}% da capacidade de FTE dos desenvolvedores.`);
+        } else if (capacityUtilizationRate < 60 && metrics.totalCapacity > 0) {
+            insights.push(`Disponibilidade de Processamento: Equipe com ${capacityUtilizationRate.toFixed(1)}% de ocupação. Há espaço para acelerar backlog.`);
+        }
+
+        if (insights.length === 0) {
+            insights.push("Fluxo estável de projetos. Capacidade ideal e sem detecção de sobrefaturamento ou sobrecarga.");
+        }
+
+        return insights;
+    }, [developerAllocation, sortedQueue, metrics]);
+
+    // 7. EXPORT POWERPOINT SLIDES (DELIVERABLE 8)
+    const handleExportReportPPT = () => {
+        const pres = new pptxgen();
+        pres.layout = 'LAYOUT_WIDE';
+
+        // Slide 1 – Resumo Executivo
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("RESUMO EXECUTIVO DO PORTFÓLIO DE PROJETOS", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText(`Geração Executiva Semanal • Portal Nexus PMO • ${new Date().toLocaleDateString()}`, { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            // Shape Indicators
+            const cards = [
+                { title: 'Total Projetos', value: metrics.total.toString(), color: '38BDF8' },
+                { title: 'Em Desenvolvimento', value: metrics.inDevelopment.toString(), color: '6366f1' },
+                { title: 'Em Homologação / QA', value: (metrics.inQA + metrics.inHomologation).toString(), color: 'FBBF24' },
+                { title: 'Bloqueados', value: metrics.blocked.toString(), color: 'F43F5E' },
+                { title: 'FTE Total Alocado', value: metrics.totalFteAllocated.toFixed(2), color: '10B981' }
+            ];
+
+            cards.forEach((c, idx) => {
+                const x = 0.5 + (idx * 2.5);
+                slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.3, h: 1.2, fill: { color: '111A4E' }, line: { color: c.color, width: 2 } });
+                slide.addText(c.title, { x, y: 1.7, w: 2.3, fontSize: 10, color: '94A3B8', align: 'center', bold: true });
+                slide.addText(c.value, { x, y: 2.0, w: 2.3, fontSize: 28, color: 'FFFFFF', align: 'center', bold: true });
+            });
+
+            // Active Priorities table
+            slide.addText("Demandas Relevantes Ordenadas por Prioridade", { x: 0.5, y: 3.1, w: 12, fontSize: 14, color: 'FFFFFF', bold: true });
+            const topProjects = sortedQueue.slice(0, 5);
+            const headers = ['Projeto', 'FTE', 'Prioridade', 'Status', 'Data Prevista'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 10 } }));
+            const rows = topProjects.map(p => [
+                p.summary,
+                (p.fteValue || 0.20).toFixed(2),
+                p.priority.split(' - ')[1] || p.priority,
+                p.status,
+                p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'
+            ]);
+            slide.addTable([headers, ...rows] as any, { x: 0.5, y: 3.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+        }
+
+        // Slide 2 – Capacity da Equipe
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("CAPACITY E ALOCAÇÃO DA EQUIPE", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText("Balanço e Alocação de Recursos de Desenvolvimento", { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            const headers = ['Membro da Equipe', 'Qtd Projetos Ativos', 'FTE Utilizado (Utilized)', 'Capacity Disponível', 'Classificação'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 11 } }));
+            const rows = developerAllocation.map(d => [
+                d.name,
+                d.activeCount.toString(),
+                d.usedFte.toFixed(2),
+                d.availableFte.toFixed(2),
+                d.usedFte > 1.0 ? 'Atenção: Sobrecarga' : d.usedFte > 0.7 ? 'Capacidade Limite' : d.usedFte > 0.2 ? 'Produtivo' : 'Ocioso'
+            ]);
+            slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+        }
+
+        // Slide 3 – Backlog Priorizado
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("BACKLOG PRIORIZADO", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText("Faturamento de Iniciativas Pendentes de Início", { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            const backlogTasks = sortedQueue.filter(t => ['Novo', 'Backlog', 'Pendente'].includes(t.status)).slice(0, 7);
+            if (backlogTasks.length === 0) {
+                slide.addText("Sem demandas no backlog ativo para os filtros selecionados.", { x: 0.5, y: 2.0, w: 12, fontSize: 14, color: '94A3B8', italic: true });
+            } else {
+                const headers = ['ID', 'Nome do Projeto', 'Prioridade', 'FTE Estimado', 'Área Originadora'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 11 } }));
+                const rows = backlogTasks.map(t => [
+                    t.id,
+                    t.summary,
+                    t.priority.split(' - ')[1] || t.priority,
+                    (t.fteValue || 0.20).toFixed(2),
+                    t.managementArea || 'Global'
+                ]);
+                slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+            }
+        }
+
+        // Slide 4 – Projetos em QA
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("PROJETOS E INICIATIVAS EM VALIDAÇÃO (QA)", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText("Fila de projetos sob auditoria, QA e testes funcionais cooperados", { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            const qaTasks = sortedQueue.filter(p => p.status === 'Resolvido' || (p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId))).slice(0, 7);
+            if (qaTasks.length === 0) {
+                slide.addText("Sem demandas ativas em fase de QA ou testes homologatórios.", { x: 0.5, y: 2.0, w: 12, fontSize: 14, color: '94A3B8', italic: true });
+            } else {
+                const headers = ['Nome do Projeto', 'Dev Responsável', 'FTE Alocado', 'Fase Interna', 'Entrega Prevista'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 11 } }));
+                const rows = qaTasks.map(p => [
+                    p.summary,
+                    p.assignee || 'Sem Responsável',
+                    (p.fteValue || 0.20).toFixed(2),
+                    p.projectData?.phaseStatus || 'Verificação Interna',
+                    p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'
+                ]);
+                slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+            }
+        }
+
+        // Slide 5 – Projetos Concluídos
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("PROJETOS E ENTREGAS RECENTES (COMPLETED)", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText("Iniciativas concluídas com sucesso e integradas à operação", { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            const completedTasks = sortedQueue.filter(t => ['Concluído', 'Fechado'].includes(t.status)).slice(0, 7);
+            if (completedTasks.length === 0) {
+                slide.addText("Sem dejetos ou projetos registrados como Concluídos no portfólio selecionado.", { x: 0.5, y: 2.0, w: 12, fontSize: 14, color: '94A3B8', italic: true });
+            } else {
+                const headers = ['ID', 'Iniciativa Entregue', 'Gerência Recebedora', 'Responsável', 'Savings / FTE Resolvido'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 11 } }));
+                const rows = completedTasks.map(t => [
+                    t.id,
+                    t.summary,
+                    t.managementArea || 'Geral',
+                    t.assignee || '-',
+                    (t.fteValue || 0.5).toFixed(2)
+                ]);
+                slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+            }
+        }
+
+        // Slide 6 – Bloqueios e Riscos
+        {
+            const slide = pres.addSlide();
+            slide.background = { color: "050B24" };
+            slide.addText("BLOQUEIOS E GARGALOS OPERACIONAIS (RISCOS)", { x: 0.5, y: 0.5, w: 12, fontSize: 24, color: 'FFFFFF', bold: true });
+            slide.addText("Projetos estagnados com necessidade urgente de deliberação gerencial", { x: 0.5, y: 1.0, w: 12, fontSize: 13, color: '38BDF8' });
+
+            const blockedTasks = sortedQueue.filter(t => t.blocker || ['Aguardando', 'Pendente'].includes(t.status)).slice(0, 7);
+            if (blockedTasks.length === 0) {
+                slide.addText("Parabéns! Nenhum bloqueio catalogado no momento para as demandas sob foco.", { x: 0.5, y: 2.0, w: 12, fontSize: 14, color: '10B981', italic: true });
+            } else {
+                const headers = ['Projeto Afetado', 'Status Crítico', 'Recurso Alocado', 'Motivo Detalhado do Impedimento'].map(h => ({ text: h, options: { bold: true, fill: '111A4E', color: 'FFFFFF', fontSize: 11 } }));
+                const rows = blockedTasks.map(t => [
+                    t.summary,
+                    t.status,
+                    t.assignee || 'Sem Responsável',
+                    t.blocker || 'Pendência operacional genérica.'
+                ]);
+                slide.addTable([headers, ...rows] as any, { x: 0.5, y: 1.6, w: 12.3, color: 'E2E8F0', border: { type: 'solid', color: '1E293B', pt: 0.5 } });
+            }
+        }
+
+        pres.writeFile({ fileName: `Nexus_Report_PMO_Semanal_${new Date().toISOString().substring(0,10)}.pptx` });
     };
+
+    // 8. EXPORT EXCEL SHEETS (DELIVERABLE 8)
+    const handleExportExcel = () => {
+        const wb = XLSX.utils.book_new();
+        
+        // Tab 1: KPIs
+        const kpiSheetData = [
+            { 'Indicador Estratégico': 'Total de Projetos', 'Métrica Alçada': metrics.total },
+            { 'Indicador Estratégico': 'Projetos em Desenvolvimento', 'Métrica Alçada': metrics.inDevelopment },
+            { 'Indicador Estratégico': 'Projetos em QA', 'Métrica Alçada': metrics.inQA },
+            { 'Indicador Estratégico': 'Projetos em Homologação', 'Métrica Alçada': metrics.inHomologation },
+            { 'Indicador Estratégico': 'Projetos Concluídos', 'Métrica Alçada': metrics.completed },
+            { 'Indicador Estratégico': 'Projetos Bloqueados / Outros', 'Métrica Alçada': metrics.blocked },
+            { 'Indicador Estratégico': 'Capacidade Total Disposta (FTE)', 'Métrica Alçada': metrics.totalCapacity },
+            { 'Indicador Estratégico': 'Total de FTE Alocado Corrente', 'Métrica Alçada': metrics.totalFteAllocated },
+            { 'Indicador Estratégico': 'Capacidade Ociosa / Disponível (FTE)', 'Métrica Alçada': metrics.availableCapacity }
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kpiSheetData), "Indicadores Gerais");
+
+        // Tab 2: Fila
+        const filaSheetData = sortedQueue.map(t => ({
+            'ID do Chamado': t.id,
+            'Tipo de Demanda': t.type,
+            'Título do Projeto': t.summary,
+            'Prioridade': t.priority,
+            'Status de Fluxo': t.status,
+            'FTE Alocado': t.fteValue || 0.20,
+            'Developer Responsável': t.assignee || 'Sem Alocação',
+            'Data Estimada Termino': t.endDate || '-',
+            'Gargalos / Blocker': t.blocker || '-'
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filaSheetData), "Fila de Atividades");
+
+        // Tab 3: Capacity
+        const capSheetData = developerAllocation.map(d => ({
+            'Nome': d.name,
+            'Count Projetos Ativos': d.activeCount,
+            'FTE Utilizados': d.usedFte,
+            'FTE Disponível': d.availableFte,
+            'Estado de Processamento': d.usedFte > 1.0 ? 'Excedido' : d.usedFte > 0.8 ? 'Operando no Limite' : 'Ideal'
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(capSheetData), "Capacidade do Time");
+
+        // Tab 4: Riscos
+        const risksSheetData = sortedQueue.filter(t => t.blocker || ['Aguardando', 'Pendente'].includes(t.status)).map(t => ({
+            'Projeto com Impedimento': t.summary,
+            'Severidade': t.priority,
+            'Desenvolvedor': t.assignee || '-',
+            'Gargalo Catalogado': t.blocker || 'Pendência operacional genérica.'
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(risksSheetData), "Riscos e Bloqueios");
+
+        XLSX.writeFile(wb, `Fila_Capacity_Dashboard_Consolidado_${new Date().toISOString().substring(0,10)}.xlsx`);
+    };
+
+    // 9. TRIGGER LIVE DECK PRINT WINDOW (PDF INTERACTION)
+    const handlePrintPDF = () => {
+        window.print();
+    };
+
+    // Split tasks for Queue columnization (as requested in referencial visual layout)
+    const LeftFilaProjetos = useMemo(() => {
+        // Incidents or standard support tasks
+        return sortedQueue.filter(t => t.type === 'Incidente');
+    }, [sortedQueue]);
+
+    const RightFilaProjetos = useMemo(() => {
+        // Automation, improvements or major changes
+        return sortedQueue.filter(t => t.type !== 'Incidente');
+    }, [sortedQueue]);
+
     return (
-        <div className="space-y-6 animate-fade-in pb-10">
-            <div className="flex justify-between items-center"><div><h2 className="text-2xl font-bold text-white">Report de Fluxo de Projetos</h2><p className="text-sm text-slate-400">Visão consolidada de Melhorias e Automações</p></div><div className="flex gap-2"><Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>{isEditMode ? 'Salvar Layout' : 'Editar Layout'}</Button><Button onClick={handleExportReportPPT} variant="primary"><IconDownload /> Exportar PPT</Button></div></div>
-            <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                 {widgets.filter(w => w.visible).map((widget, index) => (
-                     <div key={widget.id} className={`${widget.size === 'full' ? 'md:col-span-2 lg:col-span-4' : 'md:col-span-1 lg:col-span-2'} relative group`}><Card className="h-full min-h-[350px]">{renderWidget(widget)}</Card>
-                         {isEditMode && (<div className="absolute top-2 right-2 flex flex-col gap-1 bg-slate-900/90 p-1 rounded z-20 opacity-0 group-hover:opacity-100 transition-opacity">{index > 0 && <button onClick={() => moveWidget(index, 'up')} className="p-1 text-white hover:text-indigo-400">↑</button>}{index < widgets.length - 1 && <button onClick={() => moveWidget(index, 'down')} className="p-1 text-white hover:text-indigo-400">↓</button>}<button onClick={() => toggleSize(widget.id)} className="p-1 text-white hover:text-emerald-400">↔</button><button onClick={() => toggleVisibility(widget.id)} className="p-1 text-white hover:text-rose-400">✕</button></div>)}
-                     </div>
-                 ))}
+        <div className="space-y-6 animate-fade-in pb-16 relative bg-[#050B24] p-6 lg:p-8 rounded-2xl border border-indigo-900/40 text-slate-200">
+            {/* INLINE SPECIFIC MEDIA PRINT STYLING STAGE */}
+            <style>{`
+                @media print {
+                    body * {
+                        visibility: hidden !important;
+                    }
+                    #pmo-print-zone, #pmo-print-zone * {
+                        visibility: visible !important;
+                    }
+                    #pmo-print-zone {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        background: #050B24 !important;
+                        color: white !important;
+                    }
+                    .no-print {
+                        display: none !important;
+                    }
+                }
+            `}</style>
+
+            {/* HEADER PMO EXEC COCKPIT */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-indigo-950 pb-6 no-print">
+                <div className="space-y-1">
+                    <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest bg-indigo-950/60 border border-indigo-800/40 px-3 py-1 rounded-full">
+                        PMO & Solution Architecture Suite
+                    </span>
+                    <h2 className="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+                        <span className="w-3.5 h-3.5 bg-gradient-to-r from-emerald-500 to-indigo-500 rounded-full animate-pulse inline-block"></span>
+                        Report de Projetos (Cockpit Executivo)
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                        Acompanhamento em tempo real, capacidade de equipes (FTE) e faturamento mensal de RPAs.
+                    </p>
+                </div>
+                
+                {/* GLOBAL EXEC REPORT CONTROLLER */}
+                <div className="flex flex-wrap items-center gap-3">
+                    <button 
+                        onClick={handleExportReportPPT}
+                        className="bg-indigo-600 hover:bg-indigo-700 transition-all font-semibold text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl text-white shadow-lg shadow-indigo-950"
+                    >
+                        <IconDownload className="w-4 h-4 text-white" />
+                        PowerPoint (.pptx)
+                    </button>
+                    <button 
+                        onClick={handleExportExcel}
+                        className="bg-emerald-600 hover:bg-emerald-700 transition-all font-semibold text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl text-white shadow-lg shadow-emerald-950"
+                    >
+                        <IconUpload className="w-4 h-4 text-white" />
+                        Planilha (.xlsx)
+                    </button>
+                    <button 
+                        onClick={handlePrintPDF}
+                        className="bg-slate-700 hover:bg-slate-600 transition-all font-semibold text-xs flex items-center gap-2 px-4 py-2.5 rounded-xl text-white"
+                    >
+                        <IconTerminal className="w-4 h-4 text-slate-300" />
+                        Imprimir (PDF)
+                    </button>
+                </div>
+            </header>
+
+            {/* FILTERS PANEL */}
+            <div className="bg-[#091136]/60 border border-indigo-900/50 p-5 rounded-2xl space-y-4 no-print relative overflow-hidden backdrop-blur-md">
+                <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-indigo-500 to-blue-600"></div>
+                <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-2">
+                        <IconSearch className="w-3.5 h-3.5" /> Filtros Globais de Portfólio
+                    </h3>
+                    <button 
+                        onClick={() => setFilters({ search: '', dev: 'Todos', type: 'Todos', status: 'Todos', sprint: 'Todos', client: 'Todos', area: 'Todos' })}
+                        className="text-[10px] text-slate-500 hover:text-indigo-400 font-bold transition-colors uppercase"
+                    >
+                        Limpar Filtros
+                    </button>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    {/* SEARCH INPUT */}
+                    <div className="col-span-1 sm:col-span-2 md:col-span-2 lg:col-span-1">
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Pesquisar ID / Nome</label>
+                        <input 
+                            type="text" 
+                            placeholder="Buscar..."
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                            value={filters.search}
+                            onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                        />
+                    </div>
+
+                    {/* SELECT DEV */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Desenvolvedor</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.dev}
+                            onChange={e => setFilters(prev => ({ ...prev, dev: e.target.value }))}
+                        >
+                            <option value="Todos">Todos</option>
+                            {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                        </select>
+                    </div>
+
+                    {/* SELECT TYPE */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Tipo</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.type}
+                            onChange={e => setFilters(prev => ({ ...prev, type: e.target.value }))}
+                        >
+                            <option value="Todos">Todos</option>
+                            <option value="Incidente">Incidente</option>
+                            <option value="Melhoria">Melhoria</option>
+                            <option value="Nova Automação">Nova Automação</option>
+                        </select>
+                    </div>
+
+                    {/* SELECT STATUS */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Status de Fluxo</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.status}
+                            onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
+                        >
+                            <option value="Todos">Todos</option>
+                            {uniqueStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    </div>
+
+                    {/* SELECT SPRINT */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Sprint Ativa</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.sprint}
+                            onChange={e => setFilters(prev => ({ ...prev, sprint: e.target.value }))}
+                        >
+                            <option value="Todos">Todas</option>
+                            {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                    </div>
+
+                    {/* SELECT CLIENT */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Cliente</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.client}
+                            onChange={e => setFilters(prev => ({ ...prev, client: e.target.value }))}
+                        >
+                            <option value="Todos">Todos</option>
+                            {uniqueClients.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+
+                    {/* SELECT AREA */}
+                    <div>
+                        <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Área de Negócio</label>
+                        <select 
+                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            value={filters.area}
+                            onChange={e => setFilters(prev => ({ ...prev, area: e.target.value }))}
+                        >
+                            <option value="Todos">Todas</option>
+                            {uniqueAreas.map(a => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                    </div>
+                </div>
             </div>
-            {isEditMode && widgets.some(w => !w.visible) && (<div className="bg-slate-800 p-4 rounded flex gap-2">{widgets.filter(w => !w.visible).map(w => (<button key={w.id} onClick={() => toggleVisibility(w.id)} className="bg-slate-700 px-3 py-1 rounded text-white text-xs">+ {w.title}</button>))}</div>)}
+
+            {/* 1. VISÃO EXECUTIVA (KPIs CARDS) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+                <Card className="bg-[#0A1136] border border-indigo-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Total Geral</span>
+                    <span className="text-3xl font-extrabold text-white font-mono">{metrics.total}</span>
+                    <span className="text-[9px] text-indigo-400 mt-2 block">Demandas Ativas</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-blue-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider block mb-1">Em Dev</span>
+                    <span className="text-3xl font-extrabold text-[#38BDF8] font-mono">{metrics.inDevelopment}</span>
+                    <span className="text-[9px] text-slate-400 mt-2 block">Codificação</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-yellow-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block mb-1">Em QA</span>
+                    <span className="text-3xl font-extrabold text-amber-400 font-mono">{metrics.inQA}</span>
+                    <span className="text-[9px] text-slate-400 mt-2 block">Validação QA</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-indigo-950 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-violet-400 font-bold uppercase tracking-wider block mb-1">Homologação</span>
+                    <span className="text-3xl font-extrabold text-violet-400 font-mono">{metrics.inHomologation}</span>
+                    <span className="text-[9px] text-slate-400 mt-2 block">Aprovação Final</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-emerald-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider block mb-1">Concluídos</span>
+                    <span className="text-3xl font-extrabold text-emerald-400 font-mono">{metrics.completed}</span>
+                    <span className="text-[9px] text-emerald-400 mt-2 block">Fechados & OK</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-rose-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider block mb-1">Bloqueados</span>
+                    <span className="text-3xl font-extrabold text-rose-400 font-mono">{metrics.blocked}</span>
+                    <span className="text-[9px] text-rose-400 mt-2 block">Parados (Block)</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-teal-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-[#2dd4bf] font-bold uppercase tracking-wider block mb-1">FTE Alocado</span>
+                    <span className="text-3xl font-extrabold text-[#2dd4bf] font-mono">{metrics.totalFteAllocated.toFixed(2)}</span>
+                    <span className="text-[9px] text-slate-400 mt-2 block">Esforço Ativo</span>
+                </Card>
+
+                <Card className="bg-[#0A1136] border border-indigo-900/60 p-4 rounded-2xl flex flex-col justify-between shadow-xl">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Capac. Livre</span>
+                    <span className="text-3xl font-extrabold text-slate-200 font-mono">{metrics.availableCapacity.toFixed(2)}</span>
+                    <span className="text-[9px] text-slate-500 mt-2 block">Massa de Equipe</span>
+                </Card>
+            </div>
+
+            {/* ADVISORY AD_PANEL (PMO INSIGHTS) */}
+            <div className="bg-[#0C1647]/50 border border-[#1b2668]/60 p-4 rounded-2xl shadow-inner flex items-start gap-4">
+                <div className="p-2.5 bg-indigo-500/10 rounded-xl text-indigo-400 border border-indigo-500/20">
+                    <IconTerminal className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-300">PMO Advisory & Insights do Portfólio (Reunião Semanal)</h4>
+                    <ul className="list-disc pl-4 space-y-1">
+                        {pmoInsights.map((insight, idx) => (
+                            <li key={idx} className="text-xs text-slate-300 font-medium">
+                                {insight}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+
+            {/* 2. FILA DE PROJETOS (VISUAL LAYOUT INSPIRED BY ATTACHED IMAGE) */}
+            <div className="bg-[#091136]/60 border border-indigo-900/40 rounded-2xl p-6 space-y-4 shadow-2xl relative">
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                    <div className="flex items-center gap-2">
+                        <IconList className="w-5 h-5 text-indigo-400" />
+                        <h3 className="text-lg font-bold text-white uppercase tracking-tight">Fila de Projetos & Demandas Prioritárias</h3>
+                    </div>
+                    <span className="text-[10px] text-slate-400 bg-indigo-950 px-2 py-1 rounded border border-indigo-900 font-mono">
+                        Ordenação: Prioridade Decrescente
+                    </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 divide-y lg:divide-y-0 lg:divide-x divide-indigo-950/80">
+                    {/* LEFT SIDE: SUPPORT & INCIDENTS FILA */}
+                    <div className="space-y-3">
+                        <h4 className="text-xs font-extrabold text-[#38BDF8] tracking-widest uppercase border-b border-indigo-950 pb-2">
+                            Módulo 1: Sustentação & Incidentes ({LeftFilaProjetos.length})
+                        </h4>
+                        
+                        <div className="overflow-x-auto select-none">
+                            <table className="w-full text-left text-xs font-sans">
+                                <thead>
+                                    <tr className="text-slate-400 border-b border-indigo-950 text-[10px] uppercase tracking-wider font-semibold">
+                                        <th className="py-2.5">Projeto</th>
+                                        <th className="py-2.5 text-center">FTE</th>
+                                        <th className="py-2.5 text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-indigo-950/60 text-slate-300">
+                                    {LeftFilaProjetos.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={3} className="py-4 text-center text-slate-500 italic">Nenhum incidente ativo</td>
+                                        </tr>
+                                    ) : (
+                                        LeftFilaProjetos.map(task => (
+                                            <tr key={task.id} className="hover:bg-indigo-950/30 transition-colors">
+                                                <td className="py-3 pr-2 font-medium">
+                                                    <span className="text-[10px] bg-slate-900 px-1 py-0.5 rounded mr-1.5 font-mono text-slate-400">{task.id}</span>
+                                                    {task.summary}
+                                                </td>
+                                                <td className="py-3 text-center font-mono font-bold text-emerald-400 hover:scale-105 transition-transform">
+                                                    {(task.fteValue || 0.20).toFixed(2).replace('.', ',')}
+                                                </td>
+                                                <td className="py-3 text-center">
+                                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase 
+                                                        ${task.status === 'Resolvido' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 
+                                                          task.status === 'Aguardando' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 
+                                                          'bg-[#19224E] text-slate-300'}`}>
+                                                        {task.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* RIGHT SIDE: AUTOMATIONS & IMPROVEMENTS FILA */}
+                    <div className="space-y-3 lg:pl-8 pt-4 lg:pt-0">
+                        <h4 className="text-xs font-extrabold text-[#10B981] tracking-widest uppercase border-b border-indigo-950 pb-2">
+                            Módulo 2: Robôs (RPA) & Melhorias ({RightFilaProjetos.length})
+                        </h4>
+                        
+                        <div className="overflow-x-auto select-none">
+                            <table className="w-full text-left text-xs font-sans">
+                                <thead>
+                                    <tr className="text-slate-400 border-b border-indigo-950 text-[10px] uppercase tracking-wider font-semibold">
+                                        <th className="py-2.5">Projeto</th>
+                                        <th className="py-2.5 text-center">FTE</th>
+                                        <th className="py-2.5">Comentário / Blocker</th>
+                                        <th className="py-2.5 text-center">Data Fim</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-indigo-950/60 text-slate-300">
+                                    {RightFilaProjetos.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="py-4 text-center text-slate-500 italic">Nenhuma melhoria ou RPA ativo</td>
+                                        </tr>
+                                    ) : (
+                                        RightFilaProjetos.map(task => (
+                                            <tr key={task.id} className="hover:bg-indigo-950/30 transition-colors">
+                                                <td className="py-3 pr-2 font-medium">
+                                                    <span className="text-[10px] bg-slate-900 px-1 py-0.5 rounded mr-1.5 font-mono text-slate-400">{task.id}</span>
+                                                    {task.summary}
+                                                </td>
+                                                <td className="py-3 text-center font-mono font-bold text-[#38BDF8]">
+                                                    {(task.fteValue || 0.20).toFixed(2).replace('.', ',')}
+                                                </td>
+                                                <td className="py-3 text-xs text-rose-300 max-w-[180px] truncate" title={task.blocker || ''}>
+                                                    {task.blocker ? (
+                                                        <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+                                                            <span className="w-1.5 h-1.5 bg-rose-500 rounded-full inline-block animate-ping"></span>
+                                                            {task.blocker}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-500 font-mono">Pronto p/ Desenvolvimento</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 text-center font-mono text-slate-400 text-[10px]">
+                                                    {task.endDate ? new Date(task.endDate).toLocaleDateString() : '-'}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 3. CAPACITY POR DESENVOLVEDOR (INDIVIDUAL CARD PER RESOURCE) */}
+            <div className="space-y-4">
+                <div className="flex items-center gap-2 border-b border-indigo-950 pb-2">
+                    <IconUsers className="w-5 h-5 text-indigo-400" />
+                    <h3 className="text-xl font-bold text-white uppercase tracking-tight">Capacidade Disponível por Recurso (FTE)</h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                    {developerAllocation.map(d => {
+                        const usagePercentage = Math.min(100, Math.round(d.usedFte * 100));
+                        const isOverload = d.usedFte > 1.0;
+
+                        return (
+                            <div 
+                                key={d.id} 
+                                className={`rounded-2xl p-5 border shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[460px] transition-all duration-300 hover:scale-[1.02]
+                                ${isOverload 
+                                    ? 'bg-rose-950/20 border-rose-500/40 shadow-rose-950/20' 
+                                    : 'bg-[#0A1136] border-indigo-900/60 shadow-indigo-950/50'}`}
+                            >
+                                {/* CARD TOP HEADER */}
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-start">
+                                        <div className="flex items-center gap-3">
+                                            {/* RESOURCE CORPORATE AVATAR */}
+                                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-indigo-700 flex items-center justify-center text-sm font-extrabold text-white border border-indigo-400/40">
+                                                {d.name.substring(0, 2).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <h4 className="text-base font-bold text-white tracking-tight">{d.name}</h4>
+                                                <span className="text-[10px] text-slate-400 italic font-mono">Developer Resource</span>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* ACTIVE ASSIGNMENTS COUNT */}
+                                        <div className="text-right">
+                                            <span className="text-3xl font-extrabold text-white font-mono block leading-none">{d.activeCount}</span>
+                                            <span className="text-[8px] text-indigo-300 font-bold uppercase tracking-wider">Altivas Atividades</span>
+                                        </div>
+                                    </div>
+
+                                    {/* FTE CAPACITY BAR */}
+                                    <div className="bg-slate-900/80 border border-indigo-950/80 p-3 rounded-xl space-y-1.5 relative overflow-hidden">
+                                        <div className="flex justify-between text-[10px] font-bold">
+                                            <span className="text-slate-400">Utilização de FTE</span>
+                                            <span className={isOverload ? 'text-rose-400 font-extrabold animate-pulse' : 'text-[#38BDF8] font-extrabold'}>
+                                                {d.usedFte.toFixed(2)} FTE
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-indigo-950 h-2 rounded-full overflow-hidden">
+                                            <div 
+                                                style={{ width: `${usagePercentage}%` }} 
+                                                className={`h-full rounded-full transition-all duration-500 
+                                                    ${isOverload ? 'bg-rose-500 shadow-lg shadow-rose-500/50' : 'bg-gradient-to-r from-emerald-500 to-indigo-500'}`}
+                                            ></div>
+                                        </div>
+                                        <div className="flex justify-between text-[8px] text-slate-400 font-mono pt-1">
+                                            <span>Ocupado: ${usagePercentage}%</span>
+                                            <span>Disponível: ${d.availableFte.toFixed(2)} FTE</span>
+                                        </div>
+                                        {isOverload && (
+                                            <div className="bg-rose-950/40 rounded p-1.5 mt-2 border border-rose-900/50 text-[9px] text-rose-300 text-center font-bold">
+                                                ⚠️ SOBRECARREGADO (LIMITE EXCEDIDO)
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* CARD COLUMNS DIVISIONS (BACKLOG, EM ANDAMENTO, IN QA) */}
+                                <div className="space-y-4 mt-4 flex-1">
+                                    {/* Division 1: BACKLOG */}
+                                    <div className="space-y-1">
+                                        <h5 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider border-b border-indigo-950 pb-1 flex justify-between">
+                                            <span>🗄️ BACKLOG ATIVO</span>
+                                            <span className="font-mono">{d.backlog.length}</span>
+                                        </h5>
+                                        {d.backlog.length === 0 ? (
+                                            <span className="text-[10px] text-slate-600 block italic">Lista de espera vazia</span>
+                                        ) : (
+                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                                {d.backlog.map(p => (
+                                                    <div key={p.id} className="flex justify-between items-center text-[10px] bg-indigo-950/30 p-1.5 rounded border border-indigo-900/20">
+                                                        <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
+                                                        <span className="font-mono font-bold text-slate-500 text-[9px]">FTE: {(p.fteValue || 0.20).toFixed(2).replace('.', ',')}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Division 2: EM ANDAMENTO */}
+                                    <div className="space-y-1">
+                                        <h5 className="text-[10px] font-extrabold text-[#38BDF8] uppercase tracking-wider border-b border-indigo-950 pb-1 flex justify-between">
+                                            <span>⚙️ EM ANDAMENTO</span>
+                                            <span className="font-mono">{d.inProgress.length}</span>
+                                        </h5>
+                                        {d.inProgress.length === 0 ? (
+                                            <span className="text-[10px] text-slate-600 block italic">Nenhum em andamento</span>
+                                        ) : (
+                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                                {d.inProgress.map(p => (
+                                                    <div key={p.id} className="flex justify-between items-center text-[10px] bg-sky-950/20 p-1.5 rounded border border-sky-900/30">
+                                                        <span className="truncate max-w-[120px] text-slate-200 font-medium animate-fade-in" title={p.summary}>{p.summary}</span>
+                                                        <span className="font-mono font-bold text-[#38BDF8] text-[9px]">FTE: {(p.fteValue || 0.20).toFixed(2).replace('.', ',')}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Division 3: EM QA */}
+                                    <div className="space-y-1">
+                                        <h5 className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider border-b border-indigo-950 pb-1 flex justify-between">
+                                            <span>🧪 EM QA / VALIDAÇÃO</span>
+                                            <span className="font-mono">{d.inQA.length}</span>
+                                        </h5>
+                                        {d.inQA.length === 0 ? (
+                                            <span className="text-[10px] text-slate-600 block italic">Vazio ou em homologação</span>
+                                        ) : (
+                                            <div className="space-y-1 max-h-[85px] overflow-y-auto custom-scrollbar">
+                                                {d.inQA.map(p => (
+                                                    <div key={p.id} className="flex justify-between items-center text-[10px] bg-amber-950/20 p-1.5 rounded border border-amber-900/30">
+                                                        <span className="truncate max-w-[120px] text-slate-300 font-medium" title={p.summary}>{p.summary}</span>
+                                                        <span className="font-mono font-bold text-amber-400 text-[9px]">FTE: {(p.fteValue || 0.2).toFixed(2).replace('.', ',')}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* 4. INTERACTIVE SLIDES PREVIEW HUD / PRESENTE LAYOUT */}
+            <div className="bg-[#091136]/60 border border-indigo-900/40 rounded-2xl p-6 space-y-4 shadow-2xl no-print">
+                <div className="flex justify-between items-center border-b border-indigo-950 pb-3">
+                    <div className="flex items-center gap-2">
+                        <IconTerminal className="w-5 h-5 text-indigo-400 animate-pulse" />
+                        <h3 className="text-lg font-bold text-white uppercase tracking-tight">Slide Deck Previewer (Visualizador de Slides Executivos)</h3>
+                    </div>
+                    <div className="flex gap-1.5">
+                        {[0, 1, 2, 3, 4, 5].map(idx => (
+                            <button 
+                                key={idx} 
+                                onClick={() => setActiveSlide(idx)}
+                                className={`text-[10px] px-2.5 py-1 rounded transition-colors font-bold ${activeSlide === idx ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                            >
+                                Sl. {idx + 1}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div 
+                    id="pmo-print-zone"
+                    className="aspect-video w-full bg-[#050B24] border border-indigo-800/60 rounded-xl relative p-8 flex flex-col justify-between overflow-hidden shadow-2xl"
+                >
+                    {/* WATERMARK CORPORATIVO BACKGROUND */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-950 opacity-20 text-[18vw] font-black select-none pointer-events-none tracking-widest font-mono">
+                        NEXUS
+                    </div>
+
+                    {/* TOP BRAND DECK */}
+                    <div className="flex justify-between items-center z-10 border-b border-indigo-950 pb-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest bg-indigo-950 px-2 py-0.5 rounded">WEEKLY COCKPIT REPORT</span>
+                            <span className="text-[9px] text-slate-500">• REUNIÃO PMO GERENCIAL</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">NEXUS CoE AUTOMAÇÕES</div>
+                    </div>
+
+                    {/* ACTIVE SLIDE CONTENT */}
+                    <div className="flex-1 py-6 z-10 text-left overflow-hidden">
+                        {activeSlide === 0 && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight">SLIDE 1: RESUMO EXECUTIVO DO PORTFÓLIO</h4>
+                                    <p className="text-xs text-slate-400">Snapshot de alocação de FTEs, estado geral de atividades e taxas de bloqueios no portfólio</p>
+                                </div>
+                                <div className="grid grid-cols-5 gap-3">
+                                    {[
+                                        { title: 'PROJETOS ATIVOS', val: metrics.total },
+                                        { title: 'DESENVOLVIMENTO', val: metrics.inDevelopment },
+                                        { title: 'EM QA', val: metrics.inQA },
+                                        { title: 'BLOQUEADOS', val: metrics.blocked },
+                                        { title: 'FTE ESTIMADO', val: metrics.totalFteAllocated.toFixed(2) }
+                                    ].map((k, i) => (
+                                        <div key={i} className="bg-indigo-950/60 p-3 rounded-lg border border-indigo-900/50 text-center">
+                                            <span className="text-[9px] text-[#38BDF8] font-bold block mb-1">{k.title}</span>
+                                            <span className="text-2xl font-extrabold text-white font-mono">{k.val}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-[10px] text-indigo-300 font-bold block uppercase">Principais Iniciativas Sob Foco Semanal</span>
+                                    <div className="bg-[#0A1136] rounded-lg p-2.5 border border-indigo-950/80 h-[105px] overflow-hidden">
+                                        <table className="w-full text-left text-[11px]">
+                                            <thead>
+                                                <tr className="text-slate-400 border-b border-indigo-950 uppercase text-[9px] font-bold">
+                                                    <th>Projeto</th>
+                                                    <th className="text-center">FTE</th>
+                                                    <th>Prioridade</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {sortedQueue.slice(0,3).map(p => (
+                                                    <tr key={p.id}>
+                                                        <td className="py-1 flex items-center gap-1"><span className="text-[9px] bg-slate-900 font-mono text-slate-500 inline-block px-1 rounded">{p.id}</span> {p.summary}</td>
+                                                        <td className="text-center text-emerald-400 font-mono">{(p.fteValue || 0.20).toFixed(2)}</td>
+                                                        <td>{p.priority.split(' - ')[1] || p.priority}</td>
+                                                        <td><span className="text-[9px] text-[#38BDF8] font-bold">{p.status}</span></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSlide === 1 && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight">SLIDE 2: CAPACITY DA EQUIPE (FTE)</h4>
+                                    <p className="text-xs text-slate-400">Alocação por recurso de desenvolvimento de sistemas e sustentação operacional</p>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-[11px] font-sans">
+                                        <thead>
+                                            <tr className="text-[#38BDF8] border-b border-indigo-950 uppercase text-[9px] font-bold">
+                                                <th>Desenvolvedor</th>
+                                                <th className="text-center">Projetos Ativos</th>
+                                                <th className="text-center">FTE Utilizado</th>
+                                                <th className="text-center">Capacity Livre</th>
+                                                <th>Estado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-950/60 text-slate-300">
+                                            {developerAllocation.map(d => (
+                                                <tr key={d.id}>
+                                                    <td className="py-2.5 font-bold">{d.name}</td>
+                                                    <td className="text-center font-mono">{d.activeCount}</td>
+                                                    <td className="text-center font-mono font-bold text-indigo-400">{d.usedFte.toFixed(2)} FTE</td>
+                                                    <td className="text-center font-mono text-slate-400">{d.availableFte.toFixed(2)} FTE</td>
+                                                    <td>
+                                                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${d.usedFte > 1.0 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                                                            {d.usedFte > 1.0 ? 'Sobrecarga' : d.usedFte > 0.70 ? 'Capacidade Limite' : 'Ideal'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSlide === 2 && (
+                            <div className="space-y-5 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight">SLIDE 3: BACKLOG PRIORIZADO</h4>
+                                    <p className="text-xs text-slate-400">Demandas na fila de espera esperando a designação formal por desenvolvedor, ordenadas por criticidade</p>
+                                </div>
+
+                                <div className="bg-[#0A1136] rounded-xl border border-indigo-950 p-2 overflow-hidden h-[180px]">
+                                    <table className="w-full text-left text-[11px]">
+                                        <thead>
+                                            <tr className="text-[#38BDF8] border-b border-indigo-950 text-[9px] uppercase font-bold">
+                                                <th>ID Chamado</th>
+                                                <th>Projeto / Demanda</th>
+                                                <th className="text-center">FTE</th>
+                                                <th>Prioridade</th>
+                                                <th>Área Originadora</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-950/50 text-slate-300">
+                                            {sortedQueue.filter(t => ['Novo', 'Backlog', 'Pendente'].includes(t.status)).slice(0, 4).map(t => (
+                                                <tr key={t.id}>
+                                                    <td className="py-2.5 font-mono text-slate-400">{t.id}</td>
+                                                    <td className="font-medium truncate max-w-[200px]">{t.summary}</td>
+                                                    <td className="text-center font-mono text-[#38BDF8]">{(t.fteValue || 0.20).toFixed(2)}</td>
+                                                    <td>
+                                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${t.priority.includes('1') ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>
+                                                            {t.priority.split(' - ')[1] || t.priority}
+                                                        </span>
+                                                    </td>
+                                                    <td>{t.managementArea || 'Corporativo'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSlide === 3 && (
+                            <div className="space-y-5 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight">SLIDE 4: PROJETOS EM VALIDAÇÃO E QA</h4>
+                                    <p className="text-xs text-slate-400">Demandas ativas em homologação de código, testes sistêmicos ou homologações integradas</p>
+                                </div>
+
+                                <div className="bg-[#0A1136] rounded-xl border border-indigo-950 p-2 overflow-hidden h-[185px]">
+                                    <table className="w-full text-left text-[11px]">
+                                        <thead>
+                                            <tr className="text-amber-400 border-b border-indigo-950 text-[9px] uppercase font-bold">
+                                                <th>Nome do Projeto</th>
+                                                <th>Responsável</th>
+                                                <th className="text-center">FTE</th>
+                                                <th>Status Atual</th>
+                                                <th>Previsão Fim</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-950/50 text-slate-300">
+                                            {sortedQueue.filter(p => p.status === 'Resolvido' || (p.projectData?.currentPhaseId && ['3', '4'].includes(p.projectData.currentPhaseId))).slice(0, 4).map(p => (
+                                                <tr key={p.id}>
+                                                    <td className="py-2.5 font-bold truncate max-w-[240px]">{p.summary}</td>
+                                                    <td>{p.assignee || 'Sem Responsável'}</td>
+                                                    <td className="text-center font-mono text-slate-400">{(p.fteValue || 0.20).toFixed(2)}</td>
+                                                    <td><span className="text-[10px] text-amber-400">{p.projectData?.phaseStatus || p.status}</span></td>
+                                                    <td className="font-mono text-[9px] text-slate-500">{p.endDate ? new Date(p.endDate).toLocaleDateString() : '-'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSlide === 5 && (
+                            <div className="space-y-5 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight text-rose-500">SLIDE 6: MAIORES IMPEDIMENTOS E RISCOS</h4>
+                                    <p className="text-xs text-slate-400">Mapeamento de bloqueios sérios que necessitam de intervenção ou comitê de re-alocação</p>
+                                </div>
+
+                                <div className="bg-[#0A1136] rounded-xl border border-indigo-950 p-2 overflow-hidden h-[185px]">
+                                    <table className="w-full text-left text-[11px]">
+                                        <thead>
+                                            <tr className="text-rose-500 border-b border-indigo-950 text-[9px] uppercase font-bold">
+                                                <th>Iniciativa com Risco</th>
+                                                <th>Desenvolvedor</th>
+                                                <th>Gravidade</th>
+                                                <th>Descrição Detalhada do Bloqueio</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-950/50 text-slate-300">
+                                            {sortedQueue.filter(t => t.blocker || ['Aguardando', 'Pendente'].includes(t.status)).slice(0, 3).map(t => (
+                                                <tr key={t.id}>
+                                                    <td className="py-2.5 font-bold text-rose-400 truncate max-w-[200px]">{t.summary}</td>
+                                                    <td>{t.assignee || 'Sem Recurso'}</td>
+                                                    <td><span className="font-bold text-rose-500">ALTA</span></td>
+                                                    <td className="text-rose-300 text-xs truncate max-w-[280px]" title={t.blocker}>{t.blocker || 'Pendência genérica'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeSlide === 4 && (
+                            <div className="space-y-5 animate-fade-in">
+                                <div>
+                                    <h4 className="text-xl font-black text-white uppercase tracking-tight text-emerald-400">SLIDE 5: PROJETOS CONCLUÍDOS RECENTEMENTE</h4>
+                                    <p className="text-xs text-slate-400">Melhorias e Robôs RPA entregues em ambiente operacional</p>
+                                </div>
+
+                                <div className="bg-[#0A1136] rounded-xl border border-indigo-950 p-2 overflow-hidden h-[185px]">
+                                    <table className="w-full text-left text-[11px]">
+                                        <thead>
+                                            <tr className="text-emerald-400 border-b border-indigo-950 text-[9px] uppercase font-bold">
+                                                <th>Código</th>
+                                                <th>Descrição da Solução</th>
+                                                <th>Área Originadora</th>
+                                                <th>Responsável</th>
+                                                <th className="text-center">FTE Salvo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-950/50 text-slate-300">
+                                            {sortedQueue.filter(t => ['Concluído', 'Fechado'].includes(t.status)).slice(0, 4).map(t => (
+                                                <tr key={t.id}>
+                                                    <td className="py-2.5 font-mono text-slate-500">{t.id}</td>
+                                                    <td className="font-bold text-slate-200 truncate max-w-[200px]">{t.summary}</td>
+                                                    <td>{t.managementArea || 'Geral'}</td>
+                                                    <td>{t.assignee || '-'}</td>
+                                                    <td className="text-center font-mono font-bold text-[#10B981]">{(t.fteValue || 0.50).toFixed(2)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* SLIDE FOOTER */}
+                    <div className="flex justify-between items-center z-10 border-t border-indigo-950/80 pt-2 text-[#94A3B8] text-[9px] font-semibold">
+                        <span>Página Executiva {activeSlide + 1} de 6</span>
+                        <span>Nexus CoE Portfolio Tool</span>
+                    </div>
+                </div>
+
+                <div className="text-center">
+                    <p className="text-xs text-slate-400 leading-relaxed italic">
+                        💡 Este player renderiza os slides estruturados exatamente em formato 16:9. Clique nos controles numéricos para ensaiar a sua apresentação executiva antes de exportar!
+                    </p>
+                </div>
+            </div>
         </div>
     );
 };
@@ -3562,5 +4517,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
