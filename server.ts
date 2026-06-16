@@ -71,9 +71,21 @@ async function startServer() {
         body: JSON.stringify(body)
       });
 
-      if (!response.ok) {
+      if (!response.ok || response.status === 203) {
         const errText = await response.text();
-        res.status(response.status).json({ error: `Azure DevOps API Error: ${errText}` });
+        const isAuthError = response.status === 203 || errText.includes("signin") || errText.includes("login") || errText.includes("Object moved");
+        if (isAuthError) {
+          res.status(401).json({ error: "Erro de Autenticação com o Azure DevOps: O PAT (Personal Access Token) fornecido é inválido, expirou ou a organização/projeto informados estão incorretos." });
+        } else {
+          res.status(response.status).json({ error: `Erro na API do Azure DevOps: ${errText}` });
+        }
+        return;
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const errText = await response.text();
+        res.status(400).json({ error: "Resposta inesperada do Azure DevOps (não-JSON). Provavelmente suas credenciais estão incorretas ou o projeto é inacessível." });
         return;
       }
 
@@ -134,9 +146,18 @@ async function startServer() {
           body: JSON.stringify(body)
         });
 
-        if (!response.ok) {
+        if (!response.ok || response.status === 203) {
           const errText = await response.text();
-          throw new Error(`Failed to create ${type} (${title}): ${errText}`);
+          const isAuthError = response.status === 203 || errText.includes("signin") || errText.includes("login") || errText.includes("Object moved");
+          if (isAuthError) {
+            throw new Error("Erro de Autenticação com o Azure DevOps: O seu Token de Acesso Pessoal (PAT) está incorreto ou expirou, ou a Organização/Projeto inseridos estão inválidos.");
+          }
+          throw new Error(`Erro ao criar ${type} (${title}): ${errText}`);
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error("Resposta inesperada do Azure DevOps (dados corrompidos ou HTML recebido). Verifique e renove seu Token PAT!");
         }
 
         const data = await response.json() as { id: number };
