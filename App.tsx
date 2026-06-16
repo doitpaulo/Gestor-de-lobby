@@ -4250,12 +4250,17 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     })
                 });
 
-                if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || "Erro ao criar estrutura no Azure DevOps.");
+                const responseText = await res.text();
+                let data: any;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (e) {
+                    throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
                 }
 
-                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Erro ao criar estrutura no Azure DevOps.");
+                }
                 setSyncLog(prev => [
                     ...prev,
                     `✔ Feature criada com sucesso | ID ${data.featureId} | N/A | ${formData.automationName || formData.summary}`,
@@ -4298,12 +4303,17 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     })
                 });
 
-                if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || "Erro ao criar Task no Azure DevOps.");
+                const responseText = await res.text();
+                let data: any;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (e) {
+                    throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
                 }
 
-                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Erro ao criar Task no Azure DevOps.");
+                }
                 setSyncLog(prev => [
                     ...prev,
                     `✔ Task criada com sucesso (ID ${data.id}) | Estimativa: ${hoursValue} horas | Tag: [${tag}]`,

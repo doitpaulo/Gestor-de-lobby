@@ -11,11 +11,13 @@ async function startServer() {
 
   // Helper to generate Base64 Basic auth header for Azure DevOps
   function getDevOpsHeaders(pat: string) {
-    const auth = ":" + pat;
+    const auth = ":" + pat.trim();
     const encoded = Buffer.from(auth).toString("base64");
     return {
       "Content-Type": "application/json-patch+json",
       "Authorization": `Basic ${encoded}`,
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 API-Client"
     };
   }
 
@@ -29,7 +31,12 @@ async function startServer() {
         return;
       }
 
-      const url = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/$Task?api-version=7.0`;
+      const org = String(organization).trim();
+      const proj = String(project).trim();
+      const token = String(pat).trim();
+      const userStory = String(userStoryId).trim();
+
+      const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/$Task?api-version=7.0`;
       
       const body: any[] = [
         {
@@ -61,13 +68,13 @@ async function startServer() {
         "path": "/relations/-",
         "value": {
           "rel": "System.LinkTypes.Hierarchy-Reverse",
-          "url": `https://dev.azure.com/${organization}/_apis/wit/workItems/${userStoryId}`
+          "url": `https://dev.azure.com/${org}/_apis/wit/workItems/${userStory}`
         }
       });
 
       const response = await fetch(url, {
         method: "POST",
-        headers: getDevOpsHeaders(pat),
+        headers: getDevOpsHeaders(token),
         body: JSON.stringify(body)
       });
 
@@ -106,12 +113,18 @@ async function startServer() {
         return;
       }
 
-      const headers = getDevOpsHeaders(pat);
+      const org = String(organization).trim();
+      const proj = String(project).trim();
+      const token = String(pat).trim();
+      const epic = String(epicId).trim();
+      const name = String(projectName).trim();
+
+      const headers = getDevOpsHeaders(token);
 
       // Helper function to create standard work item
       async function createWorkItem(type: string, title: string, parentId?: string | number, tag?: string) {
         const typeFormatted = encodeURIComponent(type);
-        const url = `https://dev.azure.com/${organization}/${project}/_apis/wit/workitems/$${typeFormatted}?api-version=7.0`;
+        const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/$${typeFormatted}?api-version=7.0`;
 
         const body: any[] = [
           {
@@ -135,7 +148,7 @@ async function startServer() {
             "path": "/relations/-",
             "value": {
               "rel": "System.LinkTypes.Hierarchy-Reverse",
-              "url": `https://dev.azure.com/${organization}/${project}/_apis/wit/workItems/${parentId}`
+              "url": `https://dev.azure.com/${org}/${proj}/_apis/wit/workItems/${parentId}`
             }
           });
         }
@@ -184,7 +197,7 @@ async function startServer() {
       }
 
       // 1. Create Feature under Epic
-      const featureId = await createWorkItem("Feature", `N/A | ${projectName}`, epicId);
+      const featureId = await createWorkItem("Feature", `N/A | ${name}`, epic);
 
       // 2. Create User Story structure sequentially
       const us1 = await createUserStory(featureId, "Preparação Comitê CoE", [
