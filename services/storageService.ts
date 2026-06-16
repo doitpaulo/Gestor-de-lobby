@@ -1,5 +1,5 @@
 
-import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint } from '../types';
+import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig } from '../types';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
@@ -10,7 +10,8 @@ const KEYS = {
   ROBOTS: 'nexus_robots_v1',
   API_KEY: 'nexus_integration_key', // New Key
   DOCUMENTS: 'nexus_docs_config_v1',
-  SPRINTS: 'nexus_sprints_v1'
+  SPRINTS: 'nexus_sprints_v1',
+  DEVOPS_CONFIG: 'nexus_devops_config_v1'
 };
 
 export const StorageService = {
@@ -103,6 +104,20 @@ export const StorageService = {
 
   saveDocumentsConfig: (config: DocumentConfig[]) => {
       localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(config));
+  },
+
+  // --- Azure DevOps Configuration ---
+  getDevOpsConfig: (): DevOpsConfig => {
+      try {
+          const data = localStorage.getItem(KEYS.DEVOPS_CONFIG);
+          return data ? JSON.parse(data) : { organization: '', project: '', pat: '', isActive: false };
+      } catch {
+          return { organization: '', project: '', pat: '', isActive: false };
+      }
+  },
+
+  saveDevOpsConfig: (config: DevOpsConfig) => {
+      localStorage.setItem(KEYS.DEVOPS_CONFIG, JSON.stringify(config));
   },
 
   // --- API Key / Power BI ---

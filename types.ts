@@ -76,6 +76,11 @@ export interface Task {
 
   // Sub-tasks
   subTasks?: SubTask[];
+
+  // Azure DevOps Integration fields
+  devopsEpicId?: string;
+  devopsUserStoryId?: string;
+  devopsFeatureId?: string;
 }
 
 export interface SubTask {
@@ -132,3 +137,11 @@ export interface User {
   password?: string; // Added for auth
   avatar?: string;   // Base64 string for profile picture
 }
+
+export interface DevOpsConfig {
+  organization: string;
+  project: string;
+  pat: string;
+  isActive: boolean;
+}
+

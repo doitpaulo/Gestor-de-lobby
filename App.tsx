@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
-import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask } from './types';
+import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
 
 // --- Constants ---
@@ -4152,6 +4152,7 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
 
 const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
     const [name, setName] = useState(user.name); const [avatar, setAvatar] = useState(user.avatar || ''); const [password, setPassword] = useState(user.password || '');
+    const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
     const handleExportBackup = () => {
@@ -4185,7 +4186,7 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
         };
         reader.readAsText(file);
     };
-    return (<div className="max-w-3xl mx-auto space-y-6"><h2 className="text-2xl font-bold text-white">Meu Perfil</h2><Card className="space-y-6"><div className="flex flex-col md:flex-row gap-6 items-center md:items-start"><div className="relative group"><div className="w-24 h-24 rounded-full bg-slate-700 border-2 border-indigo-500 overflow-hidden flex items-center justify-center">{avatar ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" /> : <span className="text-2xl font-bold text-indigo-300">{user.name.substring(0,2).toUpperCase()}</span>}</div><label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full cursor-pointer"><IconUpload className="w-6 h-6 text-white" /><input type="file" className="hidden" accept="image/*" onChange={handleFile} /></label></div><div className="flex-1 space-y-4 w-full"><div><label className="block text-xs text-slate-400 mb-1">Nome Completo</label><input value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Email</label><input value={user.email} disabled className="w-full bg-slate-900/50 border border-slate-700 rounded p-2 text-slate-500 cursor-not-allowed" /></div><div><label className="block text-xs text-slate-400 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" placeholder="Nova senha..." /></div></div></div><div className="flex justify-end pt-4 border-t border-slate-700"><Button onClick={handleSave}>Salvar Alterações</Button></div></Card><div className="space-y-4"><h3 className="text-lg font-bold text-indigo-400 mb-2">Segurança e Backup</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconDownload className="w-4 h-4 text-indigo-400" /> Exportar Backup</p><p className="text-xs text-slate-500 mt-1">Baixa um arquivo JSON com todas as tarefas, robôs, devs e configurações.</p></div><Button variant="secondary" className="mt-4 w-full" onClick={handleExportBackup}>Gerar Backup</Button></div><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconUpload className="w-4 h-4 text-emerald-400" /> Restaurar Backup</p><p className="text-xs text-slate-500 mt-1">Sobe um arquivo de backup previamente exportado para restaurar os dados.</p></div><div className="relative mt-4"><input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" /><Button variant="success" className="w-full">Selecionar Arquivo</Button></div></div></div></div><div className="border-t border-slate-800 pt-8"><h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3><div className="bg-rose-900/10 border border-rose-900/30 p-4 rounded-lg flex items-center justify-between"><div><p className="text-slate-300 font-medium">Resetar Dados</p><p className="text-xs text-slate-500">Apaga todas as tarefas e restaura configurações padrão. Irreversível.</p></div><Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta?")) onResetData(); }}>Resetar Tudo</Button></div></div></div>)
+    return (<div className="max-w-3xl mx-auto space-y-6"><h2 className="text-2xl font-bold text-white">Meu Perfil</h2><Card className="space-y-6"><div className="flex flex-col md:flex-row gap-6 items-center md:items-start"><div className="relative group"><div className="w-24 h-24 rounded-full bg-slate-700 border-2 border-indigo-500 overflow-hidden flex items-center justify-center">{avatar ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" /> : <span className="text-2xl font-bold text-indigo-300">{user.name.substring(0,2).toUpperCase()}</span>}</div><label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full cursor-pointer"><IconUpload className="w-6 h-6 text-white" /><input type="file" className="hidden" accept="image/*" onChange={handleFile} /></label></div><div className="flex-1 space-y-4 w-full"><div><label className="block text-xs text-slate-400 mb-1">Nome Completo</label><input value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Email</label><input value={user.email} disabled className="w-full bg-slate-900/50 border border-slate-700 rounded p-2 text-slate-500 cursor-not-allowed" /></div><div><label className="block text-xs text-slate-400 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" placeholder="Nova senha..." /></div></div></div><div className="flex justify-end pt-4 border-t border-slate-700"><Button onClick={handleSave}>Salvar Alterações</Button></div></Card><div className="space-y-4"><h3 className="text-lg font-bold text-indigo-400 mb-2">Integração Azure DevOps</h3><Card className="space-y-6"><p className="text-xs text-slate-400">Configure as credenciais do Azure DevOps para conectar as demandas manualmente ou sincronizar de forma automatizada ao cadastrar novas automações, melhorias e incidentes.</p><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Organização (ex: Bkbrasil)</label><input value={devopsConfig.organization} onChange={e => setDevopsConfig({ ...devopsConfig, organization: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Bkbrasil" /></div><div><label className="block text-xs text-slate-400 mb-1">Projeto (ex: Hyperautomation)</label><input value={devopsConfig.project} onChange={e => setDevopsConfig({ ...devopsConfig, project: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Hyperautomation" /></div><div className="md:col-span-2"><label className="block text-xs text-slate-400 mb-1">Token de Acesso Pessoal (PAT)</label><input type="password" value={devopsConfig.pat} onChange={e => setDevopsConfig({...devopsConfig, pat: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="Insira o seu PAT - CQJSl..." /></div><div className="md:col-span-2 flex items-center gap-2 pt-2"><input type="checkbox" id="devops_active" checked={devopsConfig.isActive} onChange={e => setDevopsConfig({...devopsConfig, isActive: e.target.checked})} className="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4" /><label htmlFor="devops_active" className="text-sm text-slate-200">Sincronização Ativa (Cria recursos automaticamente no Azure DevOps)</label></div></div><div className="flex justify-end pt-4 border-t border-slate-700"><Button onClick={() => { StorageService.saveDevOpsConfig(devopsConfig); alert('Credenciais e preferências do Azure DevOps salvas com sucesso!'); }}>Salvar Configurações DevOps</Button></div></Card></div><div className="space-y-4"><h3 className="text-lg font-bold text-indigo-400 mb-2">Segurança e Backup</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconDownload className="w-4 h-4 text-indigo-400" /> Exportar Backup</p><p className="text-xs text-slate-500 mt-1">Baixa um arquivo JSON com todas as tarefas, robôs, devs e configurações.</p></div><Button variant="secondary" className="mt-4 w-full" onClick={handleExportBackup}>Gerar Backup</Button></div><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconUpload className="w-4 h-4 text-emerald-400" /> Restaurar Backup</p><p className="text-xs text-slate-500 mt-1">Sobe um arquivo de backup previamente exportado para restaurar os dados.</p></div><div className="relative mt-4"><input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" /><Button variant="success" className="w-full">Selecionar Arquivo</Button></div></div></div></div><div className="border-t border-slate-800 pt-8"><h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3><div className="bg-rose-900/10 border border-rose-900/30 p-4 rounded-lg flex items-center justify-between"><div><p className="text-slate-300 font-medium">Resetar Dados</p><p className="text-xs text-slate-500">Apaga todas as tarefas e restaura configurações padrão. Irreversível.</p></div><Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta?")) onResetData(); }}>Resetar Tudo</Button></div></div></div>)
 }
 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
@@ -4215,6 +4216,110 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
     const [formData, setFormData] = useState<Task>(task || { id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } });
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [syncLog, setSyncLog] = useState<string[]>([]);
+    const [syncError, setSyncError] = useState<string | null>(null);
+
+    const handleDevOpsSync = async () => {
+        const config = StorageService.getDevOpsConfig();
+        if (!config.isActive || !config.pat || !config.organization || !config.project) {
+            alert("A integração do Azure DevOps não está configurada ou ativa. Vá em 'Meu Perfil' para configurar.");
+            return;
+        }
+
+        setIsSyncing(true);
+        setSyncError(null);
+        setSyncLog(["Iniciando integração com o Azure DevOps..."]);
+
+        try {
+            if (formData.type === 'Nova Automação') {
+                if (!formData.devopsEpicId) {
+                    throw new Error("Por favor, preencha o ID da Epic antes de iniciar a criação.");
+                }
+                setSyncLog(prev => [...prev, `Conectando ao Azure DevOps (${config.organization}/${config.project})...`, `Criando estrutura completa de Feature baseada na Epic ID ${formData.devopsEpicId}...`]);
+                
+                const res = await fetch('/api/devops/create-structure', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        organization: config.organization,
+                        project: config.project,
+                        pat: config.pat,
+                        epicId: formData.devopsEpicId,
+                        projectName: formData.automationName || formData.summary || "RPA Automação"
+                    })
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || "Erro ao criar estrutura no Azure DevOps.");
+                }
+
+                const data = await res.json();
+                setSyncLog(prev => [
+                    ...prev,
+                    `✔ Feature criada com sucesso | ID ${data.featureId} | N/A | ${formData.automationName || formData.summary}`,
+                    `✔ User Story 'Preparação Comitê CoE' criada | ID ${data.userStories.coe}`,
+                    `✔ User Story 'Fluxograma do Processo' criada | ID ${data.userStories.flowchart}`,
+                    `✔ User Story 'Especificação do Processo' criada | ID ${data.userStories.specification}`,
+                    `✔ User Story 'Desenvolvimento' criada | ID ${data.userStories.development}`,
+                    `✔ User Story 'QA Homologação' criada | ID ${data.userStories.qa}`,
+                    `✔ User Story 'Sustentação' criada | ID ${data.userStories.sustentation}`,
+                    `✔ User Story 'Melhoria' criada | ID ${data.userStories.improvement}`,
+                    `🎉 Estrutura de Ciclo de Vida do Projeto criada e vinculada com sucesso no DevOps!`
+                ]);
+
+                setFormData(prev => ({ ...prev, devopsFeatureId: String(data.featureId) }));
+            } else {
+                // Incidente ou Melhoria
+                if (!formData.devopsUserStoryId) {
+                    throw new Error("Por favor, preencha o ID da User Story antes de criar a Task.");
+                }
+                setSyncLog(prev => [...prev, `Criando Task vinculada à User Story ID ${formData.devopsUserStoryId}...`]);
+                
+                let hoursValue = 0;
+                if (formData.estimatedTime) {
+                    hoursValue = parseDuration(formData.estimatedTime);
+                }
+
+                const tag = formData.type === 'Incidente' ? 'Sustentação' : 'Melhoria';
+
+                const res = await fetch('/api/devops/create-task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        organization: config.organization,
+                        project: config.project,
+                        pat: config.pat,
+                        userStoryId: formData.devopsUserStoryId,
+                        title: `${formData.id || 'N/A'} - ${formData.summary}`,
+                        estimate: hoursValue,
+                        tag: tag
+                    })
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.error || "Erro ao criar Task no Azure DevOps.");
+                }
+
+                const data = await res.json();
+                setSyncLog(prev => [
+                    ...prev,
+                    `✔ Task criada com sucesso (ID ${data.id}) | Estimativa: ${hoursValue} horas | Tag: [${tag}]`,
+                    `🎉 Task vinculada ao Azure DevOps com sucesso!`
+                ]);
+
+                setFormData(prev => ({ ...prev, devopsFeatureId: String(data.id) }));
+            }
+        } catch (err: any) {
+            setSyncError(err.message || "Erro de Sincronização.");
+            setSyncLog(prev => [...prev, `❌ ERRO: ${err.message || "Erro desconhecido."}`]);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     useEffect(() => { if (!formData.projectData) setFormData(prev => ({ ...prev, projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } })); }, []);
     useEffect(() => { if (formData.startDate && formData.estimatedTime) { const hours = parseDuration(formData.estimatedTime); if (hours > 0) { const daysToAdd = Math.floor((hours - 0.1) / 8); const start = new Date(formData.startDate); const end = new Date(start); end.setDate(start.getDate() + daysToAdd); const endDateStr = end.toISOString().split('T')[0]; if (endDateStr !== formData.endDate) setFormData(prev => ({ ...prev, endDate: endDateStr })); } } }, [formData.startDate, formData.estimatedTime]);
     const handleChange = (e: any) => { const { name, value } = e.target; if (name === 'assignee' && value && allTasks) { const currentHours = getDevWorkload(value, allTasks, task.id); if (currentHours > 40) alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`); } let finalValue = value; if (name === 'fteValue') finalValue = value === '' ? undefined : parseFloat(value); setFormData(prev => ({ ...prev, [name]: finalValue })); };
@@ -4269,7 +4374,96 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         });
     };
 
-    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]"><div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button></div><div className="p-6 overflow-y-auto space-y-6 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" /></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-2 bg-rose-900/20 border border-rose-500/30 p-4 rounded-lg animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all" /></div>)}<div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700"><div className="col-span-2 flex items-center gap-2 mb-2"><IconClock className="w-4 h-4 text-indigo-400" /><span className="text-xs text-indigo-300 font-bold">Planejamento Automático</span><span className="text-[10px] text-slate-500">(Data Fim calculada baseada no tempo estimado)</span></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label><input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label><input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label><input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 8h, 16h, 2d" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-indigo-400 mt-1">Calculado via subtarefas</p>}</div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label><input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border-emerald-500/50 border rounded p-2 text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 2h" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-emerald-400 mt-1">Calculado via subtarefas</p>}</div></div>{isProject && (
+    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]"><div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button></div><div className="p-6 overflow-y-auto space-y-6 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" /></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-2 bg-rose-900/20 border border-rose-500/30 p-4 rounded-lg animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all" /></div>)}<div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
+
+        {/* Azure DevOps Integration Card */}
+        <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/60 space-y-4">
+            <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-sky-400 flex items-center gap-2">
+                    <IconTerminal className="w-4 h-4 text-sky-400 animate-pulse" />
+                    Vínculo Azure DevOps
+                </h4>
+                {StorageService.getDevOpsConfig().isActive ? (
+                    <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Ativo</span>
+                ) : (
+                    <span className="bg-slate-800 text-slate-500 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">Inativo</span>
+                )}
+            </div>
+
+            {formData.type === 'Nova Automação' ? (
+                <div className="space-y-3">
+                    <div>
+                        <label className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da Epic (Azure DevOps)</label>
+                        <div className="flex gap-2">
+                            <input 
+                                name="devopsEpicId" 
+                                value={formData.devopsEpicId || ''} 
+                                onChange={handleChange} 
+                                placeholder="Insira o ID da Epic (ex: 2841)" 
+                                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono" 
+                            />
+                            <Button 
+                                onClick={handleDevOpsSync} 
+                                disabled={isSyncing || !formData.devopsEpicId} 
+                                variant="secondary" 
+                                className="text-xs px-3 whitespace-nowrap bg-sky-900 hover:bg-sky-800 text-white border-none py-2"
+                            >
+                                {isSyncing ? "Gerando Ciclo..." : "🚀 Criar Estrutural"}
+                            </Button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">Cria automaticamente a Feature e todas as User Stories e Tasks do ciclo de vida RPA.</p>
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    <div>
+                        <label className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da User Story Parent (Azure DevOps)</label>
+                        <div className="flex gap-2">
+                            <input 
+                                name="devopsUserStoryId" 
+                                value={formData.devopsUserStoryId || ''} 
+                                onChange={handleChange} 
+                                placeholder="Insira o ID da User Story (ex: 2950)" 
+                                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono" 
+                            />
+                            <Button 
+                                onClick={handleDevOpsSync} 
+                                disabled={isSyncing || !formData.devopsUserStoryId} 
+                                variant="secondary" 
+                                className="text-xs px-3 whitespace-nowrap bg-sky-900 hover:bg-sky-800 text-white border-none py-2"
+                            >
+                                {isSyncing ? "Criando Task..." : "⚡ Criar Task"}
+                            </Button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">Cria uma Task vinculada sob a User Story e adiciona a tag ({formData.type === 'Incidente' ? 'Sustentação' : 'Melhoria'}).</p>
+                    </div>
+                </div>
+            )}
+
+            {formData.devopsFeatureId && (
+                <div className="bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-lg text-xs text-emerald-400 flex items-center gap-2 animate-fade-in">
+                    <IconCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                    <span>Integrado com sucesso! Work Item ID Vinculado: <strong className="font-mono text-white text-sm bg-emerald-900/40 px-1.5 py-0.5 rounded border border-emerald-600/30">{formData.devopsFeatureId}</strong></span>
+                </div>
+            )}
+
+            {syncLog.length > 0 && (
+                <div className="bg-slate-950/90 p-3 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300 max-h-36 overflow-y-auto custom-scrollbar space-y-1 block max-w-full">
+                    <div className="text-sky-400 border-b border-slate-800 pb-1 mb-1 font-bold tracking-wider uppercase">Logs de Integração DevOps:</div>
+                    {syncLog.map((log, i) => (
+                        <div key={i} className={log.startsWith('❌') ? 'text-rose-400' : log.startsWith('✔') ? 'text-emerald-400' : log.startsWith('🎉') ? 'text-sky-300 font-bold' : 'text-slate-400'}>{log}</div>
+                    ))}
+                </div>
+            )}
+
+            {syncError && (
+                <div className="text-xs text-rose-400 font-medium bg-rose-950/10 border border-rose-500/20 p-2.5 rounded-lg">
+                    {syncError}
+                </div>
+            )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700"><div className="col-span-2 flex items-center gap-2 mb-2"><IconClock className="w-4 h-4 text-indigo-400" /><span className="text-xs text-indigo-300 font-bold">Planejamento Automático</span><span className="text-[10px] text-slate-500">(Data Fim calculada baseada no tempo estimado)</span></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label><input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label><input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label><input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 8h, 16h, 2d" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-indigo-400 mt-1">Calculado via subtarefas</p>}</div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label><input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border-emerald-500/50 border rounded p-2 text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 2h" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-emerald-400 mt-1">Calculado via subtarefas</p>}</div></div>{isProject && (
     <div className="bg-indigo-900/10 border border-indigo-500/30 p-4 rounded-lg space-y-4">
         <h4 className="text-sm font-bold text-indigo-300 flex items-center gap-2"><IconProject className="w-4 h-4" /> Ciclo de Vida do Projeto & Subtarefas</h4>
         <div className="grid grid-cols-2 gap-4">
