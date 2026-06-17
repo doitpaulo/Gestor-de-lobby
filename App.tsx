@@ -4330,6 +4330,86 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         }
     };
 
+    const handleDevOpsUpdate = async () => {
+        const config = StorageService.getDevOpsConfig();
+        if (!config.isActive || !config.pat || !config.organization || !config.project) {
+            alert("A integração do Azure DevOps não está configurada ou ativa. Vá em 'Meu Perfil' para configurar.");
+            return;
+        }
+
+        setIsSyncing(true);
+        setSyncError(null);
+        setSyncLog(["Iniciando atualização do item no Azure DevOps..."]);
+
+        try {
+            const estHours = parseDuration(formData.estimatedTime || '0h');
+            const actHours = parseDuration(formData.actualTime || '0h');
+
+            const res = await fetch('/api/devops/update-task', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    organization: config.organization,
+                    project: config.project,
+                    pat: config.pat,
+                    id: formData.devopsFeatureId,
+                    title: `${formData.id || 'N/A'} - ${formData.summary}`,
+                    status: formData.status,
+                    estimate: estHours,
+                    completed: actHours,
+                    assignee: formData.assignee || undefined
+                })
+            });
+
+            const responseText = await res.text();
+            let data: any;
+            try {
+                data = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
+            }
+
+            if (!res.ok) {
+                throw new Error(data.error || "Erro ao atualizar item no Azure DevOps.");
+            }
+
+            let successMsg = `✔ Item atualizado com sucesso no DevOps!`;
+            if (data.warning) {
+                successMsg += ` (${data.warning})`;
+            }
+
+            setSyncLog(prev => [
+                ...prev,
+                `✔ Título: ${formData.id || 'N/A'} - ${formData.summary}`,
+                `✔ Status/Estado: ${formData.status}`,
+                `✔ Horas Estimadas: ${estHours} | Horas Realizadas: ${actHours}`,
+                `✔ Responsável: ${formData.assignee || 'Sem Atribuição'}`,
+                `🎉 ${successMsg}`
+            ]);
+
+            // Add history entry to formData
+            setFormData(prev => ({
+                ...prev,
+                history: [
+                    ...(prev.history || []),
+                    {
+                        id: Math.random().toString(36).substr(2, 9),
+                        date: new Date().toISOString(),
+                        user: 'Sistema (DevOps)',
+                        action: `Sincronizou alterações de título, status (${formData.status}), horas (${estHours}h est. / ${actHours}h real) e dev (${formData.assignee || 'nenhum'}) no DevOps ID ${formData.devopsFeatureId}`
+                    }
+                ]
+            }));
+
+            alert("Item atualizado no Azure DevOps com sucesso!");
+        } catch (err: any) {
+            setSyncError(err.message || "Erro de Sincronização.");
+            setSyncLog(prev => [...prev, `❌ ERRO: ${err.message || "Erro desconhecido."}`]);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     useEffect(() => { if (!formData.projectData) setFormData(prev => ({ ...prev, projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } })); }, []);
     useEffect(() => { if (formData.startDate && formData.estimatedTime) { const hours = parseDuration(formData.estimatedTime); if (hours > 0) { const daysToAdd = Math.floor((hours - 0.1) / 8); const start = new Date(formData.startDate); const end = new Date(start); end.setDate(start.getDate() + daysToAdd); const endDateStr = end.toISOString().split('T')[0]; if (endDateStr !== formData.endDate) setFormData(prev => ({ ...prev, endDate: endDateStr })); } } }, [formData.startDate, formData.estimatedTime]);
     const handleChange = (e: any) => { const { name, value } = e.target; if (name === 'assignee' && value && allTasks) { const currentHours = getDevWorkload(value, allTasks, task.id); if (currentHours > 40) alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`); } let finalValue = value; if (name === 'fteValue') finalValue = value === '' ? undefined : parseFloat(value); setFormData(prev => ({ ...prev, [name]: finalValue })); };
@@ -4400,7 +4480,41 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 )}
             </div>
 
-            {formData.type === 'Nova Automação' ? (
+            {formData.devopsFeatureId ? (
+                <div className="space-y-3">
+                    <div className="bg-emerald-950/20 border border-emerald-500/20 p-3.5 rounded-lg text-xs space-y-3">
+                        <div className="flex items-center gap-2 justify-between">
+                            <span className="text-emerald-400 font-medium flex items-center gap-1.5 font-bold">
+                                <IconCheck className="w-4 h-4 text-emerald-400" /> Vinculado ao Azure DevOps!
+                            </span>
+                            <span className="font-mono text-white text-xs bg-emerald-900/40 px-2 py-0.5 rounded border border-emerald-600/30 font-bold">
+                                Work Item ID: {formData.devopsFeatureId}
+                            </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                            Esta demanda já possui um Work Item criado no Azure DevOps. Ao alterar Título, Status, Horas (Estimada/Real) ou Responsável, clique abaixo para sincronizar as mudanças no painel oficial do DevOps.
+                        </p>
+                        <div className="flex gap-2">
+                            <Button 
+                                onClick={handleDevOpsUpdate} 
+                                disabled={isSyncing} 
+                                variant="secondary" 
+                                className="flex-1 text-xs py-2 bg-sky-900 hover:bg-sky-800 text-white border-none flex items-center justify-center gap-1.5 font-bold"
+                            >
+                                {isSyncing ? "Atualizando no DevOps..." : "🔄 Sincronizar / Atualizar no DevOps"}
+                            </Button>
+                            <Button 
+                                onClick={() => { if (window.confirm("Deseja desvincular o ID atual? Se fizer isso, poderá vincular a uma nova User Story/Epic.")) setFormData(p => ({ ...p, devopsFeatureId: undefined })); }}
+                                variant="danger" 
+                                className="text-xs px-2 py-2 bg-rose-950 hover:bg-rose-900 text-rose-300 border-none flex items-center justify-center"
+                                title="Desvincular item"
+                            >
+                                Desvincular
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            ) : formData.type === 'Nova Automação' ? (
                 <div className="space-y-3">
                     <div>
                         <label className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da Epic (Azure DevOps)</label>
@@ -4447,13 +4561,6 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Cria uma Task vinculada sob a User Story e adiciona a tag ({formData.type === 'Incidente' ? 'Sustentação' : 'Melhoria'}).</p>
                     </div>
-                </div>
-            )}
-
-            {formData.devopsFeatureId && (
-                <div className="bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-lg text-xs text-emerald-400 flex items-center gap-2 animate-fade-in">
-                    <IconCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Integrado com sucesso! Work Item ID Vinculado: <strong className="font-mono text-white text-sm bg-emerald-900/40 px-1.5 py-0.5 rounded border border-emerald-600/30">{formData.devopsFeatureId}</strong></span>
                 </div>
             )}
 
@@ -4823,6 +4930,40 @@ export default function App() {
     if (changed) {
         setSprints(newSprints);
         StorageService.saveSprints(newSprints);
+    }
+
+    // Sync with Azure DevOps if linked
+    if (finalTask.devopsFeatureId) {
+        const config = StorageService.getDevOpsConfig();
+        if (config.isActive && config.pat && config.organization && config.project) {
+            const estHours = parseDuration(finalTask.estimatedTime || '0h');
+            const actHours = parseDuration(finalTask.actualTime || '0h');
+
+            fetch('/api/devops/update-task', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    organization: config.organization,
+                    project: config.project,
+                    pat: config.pat,
+                    id: finalTask.devopsFeatureId,
+                    title: `${finalTask.id || 'N/A'} - ${finalTask.summary}`,
+                    status: finalTask.status,
+                    estimate: estHours,
+                    completed: actHours,
+                    assignee: finalTask.assignee || undefined
+                })
+            }).then(async (res) => {
+                if (res.ok) {
+                    console.log(`[DevOps Sync] Sincronização automática bem-sucedida para o ID: ${finalTask.devopsFeatureId}`);
+                } else {
+                    const err = await res.text();
+                    console.warn(`[DevOps Sync] Sincronização automática falhou:`, err);
+                }
+            }).catch(err => {
+                console.error(`[DevOps Sync] Erro de rede na sincronização automática:`, err);
+            });
+        }
     }
 
     setEditingTask(null); 
