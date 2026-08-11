@@ -145,3 +145,31 @@ export interface DevOpsConfig {
   isActive: boolean;
 }
 
+export interface BackupConfig {
+  autoBackupEnabled: boolean;
+  backupFolder: string;
+  backupOnDataChange: boolean;
+  dailyBackupEnabled: boolean;
+  maxSnapshotsRetention: number;
+  lastDailyBackupDate?: string;
+  lastBackupTimestamp?: string;
+}
+
+export interface BackupSnapshot {
+  id: string;
+  timestamp: string;
+  dateFormatted: string;
+  triggerReason: string;
+  dataHash: string;
+  stats: {
+    tasksCount: number;
+    robotsCount: number;
+    sprintsCount: number;
+    devsCount: number;
+    workflowPhasesCount: number;
+    documentsCount: number;
+  };
+  sizeKb: number;
+  dataPayload: Record<string, any>;
+}
+

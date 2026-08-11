@@ -1,5 +1,6 @@
 
 import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig } from '../types';
+import { BackupService } from './backupService';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
@@ -28,6 +29,7 @@ export const StorageService = {
   saveTasks: (tasks: Task[]) => {
     try {
       localStorage.setItem(KEYS.TASKS, JSON.stringify(tasks));
+      BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
     } catch (e) {
       console.error("Error saving tasks", e);
     }
@@ -37,6 +39,7 @@ export const StorageService = {
     try {
         localStorage.removeItem(KEYS.TASKS);
         localStorage.removeItem(KEYS.ROBOTS);
+        BackupService.triggerAutoBackup("Reset / Limpeza de Dados");
     } catch (e) {
         console.error("Error clearing tasks", e);
     }
@@ -62,6 +65,7 @@ export const StorageService = {
 
   saveDevs: (devs: Developer[]) => {
     localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
+    BackupService.triggerAutoBackup("Alteração na Equipe de Desenvolvedores");
   },
 
   // --- Robots ---
@@ -76,6 +80,7 @@ export const StorageService = {
 
   saveRobots: (robots: Robot[]) => {
       localStorage.setItem(KEYS.ROBOTS, JSON.stringify(robots));
+      BackupService.triggerAutoBackup("Alteração nos Robôs RPA");
   },
 
   // --- Workflow Config ---
@@ -90,6 +95,7 @@ export const StorageService = {
 
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
       localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
+      BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
   },
 
   // --- Documents Config ---
@@ -104,6 +110,7 @@ export const StorageService = {
 
   saveDocumentsConfig: (config: DocumentConfig[]) => {
       localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(config));
+      BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
   },
 
   // --- Azure DevOps Configuration ---
@@ -118,6 +125,7 @@ export const StorageService = {
 
   saveDevOpsConfig: (config: DevOpsConfig) => {
       localStorage.setItem(KEYS.DEVOPS_CONFIG, JSON.stringify(config));
+      BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
   },
 
   // --- API Key / Power BI ---
@@ -149,6 +157,7 @@ export const StorageService = {
     }
     registry.push(user);
     localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
+    BackupService.triggerAutoBackup("Novo Usuário Cadastrado");
     return true;
   },
 
@@ -182,6 +191,7 @@ export const StorageService = {
       registry[index] = updatedUser;
       localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
     }
+    BackupService.triggerAutoBackup("Atualização de Perfil de Usuário");
   },
 
   // --- Sprints ---
@@ -203,7 +213,9 @@ export const StorageService = {
 
   saveSprints: (sprints: Sprint[]) => {
     localStorage.setItem(KEYS.SPRINTS, JSON.stringify(sprints));
+    BackupService.triggerAutoBackup("Alteração nas Sprints");
   },
+
 
   // --- Backup & Restore ---
   getFullBackup: () => {

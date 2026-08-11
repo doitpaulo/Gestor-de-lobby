@@ -9,6 +9,8 @@ import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
+import { BackupService } from './services/backupService';
+import { BackupManagementSection } from './components/BackupManagementSection';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
 
@@ -4155,39 +4157,89 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
-    const handleExportBackup = () => {
-        const backupData = StorageService.getFullBackup();
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `nexus_backup_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    };
-    const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            try {
-                const backup = JSON.parse(ev.target?.result as string);
-                if (StorageService.restoreBackup(backup)) {
-                    alert('Backup restaurado com sucesso! A página será recarregada.');
-                    window.location.reload();
-                } else {
-                    alert('Erro ao restaurar backup. Verifique o arquivo.');
-                }
-            } catch (err) {
-                alert('Arquivo de backup inválido.');
-            }
-        };
-        reader.readAsText(file);
-    };
-    return (<div className="max-w-3xl mx-auto space-y-6"><h2 className="text-2xl font-bold text-white">Meu Perfil</h2><Card className="space-y-6"><div className="flex flex-col md:flex-row gap-6 items-center md:items-start"><div className="relative group"><div className="w-24 h-24 rounded-full bg-slate-700 border-2 border-indigo-500 overflow-hidden flex items-center justify-center">{avatar ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" /> : <span className="text-2xl font-bold text-indigo-300">{user.name.substring(0,2).toUpperCase()}</span>}</div><label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full cursor-pointer"><IconUpload className="w-6 h-6 text-white" /><input type="file" className="hidden" accept="image/*" onChange={handleFile} /></label></div><div className="flex-1 space-y-4 w-full"><div><label className="block text-xs text-slate-400 mb-1">Nome Completo</label><input value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Email</label><input value={user.email} disabled className="w-full bg-slate-900/50 border border-slate-700 rounded p-2 text-slate-500 cursor-not-allowed" /></div><div><label className="block text-xs text-slate-400 mb-1">Senha</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" placeholder="Nova senha..." /></div></div></div><div className="flex justify-end pt-4 border-t border-slate-700"><Button onClick={handleSave}>Salvar Alterações</Button></div></Card><div className="space-y-4"><h3 className="text-lg font-bold text-indigo-400 mb-2">Integração Azure DevOps</h3><Card className="space-y-6"><p className="text-xs text-slate-400">Configure as credenciais do Azure DevOps para conectar as demandas manualmente ou sincronizar de forma automatizada ao cadastrar novas automações, melhorias e incidentes.</p><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Organização (ex: Bkbrasil)</label><input value={devopsConfig.organization} onChange={e => setDevopsConfig({ ...devopsConfig, organization: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Bkbrasil" /></div><div><label className="block text-xs text-slate-400 mb-1">Projeto (ex: Hyperautomation)</label><input value={devopsConfig.project} onChange={e => setDevopsConfig({ ...devopsConfig, project: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Hyperautomation" /></div><div className="md:col-span-2"><label className="block text-xs text-slate-400 mb-1">Token de Acesso Pessoal (PAT)</label><input type="password" value={devopsConfig.pat} onChange={e => setDevopsConfig({...devopsConfig, pat: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="Insira o seu PAT - CQJSl..." /></div><div className="md:col-span-2 flex items-center gap-2 pt-2"><input type="checkbox" id="devops_active" checked={devopsConfig.isActive} onChange={e => setDevopsConfig({...devopsConfig, isActive: e.target.checked})} className="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4" /><label htmlFor="devops_active" className="text-sm text-slate-200">Sincronização Ativa (Cria recursos automaticamente no Azure DevOps)</label></div></div><div className="flex justify-end pt-4 border-t border-slate-700"><Button onClick={() => { StorageService.saveDevOpsConfig(devopsConfig); alert('Credenciais e preferências do Azure DevOps salvas com sucesso!'); }}>Salvar Configurações DevOps</Button></div></Card></div><div className="space-y-4"><h3 className="text-lg font-bold text-indigo-400 mb-2">Segurança e Backup</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconDownload className="w-4 h-4 text-indigo-400" /> Exportar Backup</p><p className="text-xs text-slate-500 mt-1">Baixa um arquivo JSON com todas as tarefas, robôs, devs e configurações.</p></div><Button variant="secondary" className="mt-4 w-full" onClick={handleExportBackup}>Gerar Backup</Button></div><div className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl flex flex-col justify-between"><div><p className="text-slate-200 font-bold flex items-center gap-2"><IconUpload className="w-4 h-4 text-emerald-400" /> Restaurar Backup</p><p className="text-xs text-slate-500 mt-1">Sobe um arquivo de backup previamente exportado para restaurar os dados.</p></div><div className="relative mt-4"><input type="file" accept=".json" onChange={handleImportBackup} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" /><Button variant="success" className="w-full">Selecionar Arquivo</Button></div></div></div></div><div className="border-t border-slate-800 pt-8"><h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3><div className="bg-rose-900/10 border border-rose-900/30 p-4 rounded-lg flex items-center justify-between"><div><p className="text-slate-300 font-medium">Resetar Dados</p><p className="text-xs text-slate-500">Apaga todas as tarefas e restaura configurações padrão. Irreversível.</p></div><Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta?")) onResetData(); }}>Resetar Tudo</Button></div></div></div>)
-}
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-8 pb-16 animate-fade-in">
+        <h2 className="text-2xl font-bold text-white">Meu Perfil e Configurações</h2>
+        
+        {/* User Details */}
+        <Card className="space-y-6">
+          <div className="flex flex-col md:flex-row gap-6 items-center md:items-start">
+            <div className="relative group">
+              <div className="w-24 h-24 rounded-full bg-slate-700 border-2 border-indigo-500 overflow-hidden flex items-center justify-center shadow-lg">
+                {avatar ? <img src={avatar} alt="Avatar" className="w-full h-full object-cover" /> : <span className="text-2xl font-bold text-indigo-300">{user.name.substring(0,2).toUpperCase()}</span>}
+              </div>
+              <label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full cursor-pointer">
+                <IconUpload className="w-6 h-6 text-white" />
+                <input type="file" className="hidden" accept="image/*" onChange={handleFile} />
+              </label>
+            </div>
+            <div className="flex-1 space-y-4 w-full">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Nome Completo</label>
+                <input value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Email Corporativo</label>
+                <input value={user.email} disabled className="w-full bg-slate-900/50 border border-slate-700 rounded-lg p-2.5 text-slate-500 cursor-not-allowed text-sm font-mono" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Senha</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 text-sm" placeholder="Nova senha..." />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end pt-4 border-t border-slate-700">
+            <Button onClick={handleSave}>Salvar Alterações</Button>
+          </div>
+        </Card>
+
+        {/* Azure DevOps Configuration */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold text-indigo-400 mb-2">Integração Azure DevOps</h3>
+          <Card className="space-y-6">
+            <p className="text-xs text-slate-400">Configure as credenciais do Azure DevOps para conectar as demandas manualmente ou sincronizar de forma automatizada ao cadastrar novas automações, melhorias e incidentes.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Organização (ex: Bkbrasil)</label>
+                <input value={devopsConfig.organization} onChange={e => setDevopsConfig({ ...devopsConfig, organization: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Bkbrasil" />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Projeto (ex: Hyperautomation)</label>
+                <input value={devopsConfig.project} onChange={e => setDevopsConfig({ ...devopsConfig, project: e.target.value })} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-sm" placeholder="Hyperautomation" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Token de Acesso Pessoal (PAT)</label>
+                <input type="password" value={devopsConfig.pat} onChange={e => setDevopsConfig({...devopsConfig, pat: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="Insira o seu PAT - CQJSl..." />
+              </div>
+              <div className="md:col-span-2 flex items-center gap-2 pt-2">
+                <input type="checkbox" id="devops_active" checked={devopsConfig.isActive} onChange={e => setDevopsConfig({...devopsConfig, isActive: e.target.checked})} className="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" />
+                <label htmlFor="devops_active" className="text-sm text-slate-200 cursor-pointer">Sincronização Ativa (Cria recursos automaticamente no Azure DevOps)</label>
+              </div>
+            </div>
+            <div className="flex justify-end pt-4 border-t border-slate-700">
+              <Button onClick={() => { StorageService.saveDevOpsConfig(devopsConfig); alert('Credenciais e preferências do Azure DevOps salvas com sucesso!'); }}>Salvar Configurações DevOps</Button>
+            </div>
+          </Card>
+        </div>
+
+        {/* System Auto-Backup & Restore Management */}
+        <BackupManagementSection />
+
+        {/* Danger Zone */}
+        <div className="border-t border-slate-800 pt-8">
+          <h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3>
+          <div className="bg-rose-900/10 border border-rose-900/30 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-slate-200 font-bold text-sm">Resetar Dados e Configurações</p>
+              <p className="text-xs text-slate-400 mt-0.5">Apaga todas as tarefas e restaura as configurações de fábrica. Um backup preventivo será registrado automaticamente antes de resetar.</p>
+            </div>
+            <Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta de que deseja apagar todas as demandas? Um backup de segurança será gravado antes da exclusão.")) onResetData(); }}>Resetar Tudo</Button>
+          </div>
+        </div>
+      </div>
+    );
+};
 
 const Layout = ({ children, user, onLogout, headerContent }: any) => {
   const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
@@ -4827,6 +4879,9 @@ export default function App() {
 
 
   useEffect(() => {
+    // Run daily backup check
+    BackupService.checkAndRunDailyBackup();
+
     if (tasks.length > 0) {
         let currentSprints = [...sprints];
         let anySprintChanged = false;
