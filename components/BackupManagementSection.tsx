@@ -80,10 +80,14 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
           BackupService.setDirHandleInMemory(dirHandle);
           setSelectedFolderHandleName(dirHandle.name);
           handleSaveConfig({ backupFolder: dirHandle.name });
-          showNotification(`✔ Pasta de backup vinculada com sucesso: ${dirHandle.name}`);
+          
+          // Trigger automatic initial backup right after setting folder
+          const autoSnap = BackupService.createSnapshot(`Backup Automático (Pasta Vinculada: ${dirHandle.name})`, true);
+          refreshData();
+          showNotification(`✔ Pasta vinculada e backup automático gerado com sucesso: ${dirHandle.name}`);
         }
       } else {
-        alert("Seu navegador não possui a API de Seleção de Pasta Nativa, mas você pode definir o nome da pasta de destino abaixo.");
+        alert("Seu navegador não possui a API de Seleção de Pasta Nativa em iFrames. Você pode definir o nome da pasta de destino no campo de configurações abaixo.");
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -95,6 +99,9 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
   const handleUpdateFolderPathName = () => {
     if (!folderPathInput.trim()) return;
     handleSaveConfig({ backupFolder: folderPathInput.trim() });
+    BackupService.createSnapshot(`Backup Automático (Pasta Destino Configurada)`, true);
+    refreshData();
+    showNotification("✔ Pasta de destino configurada e backup automático gerado!");
   };
 
   const handleExecuteRestore = (snapshot: BackupSnapshot) => {
@@ -145,16 +152,16 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
       )}
 
       {/* Main Header & Auto Backup Status Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-700/80 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-6 relative z-10">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-indigo-600/20 rounded-xl border border-indigo-500/30 text-indigo-400">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-700/80 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
+        <div className="space-y-5 relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="p-2.5 bg-indigo-600/20 rounded-xl border border-indigo-500/30 text-indigo-400 flex-shrink-0">
                 <IconShieldCheck className="w-6 h-6" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xl font-bold text-white">Central de Backup Automático & Restauração</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg sm:text-xl font-bold text-white">Central de Backup Automático & Restauração</h3>
                   {config.autoBackupEnabled ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-500/30">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -172,39 +179,44 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
               </div>
             </div>
 
-            <div className="pt-2 flex flex-wrap items-center gap-4 text-xs text-slate-300">
-              <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                <IconClock className="w-4 h-4 text-indigo-400" />
-                <span>Último Backup: <strong className="text-white font-mono">{config.lastBackupTimestamp ? new Date(config.lastBackupTimestamp).toLocaleString('pt-BR') : 'Sem registro'}</strong></span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <button
+                onClick={handleCreateManualBackup}
+                disabled={isCreatingBackup}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-1.5 whitespace-nowrap"
+              >
+                <IconPlus className="w-4 h-4" />
+                {isCreatingBackup ? "Gerando..." : "Gerar Backup Agora"}
+              </button>
+              <button
+                onClick={handleSelectLocalFolder}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
+                title="Vincular pasta do computador para salvar backups automaticamente"
+              >
                 <IconFolder className="w-4 h-4 text-emerald-400" />
-                <span>Pasta Destino: <strong className="text-emerald-300 font-mono">{selectedFolderHandleName || config.backupFolder}</strong></span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                <IconShieldCheck className="w-4 h-4 text-sky-400" />
-                <span>Pontos de Restauração: <strong className="text-sky-300 font-mono">{snapshots.length} salvos</strong></span>
-              </div>
+                Selecionar Pasta Destino
+              </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap sm:flex-nowrap gap-3">
-            <button
-              onClick={handleCreateManualBackup}
-              disabled={isCreatingBackup}
-              className="flex-1 sm:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
-            >
-              <IconPlus className="w-4 h-4" />
-              {isCreatingBackup ? "Gerando Backup..." : "Gerar Backup Agora"}
-            </button>
-            <button
-              onClick={handleSelectLocalFolder}
-              className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2"
-              title="Vincular pasta do computador para salvar backups automaticamente"
-            >
-              <IconFolder className="w-4 h-4 text-emerald-400" />
-              Selecionar Pasta Destino
-            </button>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+            <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/80">
+              <IconClock className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              <span>Último Backup: <strong className="text-white font-mono">{config.lastBackupTimestamp ? new Date(config.lastBackupTimestamp).toLocaleString('pt-BR') : 'Sem registro'}</strong></span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/80 max-w-full overflow-hidden" title={selectedFolderHandleName || config.backupFolder}>
+              <IconFolder className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+              <span className="flex items-center gap-1 truncate">
+                Pasta Destino: 
+                <strong className="text-emerald-300 font-mono truncate max-w-[180px] sm:max-w-[280px] inline-block align-bottom">
+                  {selectedFolderHandleName || config.backupFolder}
+                </strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/80">
+              <IconShieldCheck className="w-4 h-4 text-sky-400 flex-shrink-0" />
+              <span>Pontos de Restauração: <strong className="text-sky-300 font-mono">{snapshots.length} salvos</strong></span>
+            </div>
           </div>
         </div>
       </div>
