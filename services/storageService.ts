@@ -1,5 +1,5 @@
 
-import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig } from '../types';
+import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig, normalizeStatus, normalizeTaskType } from '../types';
 import { BackupService } from './backupService';
 
 const KEYS = {
@@ -19,7 +19,30 @@ export const StorageService = {
   getTasks: (): Task[] => {
     try {
       const data = localStorage.getItem(KEYS.TASKS);
-      return data ? JSON.parse(data) : [];
+      if (!data) return [];
+      const parsed: any[] = JSON.parse(data);
+      if (!Array.isArray(parsed)) return [];
+
+      let hasChanges = false;
+      const tasks: Task[] = parsed.map(t => {
+        const normStatus = normalizeStatus(t.status);
+        const normType = normalizeTaskType(t.type);
+        if (normStatus !== t.status || normType !== t.type) {
+          hasChanges = true;
+        }
+        return {
+          ...t,
+          status: normStatus,
+          type: normType
+        };
+      });
+
+      // Self-heal corrupted or misnamed statuses/types in storage
+      if (hasChanges) {
+        localStorage.setItem(KEYS.TASKS, JSON.stringify(tasks));
+      }
+
+      return tasks;
     } catch (e) {
       console.error("Error loading tasks", e);
       return [];
@@ -28,7 +51,12 @@ export const StorageService = {
 
   saveTasks: (tasks: Task[]) => {
     try {
-      localStorage.setItem(KEYS.TASKS, JSON.stringify(tasks));
+      const sanitized = tasks.map(t => ({
+        ...t,
+        status: normalizeStatus(t.status),
+        type: normalizeTaskType(t.type)
+      }));
+      localStorage.setItem(KEYS.TASKS, JSON.stringify(sanitized));
       BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
     } catch (e) {
       console.error("Error saving tasks", e);
@@ -260,8 +288,8 @@ export const StorageService = {
         const mergedTask: Task = {
           ...existing,
           summary: newTask.summary,
-          type: newTask.type,
-          status: newTask.status, 
+          type: normalizeTaskType(newTask.type || existing.type),
+          status: normalizeStatus(newTask.status || existing.status), 
           subcategory: newTask.subcategory,
           category: newTask.category || existing.category,
           priority: newTask.priority,
@@ -286,7 +314,11 @@ export const StorageService = {
 
         taskMap.set(newTask.id, mergedTask);
       } else {
-        taskMap.set(newTask.id, newTask);
+        taskMap.set(newTask.id, {
+          ...newTask,
+          status: normalizeStatus(newTask.status),
+          type: normalizeTaskType(newTask.type)
+        });
       }
     });
 

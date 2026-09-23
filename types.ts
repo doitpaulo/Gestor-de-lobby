@@ -173,3 +173,56 @@ export interface BackupSnapshot {
   dataPayload: Record<string, any>;
 }
 
+// Helper utilities for status and task type normalization
+export const isCompletedStatus = (status?: string | null): boolean => {
+  if (!status) return false;
+  const s = status.trim().toLowerCase();
+  return (
+    s === 'concluído' ||
+    s === 'concluido' ||
+    s === 'conclído' ||
+    s === 'resolvido' ||
+    s === 'resolvida' ||
+    s === 'fechado' ||
+    s === 'fechada' ||
+    s === 'cancelado' ||
+    s === 'cancelada' ||
+    s === 'encerrado' ||
+    s === 'encerrada' ||
+    s === 'finalizado' ||
+    s === 'finalizada' ||
+    s === 'closed' ||
+    s === 'resolved' ||
+    s === 'completed' ||
+    s === 'cancelled' ||
+    s === 'canceled' ||
+    s === 'done'
+  );
+};
+
+export const normalizeStatus = (status?: string | null): string => {
+  if (!status) return 'Novo';
+  const s = status.trim();
+  const lower = s.toLowerCase();
+  if (lower === 'conclído' || lower === 'concluido' || lower === 'concluído' || lower === 'completed' || lower === 'done') return 'Concluído';
+  if (lower === 'fechado' || lower === 'fechada' || lower === 'closed' || lower === 'encerrado' || lower === 'encerrada' || lower === 'finalizado' || lower === 'finalizada') return 'Fechado';
+  if (lower === 'resolvido' || lower === 'resolvida' || lower === 'resolved') return 'Resolvido';
+  if (lower === 'cancelado' || lower === 'cancelada' || lower === 'cancelled' || lower === 'canceled') return 'Cancelado';
+  if (lower === 'em progresso' || lower === 'em andamento' || lower === 'in progress') return 'Em Progresso';
+  if (lower === 'em atendimento') return 'Em Atendimento';
+  if (lower === 'aguardando' || lower === 'waiting' || lower === 'on hold') return 'Aguardando';
+  if (lower === 'pendente' || lower === 'pending') return 'Pendente';
+  if (lower === 'backlog') return 'Backlog';
+  if (lower === 'novo' || lower === 'new') return 'Novo';
+  return s;
+};
+
+export const normalizeTaskType = (type?: string | null): TaskType => {
+  if (!type) return 'Incidente';
+  const s = type.trim().toLowerCase();
+  if (s === 'nova automação' || s.includes('auto') || s.includes('rpa') || s.includes('bot')) return 'Nova Automação';
+  if (s === 'melhoria' || s.includes('melhoria') || s.includes('feature') || s.includes('enhancement')) return 'Melhoria';
+  if (s === 'incidente' || s.includes('incid') || s.includes('bug') || s.includes('defeito') || s.includes('erro')) return 'Incidente';
+  return 'Nova Automação';
+};
+

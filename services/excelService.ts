@@ -1,7 +1,7 @@
 
 
 import * as XLSX from 'xlsx';
-import { Task, TaskType, Priority, Robot } from '../types';
+import { Task, TaskType, Priority, Robot, normalizeStatus, normalizeTaskType } from '../types';
 
 export const ExcelService = {
   parseFile: async (file: File, defaultType?: TaskType): Promise<Task[]> => {
@@ -67,30 +67,45 @@ const mapRowToTask = (row: any, defaultType?: TaskType): Task => {
   // Helper to find key case-insensitive
   const findKey = (obj: any, keys: string[]) => {
       for (let k of keys) {
-          if (obj[k] !== undefined) return obj[k];
-          // Try uppercase match
-          const found = Object.keys(obj).find(ok => ok.toLowerCase() === k.toLowerCase());
-          if (found) return obj[found];
+          if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') return obj[k];
+          const found = Object.keys(obj).find(ok => ok.trim().toLowerCase() === k.trim().toLowerCase());
+          if (found && obj[found] !== undefined && obj[found] !== null && String(obj[found]).trim() !== '') return obj[found];
       }
       return null;
   }
 
   const id = findKey(row, ['Número', 'Numero', 'ID', 'Number']) || `TASK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-  const summary = findKey(row, ['Descrição resumida', 'Resumo', 'Summary', 'Short Description']) || 'Sem descrição';
-  const statusRaw = findKey(row, ['Estado', 'State', 'Status']) || 'Novo';
-  const assigneeRaw = findKey(row, ['Atribuído a', 'Atribuido a', 'Assigned to', 'Responsável']) || null;
-  const createdRaw = findKey(row, ['Criação de', 'Criação em', 'Created', 'Opened']) || new Date().toISOString();
+  const summary = findKey(row, ['Descrição resumida', 'Resumo', 'Summary', 'Short Description', 'Título', 'Titulo']) || 'Sem descrição';
+  const statusRaw = findKey(row, ['Estado', 'State', 'Status', 'Situação', 'Situacao']) || 'Novo';
+  const assigneeRaw = findKey(row, ['Atribuído a', 'Atribuido a', 'Assigned to', 'Responsável', 'Responsavel']) || null;
+  const createdRaw = findKey(row, ['Criação de', 'Criação em', 'Criado em', 'Created', 'Opened']) || new Date().toISOString();
   const subcategory = findKey(row, ['Subcategoria', 'Subcategory']) || '';
   
   const requester = findKey(row, ['Criado por', 'Solicitante', 'Requester', 'Caller']) || 'Sistema'; 
   const rawPriority = findKey(row, ['Prioridade', 'Priority']) || '4 - Baixa';
 
-  // Determine Type
-  let type: TaskType = defaultType || 'Incidente';
-  if (!defaultType) {
-      const textToScan = JSON.stringify(row).toLowerCase();
+  // Determine Type:
+  // 1. First, check if the Excel row explicitly defines the demand type
+  const rawTypeCol = findKey(row, ['Tipo', 'Type', 'Tipo de Demanda', 'Tipo de Tarefa', 'Task Type', 'Classificação', 'Classification']);
+  let explicitType: TaskType | null = null;
+  if (rawTypeCol) {
+    const et = String(rawTypeCol).toLowerCase().trim();
+    if (et.includes('melhoria') || et.includes('enhancement') || et.includes('feature')) explicitType = 'Melhoria';
+    else if (et.includes('auto') || et.includes('rpa') || et.includes('bot')) explicitType = 'Nova Automação';
+    else if (et.includes('incid') || et.includes('bug') || et.includes('defeito') || et.includes('erro')) explicitType = 'Incidente';
+  }
+
+  let type: TaskType = explicitType || defaultType || 'Incidente';
+  if (!explicitType && !defaultType) {
+    const idLower = String(id).toLowerCase().trim();
+    if (idLower.startsWith('inc')) {
+      type = 'Incidente';
+    } else {
+      const textToScan = `${summary} ${subcategory} ${row['Categoria'] || ''}`.toLowerCase();
       if (textToScan.includes('melhoria')) type = 'Melhoria';
-      else if (textToScan.includes('automação') || textToScan.includes('rpa')) type = 'Nova Automação';
+      else if (textToScan.includes('automação') || textToScan.includes('automacao') || textToScan.includes('rpa')) type = 'Nova Automação';
+      else type = idLower.startsWith('ritm') ? 'Nova Automação' : 'Incidente';
+    }
   }
 
   // Normalize Priority
@@ -101,17 +116,18 @@ const mapRowToTask = (row: any, defaultType?: TaskType): Task => {
   else if (pLower.includes('3') || pLower.includes('moderada')) priority = '3 - Moderada';
   else if (pLower.includes('4') || pLower.includes('baixa')) priority = '4 - Baixa';
 
-  let status = String(statusRaw).trim();
+  // Normalize Status
+  let status = normalizeStatus(String(statusRaw));
   
   // Clean Assignee
   let assignee = assigneeRaw && String(assigneeRaw).trim().length > 0 ? String(assigneeRaw).trim() : null;
-  if (assignee === 'N/A' || assignee === '-') assignee = null;
+  if (assignee === 'N/A' || assignee === '-' || assignee === 'None' || assignee === 'null') assignee = null;
 
   return {
-    id: String(id),
-    type,
-    summary: String(summary),
-    requester: String(requester),
+    id: String(id).trim(),
+    type: normalizeTaskType(type),
+    summary: String(summary).trim(),
+    requester: String(requester).trim(),
     assignee: assignee,
     priority,
     status,

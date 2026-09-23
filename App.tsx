@@ -11,13 +11,13 @@ import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
 import { BackupManagementSection } from './components/BackupManagementSection';
-import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig } from './types';
+import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, normalizeStatus, normalizeTaskType } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
 const PRIORITIES = ['1 - Crítica', '2 - Alta', '3 - Moderada', '4 - Baixa'];
-const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog'];
+const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog', 'Cancelado'];
 
 const DEFAULT_DOCS: DocumentConfig[] = [
     { id: 'doc1', label: 'Planilha BC', active: true },
@@ -1607,11 +1607,11 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
             const currentWorkload = getDevWorkload(targetDev, tasks, task.id);
             if (currentWorkload > 40) { if(!window.confirm(`ALERTA: ${targetDev} já tem ${formatDuration(currentWorkload)} de carga. Deseja atribuir mesmo assim?`)) { return; } }
             if (task.assignee !== targetDev) { historyAction = `Atribuiu para ${targetDev}`; task.assignee = targetDev; }
-            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
+            if (isCompletedStatus(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
             else if (task.status === 'Novo' || task.status === 'Backlog') { task.status = 'Em Atendimento'; }
         }
         else if (colType === 'completed') {
-            if (!['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Concluído'; historyAction = `Concluiu tarefa`; }
+            if (!isCompletedStatus(task.status)) { task.status = 'Concluído'; historyAction = `Concluiu tarefa`; }
         }
     } else {
         if (targetStatus && task.status !== targetStatus) {
@@ -1631,7 +1631,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     // Filter tasks that belong to the SAME column after state update
     const columnTasks = updatedTasks.filter(t => {
         if (kanbanMode === 'assignee') {
-            const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+            const isCompleted = isCompletedStatus(t.status);
             if (colType === 'completed') return isCompleted;
             if (isCompleted) return false;
             if (colType === 'unassigned') return !t.assignee;
@@ -1702,7 +1702,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   const getTasksForColumn = (col: any) => {
       return filteredTasks.filter(t => {
           if (kanbanMode === 'assignee') {
-            const isCompleted = ['Concluído', 'Resolvido', 'Fechado'].includes(t.status);
+            const isCompleted = isCompletedStatus(t.status);
             if (col.type === 'completed') return isCompleted;
             if (isCompleted) return false;
             if (col.type === 'unassigned') return !t.assignee;
@@ -1732,7 +1732,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
           const today = new Date();
       const diffTime = endDate.getTime() - today.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status);
+      const isDone = isCompletedStatus(task.status);
       let statusColor = "bg-slate-800/50 text-slate-400 border-slate-700";
       let label = "No Prazo";
       if (isDone) {
@@ -1874,6 +1874,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
               if (action === 'delete') return null;
               let updatedTask = { ...t }; let actionName = '';
               if (action === 'status') { updatedTask.status = payload; actionName = `Alterou Status (Em massa) para ${payload}`; }
+              if (action === 'type') { updatedTask.type = payload as TaskType; actionName = `Alterou Tipo (Em massa) para ${payload}`; }
               if (action === 'priority') { updatedTask.priority = payload; actionName = `Alterou Prioridade (Em massa) para ${payload}`; }
               if (action === 'assign') { updatedTask.assignee = payload; actionName = `Atribuiu (Em massa) para ${payload}`; }
               if (actionName) { const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: actionName }; updatedTask.history = [...(t.history || []), entry]; }
@@ -1883,27 +1884,86 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       }).filter(Boolean) as Task[];
       setTasks(updated); StorageService.saveTasks(updated); setSelected(new Set());
   };
+
+  const handleDirectTypeChange = (taskId: string, newType: TaskType) => {
+      const updated = tasks.map(t => {
+          if (t.id === taskId) {
+              const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: `Alterou Tipo para ${newType}` };
+              return { ...t, type: newType, history: [...(t.history || []), entry] };
+          }
+          return t;
+      });
+      setTasks(updated);
+      StorageService.saveTasks(updated);
+  };
+
+  const handleDirectStatusChange = (taskId: string, newStatus: string) => {
+      const updated = tasks.map(t => {
+          if (t.id === taskId) {
+              const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: `Alterou Status para ${newStatus}` };
+              return { ...t, status: newStatus, history: [...(t.history || []), entry] };
+          }
+          return t;
+      });
+      setTasks(updated);
+      StorageService.saveTasks(updated);
+  };
+
   const exportToExcel = () => { const ws = XLSX.utils.json_to_sheet(filtered); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Demandas"); XLSX.writeFile(wb, "Nexus_Demandas.xlsx"); };
+
+  const completedCount = filtered.filter(t => isCompletedStatus(t.status)).length;
+  const autoActiveCount = filtered.filter(t => t.type === 'Nova Automação' && !isCompletedStatus(t.status)).length;
+  const featActiveCount = filtered.filter(t => t.type === 'Melhoria' && !isCompletedStatus(t.status)).length;
+  const incActiveCount = filtered.filter(t => t.type === 'Incidente' && !isCompletedStatus(t.status)).length;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
       <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+      
+      {/* Visual Counters matching Dashboard */}
+      <div className="flex flex-wrap items-center gap-2 bg-slate-800/60 p-2.5 px-4 rounded-xl border border-slate-700/70 text-xs">
+        <span className="text-slate-400 font-medium">Filtradas: <strong className="text-white font-bold">{filtered.length}</strong></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-indigo-300 font-medium">Automações Ativas: <strong className="text-white bg-indigo-900/60 border border-indigo-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{autoActiveCount}</strong></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-emerald-300 font-medium">Melhorias Ativas: <strong className="text-white bg-emerald-900/60 border border-emerald-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{featActiveCount}</strong></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-rose-300 font-medium">Incidentes Ativos: <strong className="text-white bg-rose-900/60 border border-rose-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{incActiveCount}</strong></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-slate-400 font-medium">Concluídos: <strong className="text-slate-200 bg-slate-900/80 border border-slate-700 px-2 py-0.5 rounded-full ml-1 font-bold">{completedCount}</strong></span>
+      </div>
+
       <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
-        <div className="flex gap-2 items-center w-full">
+        <div className="flex flex-wrap gap-2 items-center w-full">
              {selected.size > 0 ? (
                  <>
-                    <span className="text-sm text-slate-300 mr-2">{selected.size} selecionados</span>
-                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('status', e.target.value)}>
+                    <span className="text-sm font-semibold text-indigo-300 mr-2 bg-indigo-950/70 px-2.5 py-1 rounded border border-indigo-500/40">{selected.size} selecionados</span>
+                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}>
+                        <option value="">Mudar Tipo</option>
+                        <option value="Nova Automação">Nova Automação</option>
+                        <option value="Melhoria">Melhoria</option>
+                        <option value="Incidente">Incidente</option>
+                    </select>
+                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}>
                         <option value="">Mudar Status</option>
                         <option value="Novo">Novo</option>
                         <option value="Backlog">Backlog</option>
+                        <option value="Pendente">Pendente</option>
                         <option value="Em Atendimento">Em Atendimento</option>
+                        <option value="Em Progresso">Em Progresso</option>
+                        <option value="Aguardando">Aguardando</option>
                         <option value="Resolvido">Resolvido</option>
+                        <option value="Concluído">Concluído</option>
+                        <option value="Fechado">Fechado</option>
+                        <option value="Cancelado">Cancelado</option>
                     </select>
-                    <select className="bg-slate-700 text-xs rounded px-2 py-2 outline-none" onChange={(e) => handleBulkAction('assign', e.target.value)}><option value="">Atribuir Dev</option>{devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select>
+                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}>
+                        <option value="">Atribuir Dev</option>
+                        {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                    </select>
                     <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-2 px-3">Excluir</Button>
                  </>
-             ) : <div className="text-sm text-slate-500">Selecione itens para ações em massa</div>}
+             ) : <div className="text-sm text-slate-500">Selecione itens para ações em massa (Mudar Tipo, Status ou Dev)</div>}
              <div className="flex-1"></div>
              <Button onClick={exportToExcel} variant="success" className="text-sm py-2"><IconDownload /> Excel</Button>
         </div>
@@ -1911,16 +1971,53 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden flex-1">
         <div className="overflow-auto h-full">
             <table className="w-full text-left text-sm">
-            <thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md"><tr><th className="p-4 w-10 bg-slate-900"><input type="checkbox" onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th><th className="p-4 bg-slate-900">ID</th><th className="p-4 bg-slate-900">Tipo</th><th className="p-4 w-1/3 bg-slate-900">Título</th><th className="p-4 bg-slate-900">Prioridade</th><th className="p-4 bg-slate-900">Status</th><th className="p-4 bg-slate-900">Atribuído</th><th className="p-4 text-right bg-slate-900">Ações</th></tr></thead>
+            <thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md">
+              <tr>
+                <th className="p-4 w-10 bg-slate-900"><input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
+                <th className="p-4 bg-slate-900">ID</th>
+                <th className="p-4 bg-slate-900 min-w-[150px]">Tipo</th>
+                <th className="p-4 w-1/3 bg-slate-900">Título</th>
+                <th className="p-4 bg-slate-900">Prioridade</th>
+                <th className="p-4 bg-slate-900 min-w-[140px]">Status</th>
+                <th className="p-4 bg-slate-900">Atribuído</th>
+                <th className="p-4 text-right bg-slate-900">Ações</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-slate-700">
                 {filtered.map(task => (
                 <tr key={task.id} className="hover:bg-slate-700/30 transition-colors group">
                     <td className="p-4"><input type="checkbox" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
-                    <td className="p-4 font-mono text-slate-500 group-hover:text-slate-300">{task.id}</td>
-                    <td className="p-4"><Badge type={task.type} /></td>
+                    <td className="p-4 font-mono text-slate-500 group-hover:text-slate-300 font-medium">{task.id}</td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-1.5">
+                        <Badge type={task.type} />
+                        <select 
+                          className="bg-transparent text-[11px] text-slate-500 hover:text-slate-300 opacity-40 hover:opacity-100 cursor-pointer border border-transparent hover:border-slate-700 rounded px-1 py-0.5 transition-all outline-none"
+                          value={task.type}
+                          title="Alterar tipo da demanda"
+                          onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
+                        >
+                          <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
+                          <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
+                          <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                        </select>
+                      </div>
+                    </td>
                     <td className="p-4 font-medium text-slate-200">{task.summary}</td>
                     <td className="p-4"><Badge type={task.priority} /></td>
-                    <td className="p-4 text-slate-300">{task.status}</td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs ${isCompletedStatus(task.status) ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{task.status}</span>
+                        <select 
+                          className="bg-transparent text-[11px] text-slate-500 hover:text-slate-300 opacity-40 hover:opacity-100 cursor-pointer border border-transparent hover:border-slate-700 rounded px-1 py-0.5 transition-all outline-none"
+                          value={task.status}
+                          title="Alterar status da demanda"
+                          onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
+                        >
+                          {STATUSES.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
+                        </select>
+                      </div>
+                    </td>
                     <td className="p-4 text-slate-400">{task.assignee || '-'}</td>
                     <td className="p-4 text-right"><button onClick={() => onEditTask(task)} className="text-indigo-400 hover:text-indigo-300 text-xs font-medium px-2 py-1 rounded border border-indigo-900/50 hover:bg-indigo-900/20">Editar</button></td>
                 </tr>
@@ -2324,7 +2421,7 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
             // Get non-completed tasks assigned to dev
             const activeProjects = filteredProjects.filter(p => 
                 p && p.assignee === dev.name && 
-                !['Concluído', 'Resolvido', 'Fechado'].includes(p.status)
+                !isCompletedStatus(p.status)
             );
 
             const usedFte = activeProjects.reduce((acc, p) => acc + getNumericFte(p.fteValue), 0);
@@ -3461,7 +3558,7 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
             XLSX.utils.book_append_sheet(wb, ws, "Base Geral");
         }
         if (selectedModules.has('backlog')) {
-            const backlog = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado', 'Cancelado'].includes(t.status));
+            const backlog = tasks.filter(t => !isCompletedStatus(t.status));
             const data = backlog.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Status': t.status, 'Prioridade': t.priority, 'Responsável': t.assignee || 'Não Atribuído' }));
             const ws = XLSX.utils.json_to_sheet(data);
             XLSX.utils.book_append_sheet(wb, ws, "Backlog");
@@ -3473,7 +3570,7 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
         }
         if (selectedModules.has('capacity_table')) {
             const capacityData = devs.map(dev => {
-                const myTasks = tasks.filter(t => t.assignee === dev.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+                const myTasks = tasks.filter(t => t.assignee === dev.name && !isCompletedStatus(t.status));
                 const totalHours = myTasks.reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
                 return { 'Desenvolvedor': dev.name, 'Demandas Ativas': myTasks.length, 'Carga Estimada (h)': totalHours.toFixed(1), 'Dias Úteis Est.': Math.ceil(totalHours / 8) };
             });
@@ -3495,7 +3592,7 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
         slide.addText("Relatório de Performance Nexus", { x: 1, y: 3, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true });
         slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 1, y: 4, fontSize: 18, color: '94a3b8' });
 
-        const activeTasks = tasks.filter(t => !['Concluído', 'Resolvido', 'Fechado'].includes(t.status));
+        const activeTasks = tasks.filter(t => !isCompletedStatus(t.status));
 
         if (selectedModules.has('exec_summary')) {
             slide = pres.addSlide();
@@ -3535,7 +3632,7 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
             slide.background = { color: "0f172a" };
             slide.addText("Capacidade da Equipe (Backlog Ativo)", { x: 0.5, y: 0.5, fontSize: 22, color: 'FFFFFF' });
             const capData = devs.map(d => {
-                const h = tasks.filter(t => t.assignee === d.name && !['Concluído', 'Resolvido', 'Fechado'].includes(t.status)).reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
+                const h = tasks.filter(t => t.assignee === d.name && !isCompletedStatus(t.status)).reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
                 return [d.name, formatDuration(h), `${Math.ceil(h / 8)}d`];
             });
             slide.addTable([['Dev', 'Horas', 'Dias Est.'], ...capData] as any, { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', fill: { color: '1e293b' }, fontSize: 12, border: { type: 'solid', color: '334155', pt: 0.5 } });
@@ -3951,7 +4048,7 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
     const getProgress = (task: Task) => calculateTaskProgress(task, workflowConfig);
     
     const handleExportExcel = () => { const exportData = filteredTasks.map((t:Task) => { const row: any = { 'ID': t.id, 'Projeto': t.summary, 'Tipo': t.type, 'Desenvolvedor': t.assignee || 'Não Atribuído', 'Status Global': t.status }; const progress = getProgress(t); let currentTaskPhaseIndex = workflowConfig.findIndex((w:any) => w.id === (t.projectData?.currentPhaseId || '1')); if (currentTaskPhaseIndex === -1) currentTaskPhaseIndex = 0; workflowConfig.forEach((phase:any, idx:number) => { const isActive = (t.projectData?.currentPhaseId || '1') === phase.id; const isPast = idx < currentTaskPhaseIndex; const isDone = progress === 100; let val = ''; if (isActive) val = t.projectData?.phaseStatus || 'Não Iniciado'; else if (isPast || isDone) val = 'Concluído'; else val = 'Não Iniciado'; row[phase.name] = val; }); row['% Conclusão'] = `${progress}%`; return row; }); const ws = XLSX.utils.json_to_sheet(exportData); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Fluxo de Projetos"); XLSX.writeFile(wb, "Nexus_FluxoProjetos.xlsx"); };
-    return (<div className="h-full flex flex-col space-y-4"><div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700"><div><h2 className="text-xl font-bold text-white">Fluxo de Projetos</h2><p className="text-sm text-slate-400">Acompanhamento detalhado das fases de Melhorias e Automações</p></div><div className="flex gap-2"><Button onClick={handleExportExcel} variant="success"><IconDownload className="w-4 h-4" /> Excel</Button><Button variant="secondary" onClick={() => setIsConfigOpen(true)}><IconPlus className="w-4 h-4" /> Configurar Fases</Button></div></div><FilterBar filters={filters} setFilters={setFilters} devs={devs} /><div className="flex-1 overflow-auto bg-slate-900/50 rounded-xl border border-slate-700 p-4 custom-scrollbar"><table className="w-full text-left text-sm border-separate border-spacing-y-2"><thead><tr className="text-slate-400 font-medium text-xs uppercase tracking-wider"><th className="pb-2 pl-2">Projeto</th>{workflowConfig.map((phase:any) => <th key={phase.id} className="pb-2 px-2 text-center min-w-[140px]">{phase.name}</th>)}<th className="pb-2 text-center">% Conclusão</th></tr></thead><tbody>{filteredTasks.map((task:Task) => { let currentPhaseIndex = workflowConfig.findIndex((w:any) => w.id === (task.projectData?.currentPhaseId || '1')); if (currentPhaseIndex === -1) currentPhaseIndex = 0; const progress = getProgress(task); const isGlobalDone = ['Concluído', 'Resolvido', 'Fechado'].includes(task.status); return (<tr key={task.id} className="bg-slate-800 hover:bg-slate-700/50 transition-colors group"><td className="p-3 rounded-l-lg border-l-4 border-l-indigo-500 cursor-pointer" onClick={() => onEditTask(task)}><div className="flex flex-col gap-1"><div className="flex items-center gap-2"><span className="font-mono text-xs text-slate-500">{task.id}</span><Badge type={task.type} /></div><span className="font-medium text-white truncate max-w-[200px]" title={task.summary}>{task.summary}</span><span className="text-xs text-slate-400">{task.assignee || 'Sem Dev'}</span></div></td>{workflowConfig.map((phase:any, idx:number) => { const isCurrentPhase = (task.projectData?.currentPhaseId || '1') === phase.id || (task.projectData?.currentPhaseId === undefined && idx === 0); const isActive = isCurrentPhase && !isGlobalDone; const isPast = idx < currentPhaseIndex || isGlobalDone; const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não iniciado'; let bgClass = "bg-slate-900/50 border-slate-700"; let textClass = "text-slate-500"; if (isPast) { bgClass = "bg-emerald-900/20 border-emerald-500/30"; textClass = "text-emerald-500"; } else if (isActive) { bgClass = "bg-indigo-900/20 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)]"; textClass = "text-indigo-400 font-bold"; } let statusColor = "text-slate-400"; const statusLower = phaseStatus.toLowerCase(); if (statusLower.includes('concluído') || statusLower.includes('concluido')) statusColor = "text-emerald-400"; else if (statusLower.includes('andamento') || statusLower.includes('progresso')) statusColor = "text-indigo-400"; else if (statusLower.includes('cancelado')) statusColor = "text-rose-400"; else if (statusLower.includes('despriorizado')) statusColor = "text-rose-400 font-bold"; else if (statusLower.includes('aguardando')) statusColor = "text-orange-400 font-bold"; else if (statusLower.includes('validar')) statusColor = "text-blue-400"; else if (statusLower.includes('elaborar') || statusLower.includes('executar')) statusColor = "text-yellow-400"; else if (statusLower.includes('backlog')) statusColor = "text-purple-400"; return (<td key={phase.id} className={`p-2 border-y first:border-l last:border-r border-slate-700/50 text-center relative`}><div className={`w-full h-full p-2 rounded flex flex-col items-center justify-center border ${bgClass} min-h-[90px]`}><span className={`text-[10px] uppercase mb-1 leading-tight ${statusColor}`}>{phaseStatus}</span>{isActive && (<><select className="bg-slate-900 text-xs border border-slate-600 rounded px-1 py-0.5 max-w-[130px] outline-none mb-2" value={phaseStatus} onChange={(e) => handlePhaseUpdate(task.id, phase.id, e.target.value)} onClick={(e) => e.stopPropagation()}>{phase.statuses.map((s:string) => <option key={s} value={s}>{s}</option>)}</select><div className="flex gap-2"><button onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, -1); }} disabled={currentPhaseIndex === 0} className="w-5 h-5 flex items-center justify-center rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed text-xs" title="Fase Anterior">&lt;</button><button onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, 1); }} disabled={currentPhaseIndex === workflowConfig.length - 1} className="w-5 h-5 flex items-center justify-center rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-xs text-white" title="Próxima Fase">&gt;</button></div></>)}{isPast && <IconCheck className="w-4 h-4 text-emerald-500 mt-1" />}</div></td>) })}<td className="p-3 rounded-r-lg text-center"><div className="flex items-center justify-center gap-2"><div className="w-10 h-1 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${progress}%` }}></div></div><span className="text-xs font-bold text-slate-300">{progress}%</span></div></td></tr>) })}</tbody></table>{filteredTasks.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum projeto encontrado com os filtros atuais.</div>}</div>{isConfigOpen && <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><WorkflowEditor currentConfig={workflowConfig} onSave={handleAddPhase} onUpdate={handleUpdatePhase} onDelete={handleDeletePhase} onClose={() => setIsConfigOpen(false)} /></div>}</div>); };
+    return (<div className="h-full flex flex-col space-y-4"><div className="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700"><div><h2 className="text-xl font-bold text-white">Fluxo de Projetos</h2><p className="text-sm text-slate-400">Acompanhamento detalhado das fases de Melhorias e Automações</p></div><div className="flex gap-2"><Button onClick={handleExportExcel} variant="success"><IconDownload className="w-4 h-4" /> Excel</Button><Button variant="secondary" onClick={() => setIsConfigOpen(true)}><IconPlus className="w-4 h-4" /> Configurar Fases</Button></div></div><FilterBar filters={filters} setFilters={setFilters} devs={devs} /><div className="flex-1 overflow-auto bg-slate-900/50 rounded-xl border border-slate-700 p-4 custom-scrollbar"><table className="w-full text-left text-sm border-separate border-spacing-y-2"><thead><tr className="text-slate-400 font-medium text-xs uppercase tracking-wider"><th className="pb-2 pl-2">Projeto</th>{workflowConfig.map((phase:any) => <th key={phase.id} className="pb-2 px-2 text-center min-w-[140px]">{phase.name}</th>)}<th className="pb-2 text-center">% Conclusão</th></tr></thead><tbody>{filteredTasks.map((task:Task) => { let currentPhaseIndex = workflowConfig.findIndex((w:any) => w.id === (task.projectData?.currentPhaseId || '1')); if (currentPhaseIndex === -1) currentPhaseIndex = 0; const progress = getProgress(task); const isGlobalDone = isCompletedStatus(task.status); return (<tr key={task.id} className="bg-slate-800 hover:bg-slate-700/50 transition-colors group"><td className="p-3 rounded-l-lg border-l-4 border-l-indigo-500 cursor-pointer" onClick={() => onEditTask(task)}><div className="flex flex-col gap-1"><div className="flex items-center gap-2"><span className="font-mono text-xs text-slate-500">{task.id}</span><Badge type={task.type} /></div><span className="font-medium text-white truncate max-w-[200px]" title={task.summary}>{task.summary}</span><span className="text-xs text-slate-400">{task.assignee || 'Sem Dev'}</span></div></td>{workflowConfig.map((phase:any, idx:number) => { const isCurrentPhase = (task.projectData?.currentPhaseId || '1') === phase.id || (task.projectData?.currentPhaseId === undefined && idx === 0); const isActive = isCurrentPhase && !isGlobalDone; const isPast = idx < currentPhaseIndex || isGlobalDone; const phaseStatus = isActive ? (task.projectData?.phaseStatus || 'Não Iniciado') : isPast ? 'Concluído' : 'Não iniciado'; let bgClass = "bg-slate-900/50 border-slate-700"; let textClass = "text-slate-500"; if (isPast) { bgClass = "bg-emerald-900/20 border-emerald-500/30"; textClass = "text-emerald-500"; } else if (isActive) { bgClass = "bg-indigo-900/20 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.2)]"; textClass = "text-indigo-400 font-bold"; } let statusColor = "text-slate-400"; const statusLower = phaseStatus.toLowerCase(); if (statusLower.includes('concluído') || statusLower.includes('concluido')) statusColor = "text-emerald-400"; else if (statusLower.includes('andamento') || statusLower.includes('progresso')) statusColor = "text-indigo-400"; else if (statusLower.includes('cancelado')) statusColor = "text-rose-400"; else if (statusLower.includes('despriorizado')) statusColor = "text-rose-400 font-bold"; else if (statusLower.includes('aguardando')) statusColor = "text-orange-400 font-bold"; else if (statusLower.includes('validar')) statusColor = "text-blue-400"; else if (statusLower.includes('elaborar') || statusLower.includes('executar')) statusColor = "text-yellow-400"; else if (statusLower.includes('backlog')) statusColor = "text-purple-400"; return (<td key={phase.id} className={`p-2 border-y first:border-l last:border-r border-slate-700/50 text-center relative`}><div className={`w-full h-full p-2 rounded flex flex-col items-center justify-center border ${bgClass} min-h-[90px]`}><span className={`text-[10px] uppercase mb-1 leading-tight ${statusColor}`}>{phaseStatus}</span>{isActive && (<><select className="bg-slate-900 text-xs border border-slate-600 rounded px-1 py-0.5 max-w-[130px] outline-none mb-2" value={phaseStatus} onChange={(e) => handlePhaseUpdate(task.id, phase.id, e.target.value)} onClick={(e) => e.stopPropagation()}>{phase.statuses.map((s:string) => <option key={s} value={s}>{s}</option>)}</select><div className="flex gap-2"><button onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, -1); }} disabled={currentPhaseIndex === 0} className="w-5 h-5 flex items-center justify-center rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed text-xs" title="Fase Anterior">&lt;</button><button onClick={(e) => { e.stopPropagation(); handleChangePhase(task.id, 1); }} disabled={currentPhaseIndex === workflowConfig.length - 1} className="w-5 h-5 flex items-center justify-center rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-xs text-white" title="Próxima Fase">&gt;</button></div></>)}{isPast && <IconCheck className="w-4 h-4 text-emerald-500 mt-1" />}</div></td>) })}<td className="p-3 rounded-r-lg text-center"><div className="flex items-center justify-center gap-2"><div className="w-10 h-1 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${progress}%` }}></div></div><span className="text-xs font-bold text-slate-300">{progress}%</span></div></td></tr>) })}</tbody></table>{filteredTasks.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum projeto encontrado com os filtros atuais.</div>}</div>{isConfigOpen && <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><WorkflowEditor currentConfig={workflowConfig} onSave={handleAddPhase} onUpdate={handleUpdatePhase} onDelete={handleDeletePhase} onClose={() => setIsConfigOpen(false)} /></div>}</div>); };
 
 const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: any) => {
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -3964,7 +4061,7 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     return (<div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden"><div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4"><h3 className="text-lg font-bold mb-4 text-white">Etapas Existentes</h3><div className="space-y-2">{currentConfig.map((phase: WorkflowPhase, idx: number) => (<div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}><div><span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span><span className="font-medium text-slate-200">{phase.name}</span><p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p></div><div className="flex gap-1"><button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400">✏️</button><button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400">🗑️</button></div></div>))}</div><div className="mt-4"><Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs"><IconPlus className="w-3 h-3" /> Adicionar Nova Fase</Button></div></div><div className="flex-1 flex flex-col"><h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3><div className="space-y-4 flex-1"><div><label className="block text-xs text-slate-400 mb-1">Nome da Fase</label><input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" /></div><div><label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não Iniciado, Em Andamento, Concluído..." /></div><div><label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." /></div></div><div className="flex justify-end gap-2 mt-6"><Button variant="secondary" onClick={onClose}>Fechar</Button><Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button></div></div></div>);
 };
 
-const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       try {
           const saved = localStorage.getItem('nexus_dashboard_widgets');
@@ -3988,10 +4085,77 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<string[]>([]);
+  const [selectedKpiModal, setSelectedKpiModal] = useState<'total' | 'incidents' | 'features' | 'automations' | null>(null);
+  const [kpiSearch, setKpiSearch] = useState('');
+
   useEffect(() => { localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets)); }, [widgets]);
-  const activeFilteredTasks = useMemo(() => { return tasks.filter(t => { if (['Concluído', 'Resolvido', 'Fechado'].includes(t.status)) return false; const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); const matchesType = filterType.length === 0 || filterType.includes(t.type); return matchesDev && matchesType; }); }, [tasks, filterDev, filterType]);
-  const completedMetrics = useMemo(() => { const completed = tasks.filter(t => ['Concluído', 'Resolvido', 'Fechado'].includes(t.status)); const filteredCompleted = completed.filter(t => { const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); const matchesType = filterType.length === 0 || filterType.includes(t.type); return matchesDev && matchesType; }); return { incidents: filteredCompleted.filter(t => t.type === 'Incidente').length, features: filteredCompleted.filter(t => t.type === 'Melhoria').length, automations: filteredCompleted.filter(t => t.type === 'Nova Automação').length, total: filteredCompleted.length }; }, [tasks, filterDev, filterType]);
-  const metrics = useMemo(() => { return { incidents: activeFilteredTasks.filter(t => t.type === 'Incidente').length, features: activeFilteredTasks.filter(t => t.type === 'Melhoria').length, automations: activeFilteredTasks.filter(t => t.type === 'Nova Automação').length, total: activeFilteredTasks.length }; }, [activeFilteredTasks]);
+  
+  const activeFilteredTasks = useMemo(() => { 
+    return tasks.filter(t => { 
+      if (isCompletedStatus(t.status)) return false; 
+      const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); 
+      const matchesType = filterType.length === 0 || filterType.includes(t.type); 
+      return matchesDev && matchesType; 
+    }); 
+  }, [tasks, filterDev, filterType]);
+
+  const completedMetrics = useMemo(() => { 
+    const completed = tasks.filter(t => isCompletedStatus(t.status)); 
+    const filteredCompleted = completed.filter(t => { 
+      const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); 
+      const matchesType = filterType.length === 0 || filterType.includes(t.type); 
+      return matchesDev && matchesType; 
+    }); 
+    return { 
+      incidents: filteredCompleted.filter(t => t.type === 'Incidente').length, 
+      features: filteredCompleted.filter(t => t.type === 'Melhoria').length, 
+      automations: filteredCompleted.filter(t => t.type === 'Nova Automação').length, 
+      total: filteredCompleted.length 
+    }; 
+  }, [tasks, filterDev, filterType]);
+
+  const metrics = useMemo(() => { 
+    return { 
+      incidents: activeFilteredTasks.filter(t => t.type === 'Incidente').length, 
+      features: activeFilteredTasks.filter(t => t.type === 'Melhoria').length, 
+      automations: activeFilteredTasks.filter(t => t.type === 'Nova Automação').length, 
+      total: activeFilteredTasks.length 
+    }; 
+  }, [activeFilteredTasks]);
+
+  const modalTasks = useMemo(() => {
+    if (!selectedKpiModal) return [];
+    let base = activeFilteredTasks;
+    if (selectedKpiModal === 'incidents') base = activeFilteredTasks.filter(t => t.type === 'Incidente');
+    if (selectedKpiModal === 'features') base = activeFilteredTasks.filter(t => t.type === 'Melhoria');
+    if (selectedKpiModal === 'automations') base = activeFilteredTasks.filter(t => t.type === 'Nova Automação');
+    
+    if (!kpiSearch.trim()) return base;
+    const q = kpiSearch.toLowerCase().trim();
+    return base.filter(t => 
+      t.id.toLowerCase().includes(q) || 
+      t.summary.toLowerCase().includes(q) || 
+      (t.assignee && t.assignee.toLowerCase().includes(q)) || 
+      (t.requester && t.requester.toLowerCase().includes(q))
+    );
+  }, [selectedKpiModal, activeFilteredTasks, kpiSearch]);
+
+  const modalTitle = selectedKpiModal === 'automations' ? 'Demandas em Automações (Ativas)' :
+                     selectedKpiModal === 'features' ? 'Demandas em Melhorias (Ativas)' :
+                     selectedKpiModal === 'incidents' ? 'Demandas em Incidentes (Ativas)' :
+                     'Todas as Demandas Ativas em Aberto';
+
+  const handleQuickSwitchType = (task: Task, newType: TaskType) => {
+    if (onUpdateTask) {
+      onUpdateTask({ ...task, type: newType });
+    }
+  };
+
+  const handleQuickComplete = (task: Task) => {
+    if (onUpdateTask) {
+      onUpdateTask({ ...task, status: 'Concluído' });
+    }
+  };
   const priorityData = useMemo(() => { const counts: Record<string, number> = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 }; activeFilteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; }); return Object.entries(counts).map(([name, value]) => ({ name, value })); }, [activeFilteredTasks]);
   const statusByTypeData = useMemo(() => { const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Backlog']; return STATUS_ORDER.map(status => { const tasksInStatus = activeFilteredTasks.filter(t => t.status === status); return { name: status, Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length, Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length, 'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length, total: tasksInStatus.length }; }).filter(d => d.total > 0); }, [activeFilteredTasks]);
   const devTypeData = useMemo(() => { return devs.map(dev => { const devTasks = activeFilteredTasks.filter(t => t.assignee === dev.name); return { name: dev.name, Incidente: devTasks.filter(t => t.type === 'Incidente').length, Melhoria: devTasks.filter(t => t.type === 'Melhoria').length, 'Nova Automação': devTasks.filter(t => t.type === 'Nova Automação').length, total: devTasks.length }; }).filter(d => d.total > 0).sort((a, b) => b.total - a.total); }, [activeFilteredTasks, devs]);
@@ -4140,7 +4304,69 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
           <div className="h-full flex flex-col">
              <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-semibold text-slate-200">{widget.title}</h3><div className="flex items-center gap-2">{isEditMode && ['priority', 'status', 'incidentByAuto', 'automationsByManager', 'fteByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<select className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none" value={widget.visualStyle || 'bar'} onChange={(e) => changeVisualStyle(widget.id, e.target.value)}><option value="bar">Barras</option><option value="pie">Pizza</option></select>)}{isEditMode && (<div className="flex items-center gap-1 bg-slate-900 rounded p-1"><button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400">↔</button><button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400">✕</button></div>)}</div></div>
              <div className="flex-1 min-h-[250px]">
-                 {widget.type === 'cards' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-slate-500 flex flex-col justify-between"><span className="text-slate-400 text-xs uppercase font-bold">Total (Ativos)</span><span className="text-3xl font-bold text-white">{metrics.total}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-500 flex flex-col justify-between"><span className="text-rose-400 text-xs uppercase font-bold">Incidentes</span><span className="text-3xl font-bold text-white">{metrics.incidents}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-500 flex flex-col justify-between"><span className="text-emerald-400 text-xs uppercase font-bold">Melhorias</span><span className="text-3xl font-bold text-white">{metrics.features}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between"><span className="text-indigo-400 text-xs uppercase font-bold">Automações</span><span className="text-3xl font-bold text-white">{metrics.automations}</span></div></div>)}
+                  {widget.type === 'cards' && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
+                      <div 
+                        onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }} 
+                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-slate-400/80 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        title="Clique para ver a lista de todas as demandas ativas"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Total (Ativos)</span>
+                          <span className="text-[10px] text-slate-500 group-hover:text-slate-200 transition-colors font-semibold">Ver detalhes →</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-2">
+                          <span className="text-3xl font-bold text-white group-hover:text-slate-100 transition-colors">{metrics.total}</span>
+                          <span className="text-[11px] text-slate-500 font-medium">em aberto</span>
+                        </div>
+                      </div>
+                      
+                      <div 
+                        onClick={() => { setSelectedKpiModal('incidents'); setKpiSearch(''); }} 
+                        className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 hover:border-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        title="Clique para ver os Incidentes"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-rose-400 text-xs uppercase font-bold tracking-wider">Incidentes</span>
+                          <span className="text-[10px] text-rose-400/60 group-hover:text-rose-200 transition-colors font-semibold">Ver detalhes →</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-2">
+                          <span className="text-3xl font-bold text-white group-hover:text-rose-100 transition-colors">{metrics.incidents}</span>
+                          <span className="text-[11px] text-rose-300/70 font-medium">em aberto</span>
+                        </div>
+                      </div>
+                      
+                      <div 
+                        onClick={() => { setSelectedKpiModal('features'); setKpiSearch(''); }} 
+                        className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        title="Clique para ver as Melhorias"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-emerald-400 text-xs uppercase font-bold tracking-wider">Melhorias</span>
+                          <span className="text-[10px] text-emerald-400/60 group-hover:text-emerald-200 transition-colors font-semibold">Ver detalhes →</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-2">
+                          <span className="text-3xl font-bold text-white group-hover:text-emerald-100 transition-colors">{metrics.features}</span>
+                          <span className="text-[11px] text-emerald-300/70 font-medium">em aberto</span>
+                        </div>
+                      </div>
+                      
+                      <div 
+                        onClick={() => { setSelectedKpiModal('automations'); setKpiSearch(''); }} 
+                        className="bg-indigo-950/20 p-4 rounded-xl border border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        title="Clique para ver as Automações"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-indigo-400 text-xs uppercase font-bold tracking-wider">Automações</span>
+                          <span className="text-[10px] text-indigo-400/60 group-hover:text-indigo-200 transition-colors font-semibold">Ver detalhes →</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-2">
+                          <span className="text-3xl font-bold text-white group-hover:text-indigo-100 transition-colors">{metrics.automations}</span>
+                          <span className="text-[11px] text-indigo-300/70 font-medium">em aberto</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                  {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div></div>)}
                  {widget.type === 'capacity' && (<div className="h-full flex flex-col">{capacityData.length > 0 && (<div className="bg-emerald-900/20 border border-emerald-700/50 px-4 py-4 rounded-lg mb-4 flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"><IconClock className="w-6 h-6" /></div><div><p className="text-[11px] text-emerald-400 font-bold uppercase tracking-widest mb-1">Sugestão (Disponível 1º)</p><p className="text-xl text-white font-bold leading-none">{capacityData[0].name}</p><p className="text-xs text-slate-400 mt-1">Livre em aprox. <span className="text-white font-mono">{formatDuration(capacityData[0].totalHours)}</span></p></div></div>)}<div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2"><table className="w-full text-sm"><thead className="text-xs text-slate-400 uppercase bg-slate-900/50"><tr><th className="text-left p-2 rounded-l">Dev</th><th className="text-center p-2">Qtd</th><th className="text-center p-2">Backlog</th><th className="text-center p-2">Dias Est.</th><th className="text-center p-2 rounded-r">Saúde</th></tr></thead><tbody className="divide-y divide-slate-700/50">{capacityData.map((dev, idx) => { const estimatedDays = Math.ceil(dev.totalHours / 8); let statusColor = 'bg-emerald-500 text-white'; let statusText = 'Livre'; let barColor = 'bg-emerald-500'; if (dev.totalHours > 40) { statusColor = 'bg-rose-500 text-white'; statusText = 'Sobrecarga'; barColor = 'bg-rose-500'; } else if (dev.totalHours > 24) { statusColor = 'bg-orange-500 text-white'; statusText = 'Ocupado'; barColor = 'bg-orange-500'; } else if (dev.totalHours > 8) { statusColor = 'bg-yellow-500 text-black'; statusText = 'Moderado'; barColor = 'bg-yellow-500'; } return (<tr key={dev.name} className="group hover:bg-slate-700/30"><td className="p-2"><div className="font-medium text-slate-200">{dev.name}</div><div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden"><div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div></div></td><td className="p-2 text-center text-slate-300 font-bold">{dev.activeTasksCount}</td><td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td><td className="p-2 text-center text-slate-400">{estimatedDays}d</td><td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusColor}`}>{statusText}</span></td></tr>) })}</tbody></table></div></div>)}
                  {['priority', 'status', 'devType', 'incidentByAuto', 'automationsByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<ResponsiveContainer width="100%" height="100%">{renderChartContent() as any}</ResponsiveContainer>)}
@@ -4149,7 +4375,160 @@ const DashboardView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) =>
           </div>
       )
   }
-  return (<div className="space-y-6 animate-fade-in pb-20"><div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><div><h2 className="text-2xl font-bold text-white">One Page Report</h2><p className="text-slate-400 text-sm">Visão executiva e operacional do projeto</p></div><div className="flex flex-wrap gap-4 w-full md:w-auto items-center"><div className="flex gap-2 w-full md:w-auto"><MultiSelect options={TASK_TYPES} selected={filterType} onChange={setFilterType} placeholder="Tipos: Todos" /><MultiSelect options={devs.map(d => d.name)} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" /></div><Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>{isEditMode ? 'Salvar Layout' : 'Editar Layout'}</Button><Button onClick={exportPPT} variant="primary"><IconDownload /> Exportar PPT</Button></div></div>{isEditMode && widgets.some(w => !w.visible) && (<div className="bg-slate-800 p-4 rounded-xl border border-slate-600 flex gap-4 items-center overflow-x-auto animate-slide-in"><span className="text-sm text-slate-400 font-medium whitespace-nowrap">Widgets Disponíveis:</span>{widgets.filter(w => !w.visible).map(w => (<button key={w.id} onClick={() => toggleVisibility(w.id)} className="bg-slate-700 hover:bg-indigo-600 px-3 py-1 rounded text-xs text-white transition-colors border border-slate-600 flex items-center gap-2"><IconPlus className="w-3 h-3" /> {w.title}</button>))}</div>)}<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">{widgets.filter(w => w.visible).map((widget, index) => (<div key={widget.id} className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300`}><Card className="h-full min-h-[340px] flex flex-col">{renderWidget(widget)}</Card>{isEditMode && (<div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 p-1.5 rounded border border-slate-700 shadow-xl z-20">{index > 0 && (<button onClick={() => moveWidget(index, 'up')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Cima/Esquerda"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg></button>)}{index < widgets.filter(w => w.visible).length - 1 && (<button onClick={() => moveWidget(index, 'down')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Baixo/Direita"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg></button>)}</div>)}</div>))}</div></div>);
+  return (
+    <div className="space-y-6 animate-fade-in pb-20">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">One Page Report</h2>
+          <p className="text-slate-400 text-sm">Visão executiva e operacional do projeto</p>
+        </div>
+        <div className="flex flex-wrap gap-4 w-full md:w-auto items-center">
+          <div className="flex gap-2 w-full md:w-auto">
+            <MultiSelect options={TASK_TYPES} selected={filterType} onChange={setFilterType} placeholder="Tipos: Todos" />
+            <MultiSelect options={devs.map(d => d.name)} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" />
+          </div>
+          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>{isEditMode ? 'Salvar Layout' : 'Editar Layout'}</Button>
+          <Button onClick={exportPPT} variant="primary"><IconDownload /> Exportar PPT</Button>
+        </div>
+      </div>
+      {isEditMode && widgets.some(w => !w.visible) && (
+        <div className="bg-slate-800 p-4 rounded-xl border border-slate-600 flex gap-4 items-center overflow-x-auto animate-slide-in">
+          <span className="text-sm text-slate-400 font-medium whitespace-nowrap">Widgets Disponíveis:</span>
+          {widgets.filter(w => !w.visible).map(w => (
+            <button key={w.id} onClick={() => toggleVisibility(w.id)} className="bg-slate-700 hover:bg-indigo-600 px-3 py-1 rounded text-xs text-white transition-colors border border-slate-600 flex items-center gap-2">
+              <IconPlus className="w-3 h-3" /> {w.title}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        {widgets.filter(w => w.visible).map((widget, index) => (
+          <div key={widget.id} className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300`}>
+            <Card className="h-full min-h-[340px] flex flex-col">{renderWidget(widget)}</Card>
+            {isEditMode && (
+              <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 p-1.5 rounded border border-slate-700 shadow-xl z-20">
+                {index > 0 && (
+                  <button onClick={() => moveWidget(index, 'up')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Cima/Esquerda">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                  </button>
+                )}
+                {index < widgets.filter(w => w.visible).length - 1 && (
+                  <button onClick={() => moveWidget(index, 'down')} className="p-1.5 bg-slate-800 hover:bg-indigo-600 rounded text-white transition-colors" title="Mover para Baixo/Direita">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Drilldown Modal for KPIs */}
+      {selectedKpiModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
+            <div className="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-900/90 rounded-t-2xl">
+              <div>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold text-white">{modalTitle}</h3>
+                  <span className="bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                    {modalTasks.length} {modalTasks.length === 1 ? 'demanda' : 'demandas'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Exibindo todas as demandas computadas neste indicador. Você pode trocar o Tipo ou marcar como Concluído diretamente.
+                </p>
+              </div>
+              <button onClick={() => setSelectedKpiModal(null)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 text-lg transition-colors">✕</button>
+            </div>
+
+            <div className="p-4 bg-slate-850 border-b border-slate-700 flex items-center gap-3">
+              <input 
+                type="text" 
+                value={kpiSearch}
+                onChange={(e) => setKpiSearch(e.target.value)}
+                placeholder="Buscar por ID, título, responsável ou solicitante..."
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+              />
+              {kpiSearch && (
+                <button onClick={() => setKpiSearch('')} className="text-xs text-slate-400 hover:text-white">Limpar busca</button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
+              {modalTasks.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 text-sm">
+                  Nenhuma demanda encontrada neste filtro.
+                </div>
+              ) : (
+                modalTasks.map(t => (
+                  <div key={t.id} className="bg-slate-900/70 border border-slate-700/80 hover:border-slate-600 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-xs font-bold text-slate-400">{t.id}</span>
+                        <Badge type={t.type} />
+                        <Badge type={t.priority} />
+                        <span className="text-[11px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">{t.status}</span>
+                        {t.assignee && (
+                          <span className="text-[11px] text-indigo-300 font-medium">👤 {t.assignee}</span>
+                        )}
+                      </div>
+                      <p className="text-sm font-medium text-slate-200 truncate" title={t.summary}>{t.summary}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 self-end md:self-center shrink-0">
+                      {t.type === 'Nova Automação' && (
+                        <button 
+                          onClick={() => handleQuickSwitchType(t, 'Melhoria')}
+                          className="text-xs bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                          title="Mudar classificação para Melhoria"
+                        >
+                          🔄 Mudar p/ Melhoria
+                        </button>
+                      )}
+                      {t.type === 'Melhoria' && (
+                        <button 
+                          onClick={() => handleQuickSwitchType(t, 'Nova Automação')}
+                          className="text-xs bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                          title="Mudar classificação para Automação"
+                        >
+                          🔄 Mudar p/ Automação
+                        </button>
+                      )}
+                      
+                      <button 
+                        onClick={() => handleQuickComplete(t)}
+                        className="text-xs bg-slate-800 hover:bg-emerald-800/60 border border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                        title="Marcar como Concluído"
+                      >
+                        ✓ Concluir
+                      </button>
+
+                      {onEditTask && (
+                        <button 
+                          onClick={() => { setSelectedKpiModal(null); onEditTask(t); }}
+                          className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                        >
+                          Editar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-700 bg-slate-900/80 rounded-b-2xl flex justify-between items-center text-xs text-slate-400">
+              <span>As alterações feitas aqui recalculam o painel em tempo real.</span>
+              <button onClick={() => setSelectedKpiModal(null)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors">
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
@@ -4955,8 +5334,8 @@ export default function App() {
             if (history.length > 0) finalTask.history = [...(oldTask.history || []), ...history]; 
             
             const isAutomation = updatedTask.type === 'Nova Automação'; 
-            const isDone = ['Concluído', 'Resolvido', 'Fechado'].includes(updatedTask.status); 
-            const wasNotDone = !['Concluído', 'Resolvido', 'Fechado'].includes(oldTask.status); 
+            const isDone = isCompletedStatus(updatedTask.status); 
+            const wasNotDone = !isCompletedStatus(oldTask.status); 
             
             if (isAutomation && isDone && wasNotDone) { 
                 const robotName = updatedTask.automationName || updatedTask.summary; 
@@ -5044,5 +5423,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
