@@ -1,5 +1,6 @@
 import { StorageService } from './storageService';
 import { BackupConfig, BackupSnapshot } from '../types';
+import { FirebaseService } from './firebase';
 
 const CONFIG_KEY = 'nexus_backup_config_v1';
 const SNAPSHOTS_KEY = 'nexus_backup_snapshots_v1';
@@ -169,7 +170,12 @@ export const BackupService = {
         })();
       }
 
-      // 8. Dispatch notification event
+      // 8. Write to Firebase Cloud Firestore Backups collection
+      FirebaseService.saveCloudBackup(payload, triggerReason).catch(e => {
+        console.warn('[BackupService] Cloud backup sync notice:', e);
+      });
+
+      // 9. Dispatch notification event
       window.dispatchEvent(new CustomEvent('nexus-auto-backup-completed', { detail: newSnapshot }));
 
       return newSnapshot;

@@ -1,6 +1,7 @@
 
 import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig, normalizeStatus, normalizeTaskType } from '../types';
 import { BackupService } from './backupService';
+import { FirebaseService } from './firebase';
 
 const KEYS = {
   TASKS: 'nexus_tasks_v2',
@@ -58,6 +59,7 @@ export const StorageService = {
       }));
       localStorage.setItem(KEYS.TASKS, JSON.stringify(sanitized));
       BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
+      FirebaseService.saveTasksBatch(sanitized).catch(e => console.warn('Firebase batch sync warning:', e));
     } catch (e) {
       console.error("Error saving tasks", e);
     }
@@ -94,6 +96,7 @@ export const StorageService = {
   saveDevs: (devs: Developer[]) => {
     localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
     BackupService.triggerAutoBackup("Alteração na Equipe de Desenvolvedores");
+    FirebaseService.saveDevs(devs).catch(e => console.warn('Firebase saveDevs warning:', e));
   },
 
   // --- Robots ---
@@ -109,6 +112,7 @@ export const StorageService = {
   saveRobots: (robots: Robot[]) => {
       localStorage.setItem(KEYS.ROBOTS, JSON.stringify(robots));
       BackupService.triggerAutoBackup("Alteração nos Robôs RPA");
+      FirebaseService.saveRobots(robots).catch(e => console.warn('Firebase saveRobots warning:', e));
   },
 
   // --- Workflow Config ---
@@ -124,6 +128,7 @@ export const StorageService = {
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
       localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
       BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
+      FirebaseService.saveSetting('workflow', config).catch(e => console.warn('Firebase saveSetting workflow warning:', e));
   },
 
   // --- Documents Config ---
@@ -139,6 +144,7 @@ export const StorageService = {
   saveDocumentsConfig: (config: DocumentConfig[]) => {
       localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(config));
       BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
+      FirebaseService.saveSetting('documents', config).catch(e => console.warn('Firebase saveSetting documents warning:', e));
   },
 
   // --- Azure DevOps Configuration ---
@@ -154,6 +160,7 @@ export const StorageService = {
   saveDevOpsConfig: (config: DevOpsConfig) => {
       localStorage.setItem(KEYS.DEVOPS_CONFIG, JSON.stringify(config));
       BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
+      FirebaseService.saveSetting('devops', config).catch(e => console.warn('Firebase saveSetting devops warning:', e));
   },
 
   // --- API Key / Power BI ---
@@ -206,6 +213,7 @@ export const StorageService = {
 
   logout: () => {
     localStorage.removeItem(KEYS.USER);
+    FirebaseService.logout().catch(e => console.warn('Firebase logout warning:', e));
   },
 
   updateUser: (updatedUser: User) => {
@@ -242,6 +250,7 @@ export const StorageService = {
   saveSprints: (sprints: Sprint[]) => {
     localStorage.setItem(KEYS.SPRINTS, JSON.stringify(sprints));
     BackupService.triggerAutoBackup("Alteração nas Sprints");
+    FirebaseService.saveSprints(sprints).catch(e => console.warn('Firebase saveSprints warning:', e));
   },
 
 

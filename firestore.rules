@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // User profile: only the authenticated user can modify their own record,
+    // but any authenticated team member can view basic user info
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId || !exists(/databases/$(database)/documents/users/$(userId)));
+    }
+
+    // Tasks, automations, improvements, incidents
+    match /tasks/{taskId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Developers team
+    match /devs/{devId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // RPA Robots
+    match /robots/{robotId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Sprints
+    match /sprints/{sprintId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // System and workflow settings
+    match /settings/{settingId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Automated and manual backups
+    match /backups/{backupId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

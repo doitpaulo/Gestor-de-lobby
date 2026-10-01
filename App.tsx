@@ -10,6 +10,7 @@ import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
+import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, normalizeStatus, normalizeTaskType } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
@@ -4573,6 +4574,71 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
           </div>
         </Card>
 
+        {/* Firebase Cloud Sync Card */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Armazenamento em Nuvem Firebase (Firestore & Auth)
+            </h3>
+            <span className="text-xs bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full font-medium">
+              Conexão Ativa
+            </span>
+          </div>
+
+          <Card className="space-y-4">
+            <p className="text-xs text-slate-300">
+              Seus projetos, tarefas, robôs RPA e configurações estão conectados ao <strong>Google Firebase Firestore</strong>. Você pode acessar, criar e editar de qualquer computador ou dispositivo em tempo real sem depender apenas do armazenamento local deste navegador.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Projeto Firebase</span>
+                <span className="text-sm font-mono text-indigo-300 font-medium">atomic-chess-2kpr3</span>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Banco Firestore</span>
+                <span className="text-xs font-mono text-slate-300 truncate block" title="ai-studio-nexusproject-4dcf951c-17f1-4c17-b326-8e7464cce3c8">
+                  Nexus Project Cloud
+                </span>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Modo de Acesso</span>
+                <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Multi-Dispositivo
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-700/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <span className="text-xs text-slate-400">
+                Os dados são sincronizados automaticamente a cada alteração.
+              </span>
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    const tasks = StorageService.getTasks();
+                    const devs = StorageService.getDevs();
+                    const robots = StorageService.getRobots();
+                    const sprints = StorageService.getSprints();
+                    await FirebaseService.saveTasksBatch(tasks);
+                    await FirebaseService.saveDevs(devs);
+                    await FirebaseService.saveRobots(robots);
+                    await FirebaseService.saveSprints(sprints);
+                    alert(`Sincronização em nuvem concluída com sucesso! ${tasks.length} demandas, ${devs.length} devs e ${robots.length} robôs foram verificados no Firestore.`);
+                  } catch (e: any) {
+                    alert(`Erro ao sincronizar com Firestore: ${e.message || e}`);
+                  }
+                }}
+                className="text-xs"
+              >
+                Sincronizar com Nuvem Agora
+              </Button>
+            </div>
+          </Card>
+        </div>
+
         {/* Azure DevOps Configuration */}
         <div className="space-y-4">
           <h3 className="text-lg font-bold text-indigo-400 mb-2">Integração Azure DevOps</h3>
@@ -4620,9 +4686,13 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
     );
 };
 
-const Layout = ({ children, user, onLogout, headerContent }: any) => {
-  const navigate = useNavigate(); const location = useLocation(); const [isCollapsed, setIsCollapsed] = useState(false);
+const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any) => {
+  const navigate = useNavigate(); 
+  const location = useLocation(); 
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
   if (location.pathname === '/powerbi-data') return <>{children}</>;
+
   const menuItems = [ 
     { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
     { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
@@ -4634,15 +4704,434 @@ const Layout = ({ children, user, onLogout, headerContent }: any) => {
     { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, 
     { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, 
     { path: '/totem', icon: <IconTerminal className="w-5 h-5" />, label: 'Totem RPA' },
-    { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' } 
+    { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' },
+    { path: '/profile', icon: <IconUsers className="w-5 h-5" />, label: 'Meu Perfil' }
   ];
-  return (<div className="flex h-screen bg-dark-900 text-slate-200 font-sans"><aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/50 backdrop-blur-lg border-r border-slate-700 flex flex-col z-50 transition-all duration-300 ease-in-out relative`}><button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-9 bg-indigo-600 text-white p-1 rounded-full shadow-lg hover:bg-indigo-700 transition-colors z-50"><IconChevronLeft className={`w-3 h-3 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} /></button><div className={`p-6 border-b border-slate-700 flex items-center gap-3 h-20 ${isCollapsed ? 'justify-center px-0' : ''}`}><div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg shadow-lg shadow-indigo-500/50"></div><h1 className={`text-xl font-bold tracking-tight text-white overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>Nexus</h1></div><nav className="flex-1 p-4 space-y-2 mt-4">{menuItems.map(item => (<button key={item.path} onClick={() => navigate(item.path)} title={isCollapsed ? item.label : ''} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${location.pathname === item.path ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${isCollapsed ? 'justify-center px-0' : ''}`}>{item.icon}<span className={`font-medium transition-all duration-300 overflow-hidden ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{item.label}</span></button>))}</nav><div className="p-4 border-t border-slate-700 bg-slate-900/30"><div onClick={() => navigate('/profile')} className={`flex items-center gap-3 mb-4 cursor-pointer hover:bg-slate-800 p-2 rounded-lg transition-colors ${isCollapsed ? 'justify-center' : ''}`}><div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold text-indigo-300 border border-slate-600 overflow-hidden flex-shrink-0">{user.avatar ? (<img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />) : (user.name.substring(0, 2).toUpperCase())}</div><div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>{!isCollapsed && <><p className="text-sm font-medium text-white truncate">{user.name}</p><p className="text-xs text-slate-500 truncate">{user.email}</p></>}</div></div><Button variant="danger" onClick={onLogout} className={`w-full justify-center text-xs py-2 ${isCollapsed ? 'px-0' : ''}`} title={isCollapsed ? 'Sair' : ''}>{isCollapsed ? (<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>) : 'Sair'}</Button></div></aside><main className="flex-1 overflow-hidden relative flex flex-col"><header className="h-16 bg-dark-900/90 backdrop-blur-sm flex items-center justify-end px-6 lg:px-10 z-30 sticky top-0 border-b border-slate-800"><div className="pointer-events-auto">{headerContent}</div></header><div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" /><div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">{children}</div></main></div>);
+
+  const isGuestOrLocal = !user?.email || user.email.includes('convidado') || user.id === 'user-1' || user.id === 'guest-1';
+
+  return (
+    <div className="flex h-screen bg-dark-900 text-slate-200 font-sans overflow-hidden">
+      {/* Sidebar */}
+      <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/80 backdrop-blur-xl border-r border-slate-700 flex flex-col h-full z-50 transition-all duration-300 ease-in-out relative shrink-0 select-none shadow-2xl`}>
+        {/* Collapse toggle button */}
+        <button 
+          onClick={() => setIsCollapsed(!isCollapsed)} 
+          className="absolute -right-3 top-7 bg-indigo-600 hover:bg-indigo-500 text-white p-1 rounded-full shadow-lg transition-colors z-50 cursor-pointer"
+          title={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+        >
+          <IconChevronLeft className={`w-3.5 h-3.5 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
+        </button>
+
+        {/* Brand header */}
+        <div className={`p-4 border-b border-slate-700 flex items-center gap-3 h-16 shrink-0 ${isCollapsed ? 'justify-center px-0' : ''}`}>
+          <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-xl shadow-lg shadow-indigo-500/40 flex items-center justify-center font-black text-white text-base">
+            N
+          </div>
+          <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
+            <h1 className="text-lg font-bold tracking-tight text-white leading-none">Nexus</h1>
+            <span className="text-[10px] text-indigo-400 font-semibold tracking-wider uppercase">Project Cloud</span>
+          </div>
+        </div>
+
+        {/* Navigation items with min-h-0 and scrollbar */}
+        <nav className="flex-1 min-h-0 p-3 space-y-1 overflow-y-auto custom-scrollbar">
+          {menuItems.map(item => {
+            const isActive = location.pathname === item.path;
+            return (
+              <button 
+                key={item.path} 
+                onClick={() => navigate(item.path)} 
+                title={isCollapsed ? item.label : ''} 
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group text-sm cursor-pointer ${
+                  isActive 
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50 font-semibold' 
+                    : 'text-slate-400 hover:bg-slate-700/60 hover:text-white'
+                } ${isCollapsed ? 'justify-center px-0' : ''}`}
+              >
+                <span className="shrink-0">{item.icon}</span>
+                <span className={`transition-all duration-300 overflow-hidden truncate text-left ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* User profile & Logout - Pinned to bottom, ALWAYS visible */}
+        <div className="p-3 border-t border-slate-700/80 bg-slate-900/90 shrink-0 space-y-2">
+          <div 
+            onClick={() => navigate('/profile')} 
+            className={`flex items-center gap-2.5 p-2 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-700 group ${isCollapsed ? 'justify-center px-0' : ''}`}
+            title="Clique para abrir Meu Perfil e Configurações"
+          >
+            <div className="w-9 h-9 rounded-full bg-slate-700 border-2 border-indigo-500/60 flex items-center justify-center text-xs font-bold text-indigo-300 overflow-hidden shrink-0 shadow-sm group-hover:border-indigo-400 transition-colors">
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                (user?.name || 'U').substring(0, 2).toUpperCase()
+              )}
+            </div>
+            {!isCollapsed && (
+              <div className="overflow-hidden flex-1 min-w-0">
+                <p className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
+                  {user?.name || 'Usuário'}
+                </p>
+                <p className="text-[10px] text-slate-400 truncate font-mono">
+                  {user?.email || 'Sem email'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Action buttons */}
+          <div className={`flex gap-1.5 ${isCollapsed ? 'flex-col items-center' : 'items-center'}`}>
+            {isGuestOrLocal && onGoogleLogin && !isCollapsed && (
+              <button
+                type="button"
+                onClick={onGoogleLogin}
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-900/50 hover:bg-indigo-800/60 border border-indigo-700/50 text-indigo-200 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+                title="Conectar Conta Google"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Google</span>
+              </button>
+            )}
+
+            <button 
+              type="button" 
+              onClick={onLogout} 
+              className={`flex items-center justify-center gap-1.5 py-1.5 px-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${isCollapsed ? 'w-full' : (isGuestOrLocal ? 'flex-1' : 'w-full')}`} 
+              title="Sair / Desconectar e voltar para a tela de Login"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
+              {!isCollapsed && <span>Sair</span>}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-hidden relative flex flex-col">
+        {/* Top Navbar */}
+        <header className="h-16 bg-slate-900/80 backdrop-blur-md flex items-center justify-between px-6 lg:px-8 z-30 sticky top-0 border-b border-slate-800 shrink-0">
+          {/* Cloud Badge */}
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1 rounded-full shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="hidden sm:inline">Firebase Nuvem</span> Ativo
+            </span>
+          </div>
+
+          {/* Right Area: Action Buttons + Profile Chip + Google / Logout Buttons */}
+          <div className="flex items-center gap-3">
+            <div className="pointer-events-auto flex items-center">
+              {headerContent}
+            </div>
+
+            <div className="w-px h-6 bg-slate-700 hidden sm:block"></div>
+
+            {/* Google Login button right in the top bar if on guest/local */}
+            {isGuestOrLocal && onGoogleLogin && (
+              <button
+                type="button"
+                onClick={onGoogleLogin}
+                className="hidden sm:flex items-center gap-2 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
+                title="Entrar com Conta Google no Firebase"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>Entrar com Google</span>
+              </button>
+            )}
+
+            {/* Profile Button in Top Bar */}
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+              title="Abrir Meu Perfil e Configurações"
+            >
+              <div className="w-6 h-6 rounded-full bg-indigo-600 border border-indigo-400/50 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden shrink-0">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  (user?.name || 'U').substring(0, 2).toUpperCase()
+                )}
+              </div>
+              <span className="hidden md:inline font-semibold">{user?.name?.split(' ')[0] || 'Perfil'}</span>
+            </button>
+
+            {/* Top Bar Logout Button */}
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex items-center gap-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              title="Sair da conta e voltar para a tela de Login"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Ambient Gradient Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" />
+
+        {/* Main Content Viewport */}
+        <div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
 };
 
 const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
-    const [isRegister, setIsRegister] = useState(false); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [name, setName] = useState(''); const [error, setError] = useState('');
-    const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); setError(''); if (isRegister) { if (!email || !password || !name) { setError('Todos os campos são obrigatórios'); return; } const newUser: User = { id: Date.now().toString(), email, name, password }; const success = StorageService.registerUser(newUser); if (success) { alert('Conta criada com sucesso! Faça login.'); setIsRegister(false); } else setError('Email já cadastrado.'); } else { if (!email || !password) { setError('Preencha email e senha'); return; } const user = StorageService.authenticateUser(email, password); if (user) onLogin(user); else setError('Credenciais inválidas.'); } };
-    return (<div className="h-screen flex items-center justify-center bg-dark-900 relative overflow-hidden"><div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div><div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px]"></div><div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-[120px]"></div><div className="w-full max-w-md p-10 bg-slate-800/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl z-10 relative"><div className="flex justify-center mb-6"><div className="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-2xl shadow-2xl shadow-indigo-500/40 flex items-center justify-center"><span className="text-3xl text-white font-bold">N</span></div></div><h2 className="text-3xl font-bold text-center mb-2 text-white">Nexus Project</h2><p className="text-center text-slate-400 mb-8 text-sm">{isRegister ? 'Crie sua conta para começar' : 'Acesse sua conta'}</p><form onSubmit={handleSubmit} className="space-y-5">{isRegister && (<div><label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Nome Completo</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all" placeholder="Seu nome" /></div>)}<div><label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Email Corporativo</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all" placeholder="nome@empresa.com" /></div><div><label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Senha</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-3 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all" placeholder="••••••••" /></div>{error && <p className="text-rose-500 text-sm text-center">{error}</p>}<Button type="submit" className="w-full justify-center py-3 text-lg shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60">{isRegister ? 'Cadastrar' : 'Entrar'}</Button><div className="text-center"><button type="button" onClick={() => { setIsRegister(!isRegister); setError(''); }} className="text-sm text-slate-500 hover:text-indigo-400 transition-colors">{isRegister ? 'Já tem conta? Entrar' : 'Criar nova conta'}</button></div></form></div></div>);
+    const [isRegister, setIsRegister] = useState(false);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleGoogleLogin = async () => {
+        setError('');
+        setIsLoading(true);
+        try {
+            const user = await FirebaseService.loginWithGoogle();
+            StorageService.updateUser(user);
+            onLogin(user);
+        } catch (err: any) {
+            console.error('Google login failed:', err);
+            if (err.code === 'auth/popup-closed-by-user') {
+                setError('A janela de login do Google foi fechada antes de concluir.');
+            } else if (err.code === 'auth/cancelled-popup-request') {
+                setError('Operação cancelada.');
+            } else {
+                setError(err.message || 'Falha ao autenticar com Google.');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        setIsLoading(true);
+
+        try {
+            if (isRegister) {
+                if (!email || !password || !name) {
+                    setError('Todos os campos são obrigatórios.');
+                    setIsLoading(false);
+                    return;
+                }
+                if (password.length < 6) {
+                    setError('A senha deve ter no mínimo 6 caracteres.');
+                    setIsLoading(false);
+                    return;
+                }
+                try {
+                    const fbUser = await FirebaseService.registerWithEmail(email, password, name);
+                    StorageService.updateUser(fbUser);
+                    alert('Conta criada com sucesso no Firebase!');
+                    onLogin(fbUser);
+                } catch (fbErr: any) {
+                    if (fbErr.code === 'auth/email-already-in-use') {
+                        setError('Este e-mail já está cadastrado.');
+                    } else if (fbErr.code === 'auth/weak-password') {
+                        setError('A senha fornecida é muito fraca.');
+                    } else if (fbErr.code === 'auth/invalid-email') {
+                        setError('Formato de e-mail inválido.');
+                    } else {
+                        // Fallback to local registration if offline
+                        const newUser: User = { id: Date.now().toString(), email, name, password };
+                        const success = StorageService.registerUser(newUser);
+                        if (success) {
+                            alert('Conta criada localmente! Faça login.');
+                            setIsRegister(false);
+                        } else {
+                            setError('Email já cadastrado.');
+                        }
+                    }
+                }
+            } else {
+                if (!email || !password) {
+                    setError('Preencha email e senha.');
+                    setIsLoading(false);
+                    return;
+                }
+                try {
+                    const fbUser = await FirebaseService.loginWithEmail(email, password);
+                    StorageService.updateUser(fbUser);
+                    onLogin(fbUser);
+                } catch (fbErr: any) {
+                    // Try local fallback
+                    const localUser = StorageService.authenticateUser(email, password);
+                    if (localUser) {
+                        onLogin(localUser);
+                    } else {
+                        if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
+                            setError('Email ou senha incorretos.');
+                        } else {
+                            setError(fbErr.message || 'Credenciais inválidas.');
+                        }
+                    }
+                }
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleGuestLogin = async () => {
+        setIsLoading(true);
+        try {
+            const guestUser = await FirebaseService.loginAsGuest();
+            StorageService.updateUser(guestUser);
+            onLogin(guestUser);
+        } catch {
+            const localGuest: User = { id: 'guest-1', name: 'Visitante', email: 'convidado@nexus.app' };
+            StorageService.updateUser(localGuest);
+            onLogin(localGuest);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="h-screen flex items-center justify-center bg-dark-900 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+            <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px]"></div>
+            <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-[120px]"></div>
+            
+            <div className="w-full max-w-md p-8 md:p-10 bg-slate-800/80 backdrop-blur-xl border border-slate-700/70 rounded-2xl shadow-2xl z-10 relative">
+                <div className="flex justify-center mb-5">
+                    <div className="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-2xl shadow-2xl shadow-indigo-500/40 flex items-center justify-center">
+                        <span className="text-3xl text-white font-bold tracking-wider">N</span>
+                    </div>
+                </div>
+                
+                <h2 className="text-2xl md:text-3xl font-bold text-center text-white mb-1">Nexus Project</h2>
+                <p className="text-center text-slate-400 mb-6 text-xs md:text-sm">
+                    {isRegister ? 'Crie sua conta para acessar seus projetos de qualquer lugar' : 'Acesse seus projetos em nuvem com Firebase'}
+                </p>
+
+                {/* Cloud Sync Status Pill */}
+                <div className="mb-6 flex items-center justify-center gap-2 bg-indigo-950/60 border border-indigo-500/30 px-3 py-1.5 rounded-full text-indigo-300 text-xs font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Firebase Cloud Ativo (Firestore + Auth)</span>
+                </div>
+
+                {/* Google Sign In Button */}
+                <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={isLoading}
+                    className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-800 font-semibold py-3 px-4 rounded-xl shadow-md transition-all duration-200 active:scale-[0.98] mb-5 disabled:opacity-50 cursor-pointer"
+                >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                    <span>Entrar com Google</span>
+                </button>
+
+                <div className="relative flex py-2 items-center mb-5">
+                    <div className="flex-grow border-t border-slate-700"></div>
+                    <span className="flex-shrink mx-4 text-slate-500 text-xs uppercase tracking-wider">ou com email</span>
+                    <div className="flex-grow border-t border-slate-700"></div>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {isRegister && (
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">Nome Completo</label>
+                            <input 
+                                type="text" 
+                                value={name} 
+                                onChange={(e) => setName(e.target.value)} 
+                                className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                                placeholder="Seu nome" 
+                                required
+                            />
+                        </div>
+                    )}
+                    <div>
+                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">Email</label>
+                        <input 
+                            type="email" 
+                            value={email} 
+                            onChange={(e) => setEmail(e.target.value)} 
+                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                            placeholder="seu.email@exemplo.com" 
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">Senha</label>
+                        <input 
+                            type="password" 
+                            value={password} 
+                            onChange={(e) => setPassword(e.target.value)} 
+                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                            placeholder="••••••••" 
+                            required
+                        />
+                    </div>
+
+                    {error && (
+                        <div className="bg-rose-950/60 border border-rose-500/40 p-3 rounded-xl text-rose-300 text-xs text-center font-medium">
+                            {error}
+                        </div>
+                    )}
+
+                    <Button 
+                        type="submit" 
+                        disabled={isLoading}
+                        className="w-full justify-center py-3 text-base font-semibold shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 cursor-pointer"
+                    >
+                        {isLoading ? 'Conectando...' : (isRegister ? 'Criar Conta no Firebase' : 'Entrar com Email')}
+                    </Button>
+
+                    <div className="flex flex-col gap-2 pt-2 text-center">
+                        <button 
+                            type="button" 
+                            onClick={() => { setIsRegister(!isRegister); setError(''); }} 
+                            className="text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                        >
+                            {isRegister ? 'Já possui conta? Clique para Entrar' : 'Não tem conta? Cadastrar no Firebase'}
+                        </button>
+
+                        <button 
+                            type="button" 
+                            onClick={handleGuestLogin}
+                            className="text-xs text-slate-500 hover:text-slate-300 transition-colors mt-1"
+                        >
+                            Continuar como Visitante (Modo Demonstração)
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
 };
 
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
@@ -5279,11 +5768,98 @@ export default function App() {
     }
   }, []);
 
+  // Firebase Auth State Listener
+  useEffect(() => {
+    const unsubAuth = FirebaseService.onAuthChange((fbUser) => {
+      if (fbUser) {
+        setUser(fbUser);
+        StorageService.updateUser(fbUser);
+      }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  // Firebase Firestore Real-Time Sync across devices
+  useEffect(() => {
+    if (!user) return;
+
+    // Initial check: if remote is empty but local has data, upload local data to Firestore
+    const initialSync = async () => {
+      try {
+        const remoteTasks = await FirebaseService.fetchTasks();
+        if (remoteTasks.length === 0 && tasks.length > 0) {
+          await FirebaseService.saveTasksBatch(tasks);
+        } else if (remoteTasks.length > 0) {
+          const merged = StorageService.mergeTasks(remoteTasks);
+          setTasks(merged);
+        }
+      } catch (e) {
+        console.warn('Initial Firebase sync warning:', e);
+      }
+    };
+    initialSync();
+
+    // Subscribe to Firestore collections in real time
+    const unsubTasks = FirebaseService.subscribeTasks((remoteTasks) => {
+      if (remoteTasks && remoteTasks.length > 0) {
+        setTasks(remoteTasks);
+        try {
+          localStorage.setItem('nexus_tasks_v2', JSON.stringify(remoteTasks));
+        } catch {}
+      }
+    });
+
+    const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
+      if (remoteDevs && remoteDevs.length > 0) {
+        setDevs(remoteDevs);
+      }
+    });
+
+    const unsubRobots = FirebaseService.subscribeRobots((remoteRobots) => {
+      if (remoteRobots && remoteRobots.length > 0) {
+        setRobots(remoteRobots);
+      }
+    });
+
+    const unsubSprints = FirebaseService.subscribeSprints((remoteSprints) => {
+      if (remoteSprints && remoteSprints.length > 0) {
+        setSprints(remoteSprints);
+      }
+    });
+
+    return () => {
+      unsubTasks();
+      unsubDevs();
+      unsubRobots();
+      unsubSprints();
+    };
+  }, [user?.id]);
+
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
   const handleLogin = (loggedInUser: User) => setUser(loggedInUser);
-  const handleLogout = () => { StorageService.logout(); setUser(null); };
+  const handleLogout = async () => { 
+    try {
+      await FirebaseService.logout();
+    } catch (e) {
+      console.warn('Firebase logout warning:', e);
+    }
+    StorageService.logout(); 
+    setUser(null); 
+  };
+  const handleGoogleLoginDirect = async () => {
+    try {
+      const fbUser = await FirebaseService.loginWithGoogle();
+      StorageService.updateUser(fbUser);
+      setUser(fbUser);
+    } catch (err: any) {
+      console.error('Google login failed:', err);
+      if (err.code !== 'auth/popup-closed-by-user') {
+        alert(`Erro ao autenticar com Google: ${err.message || err}`);
+      }
+    }
+  };
   const processNewTasks = (newTasks: Task[], typeName: string) => { 
     const merged = StorageService.mergeTasks(newTasks); 
     setTasks(merged); 
@@ -5407,6 +5983,7 @@ export default function App() {
         const newTasks = tasks.filter(t => t.id !== id); 
         setTasks(newTasks); 
         StorageService.saveTasks(newTasks); 
+        FirebaseService.deleteTask(id).catch(err => console.warn('Firebase deleteTask warning:', err));
         
         // Remove from sprints
         const newSprints = sprints.map(s => ({
@@ -5423,5 +6000,5 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

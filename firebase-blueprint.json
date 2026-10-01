@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Nexus Project Firebase Schema",
+  "entities": {
+    "User": {
+      "path": "users/{userId}",
+      "description": "User profile data",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "avatar": { "type": "string", "optional": true },
+        "role": { "type": "string", "optional": true },
+        "createdAt": { "type": "string", "optional": true }
+      }
+    },
+    "Task": {
+      "path": "tasks/{taskId}",
+      "description": "Tasks, automations, improvements and incident tickets",
+      "fields": {
+        "id": { "type": "string" },
+        "summary": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "priority": { "type": "string" },
+        "assignee": { "type": "string", "optional": true },
+        "requester": { "type": "string", "optional": true },
+        "createdAt": { "type": "string", "optional": true },
+        "updatedAt": { "type": "string", "optional": true }
+      }
+    },
+    "Developer": {
+      "path": "devs/{devId}",
+      "description": "Developer team members",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "optional": true }
+      }
+    },
+    "Robot": {
+      "path": "robots/{robotId}",
+      "description": "RPA Bots and automation registry",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "department": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "Sprint": {
+      "path": "sprints/{sprintId}",
+      "description": "Agile Sprints for project planning",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "Setting": {
+      "path": "settings/{settingId}",
+      "description": "Application settings (workflow, document pipeline, devops)",
+      "fields": {
+        "id": { "type": "string" },
+        "value": { "type": "any" }
+      }
+    },
+    "Backup": {
+      "path": "backups/{backupId}",
+      "description": "Cloud backup snapshots",
+      "fields": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

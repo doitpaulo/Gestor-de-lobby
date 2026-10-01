@@ -2,8 +2,26 @@ import express from "express";
 
 const app = express();
 
+// Enable CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 // Middleware to support JSON request bodies
 app.use(express.json());
+
+const router = express.Router();
+
+router.get("/health", (req, res) => {
+  res.json({ status: "ok", time: new Date().toISOString() });
+});
 
 // Helper to generate Base64 Basic auth header for Azure DevOps
 function getDevOpsHeaders(pat: string) {
@@ -18,7 +36,7 @@ function getDevOpsHeaders(pat: string) {
 }
 
 // API Route: Create Task (Incident / Improvement)
-app.post("/api/devops/create-task", async (req: express.Request, res: express.Response) => {
+router.post("/devops/create-task", async (req: express.Request, res: express.Response) => {
   try {
     const { organization, project, pat, userStoryId, title, estimate, tag } = req.body;
 
@@ -100,7 +118,7 @@ app.post("/api/devops/create-task", async (req: express.Request, res: express.Re
 });
 
 // API Route: Create Complete Feature Lifecycle Structure for New Automation
-app.post("/api/devops/create-structure", async (req: express.Request, res: express.Response) => {
+router.post("/devops/create-structure", async (req: express.Request, res: express.Response) => {
   try {
     const { organization, project, pat, epicId, projectName } = req.body;
 
@@ -262,7 +280,7 @@ app.post("/api/devops/create-structure", async (req: express.Request, res: expre
 });
 
 // API Route: Update Work Item (Task, User Story, Feature, etc.)
-app.patch("/api/devops/update-task", async (req: express.Request, res: express.Response) => {
+router.patch("/devops/update-task", async (req: express.Request, res: express.Response) => {
   try {
     const { organization, project, pat, id, title, status, estimate, completed, assignee } = req.body;
 
@@ -395,5 +413,9 @@ app.patch("/api/devops/update-task", async (req: express.Request, res: express.R
     res.status(500).json({ error: error.message || "Internal Server Error in Update" });
   }
 });
+
+// Mount the router on /api and / to handle both direct and rewritten requests seamlessly
+app.use("/api", router);
+app.use("/", router);
 
 export default app;
