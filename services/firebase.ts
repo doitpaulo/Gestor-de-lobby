@@ -204,10 +204,11 @@ export const FirebaseService = {
 
   getTargetDoc: (colName: string, docId: string, userId?: string) => {
     const uid = userId || auth.currentUser?.uid;
+    const safeDocId = String(docId || 'doc').replace(/\//g, '_').trim();
     if (uid) {
-      return doc(db, 'users', uid, colName, docId);
+      return doc(db, 'users', uid, colName, safeDocId);
     }
-    return doc(db, colName, docId);
+    return doc(db, colName, safeDocId);
   },
 
   // Migrate legacy top-level tasks to user collection if existing admin

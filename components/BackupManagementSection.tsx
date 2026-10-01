@@ -179,12 +179,13 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
     if (excelRestoreMode === 'replace') {
       const success = BackupService.restoreSnapshot(snapshot);
       if (success) {
-        alert(`✔ Restauração Concluída!\n\nForam reconhecidas e gravadas no banco de dados ${stats.tasksCount} demandas (${stats.incidentsCount} Incidentes, ${stats.improvementsCount} Melhorias, ${stats.automationsCount} Novas Automações).`);
+        showNotification(`✔ Restauração Concluída! ${stats.tasksCount} demandas salvas no banco de dados.`);
         setExcelImportResult(null);
+        window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: snapshot.dataPayload }));
         if (onDataRestored) onDataRestored();
-        window.location.reload();
+        refreshData();
       } else {
-        alert("Ocorreu um erro ao restaurar os dados.");
+        showNotification("❌ Ocorreu um erro ao restaurar os dados.");
       }
     } else {
       // Merge mode
@@ -200,12 +201,13 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
             StorageService.saveDevs([...currentDevs, ...toAdd]);
           }
         }
-        alert(`✔ Mesclagem Concluída!\n\nAs demandas da planilha foram integradas com sucesso ao banco de dados.`);
+        showNotification(`✔ Mesclagem Concluída! ${stats.tasksCount} demandas integradas ao banco de dados.`);
         setExcelImportResult(null);
+        window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: snapshot.dataPayload }));
         if (onDataRestored) onDataRestored();
-        window.location.reload();
+        refreshData();
       } catch (err: any) {
-        alert(`Erro na mesclagem: ${err.message || err}`);
+        showNotification(`❌ Erro na mesclagem: ${err.message || err}`);
       }
     }
   };

@@ -13,7 +13,7 @@ import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, normalizeStatus, normalizeTaskType } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -1558,6 +1558,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], assignee: string[]}>({ search: '', type: [], priority: [], assignee: [] });
   const [kanbanMode, setKanbanMode] = useState<'assignee' | 'status'>('assignee');
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
+  const [mobileSelectedCol, setMobileSelectedCol] = useState<string>('all');
   
   const columns = useMemo(() => {
       if (kanbanMode === 'assignee') {
@@ -1754,16 +1755,50 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex justify-between items-center bg-slate-800 p-2 rounded-xl border border-slate-700 mb-4">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-800 p-3 rounded-xl border border-slate-700 mb-4 gap-3">
           <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700 mr-4">
-              <button onClick={() => setKanbanMode('assignee')} className={`px-3 py-1 text-xs rounded transition-colors ${kanbanMode === 'assignee' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Por Responsável</button>
-              <button onClick={() => setKanbanMode('status')} className={`px-3 py-1 text-xs rounded transition-colors ${kanbanMode === 'status' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Por Status</button>
+          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700 self-start sm:self-auto flex-shrink-0">
+              <button onClick={() => setKanbanMode('assignee')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${kanbanMode === 'assignee' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>Por Responsável</button>
+              <button onClick={() => setKanbanMode('status')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${kanbanMode === 'status' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>Por Status</button>
           </div>
       </div>
-      <div className="flex-1 overflow-x-auto pb-2">
-        <div className="flex gap-4 h-full min-w-max px-2 items-start">
-          {columns.map((col: any) => {
+      {/* Mobile Column Switcher (Pill Selector) */}
+      <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 custom-scrollbar">
+        <button
+          onClick={() => setMobileSelectedCol('all')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+            mobileSelectedCol === 'all'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'bg-slate-800/80 text-slate-400 border border-slate-700 hover:text-white'
+          }`}
+        >
+          Todas ({columns.length})
+        </button>
+        {columns.map((col: any) => {
+          const count = getTasksForColumn(col).length;
+          const isSelected = mobileSelectedCol === col.id;
+          return (
+            <button
+              key={col.id}
+              onClick={() => setMobileSelectedCol(col.id)}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                isSelected
+                  ? 'bg-indigo-600 text-white shadow-sm font-bold'
+                  : 'bg-slate-800/80 text-slate-300 border border-slate-700 hover:text-white'
+              }`}
+            >
+              <span className="truncate max-w-[110px]">{col.title}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${isSelected ? 'bg-indigo-900 text-white' : 'bg-slate-900 text-slate-400'}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
+        <div className={`flex gap-4 h-full px-1 items-start ${mobileSelectedCol === 'all' ? 'min-w-max' : 'w-full'}`}>
+          {columns.filter((col: any) => mobileSelectedCol === 'all' || col.id === mobileSelectedCol).map((col: any) => {
             const colTasks = getTasksForColumn(col);
             const isCompletedCol = col.type === 'completed' || (col.type === 'status_group' && col.id === 'col-done');
             const isUnassignedCol = col.type === 'unassigned';
@@ -1787,7 +1822,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
             }
 
             return (
-                <div key={col.id} className={`flex-1 min-w-[320px] w-[320px] rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus)}>
+                <div key={col.id} className={`${mobileSelectedCol !== 'all' ? 'w-full min-w-full' : 'w-[280px] sm:w-[320px] min-w-[280px] sm:min-w-[320px]'} flex-1 rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus)}>
                 <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${headerColor}`}>
                     <div className="flex items-center gap-2">
                          {icon}
@@ -4779,10 +4814,11 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
     );
 };
 
-const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any) => {
+const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCreateTask, onOpenUpload }: any) => {
   const navigate = useNavigate(); 
   const location = useLocation(); 
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   if (location.pathname === '/powerbi-data') return <>{children}</>;
 
@@ -4805,8 +4841,123 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any)
 
   return (
     <div className="flex h-screen bg-dark-900 text-slate-200 font-sans overflow-hidden">
-      {/* Sidebar */}
-      <aside className={`${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/80 backdrop-blur-xl border-r border-slate-700 flex flex-col h-full z-50 transition-all duration-300 ease-in-out relative shrink-0 select-none shadow-2xl`}>
+      {/* Mobile Backdrop Overlay */}
+      {isMobileDrawerOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 transition-opacity animate-fade-in"
+          onClick={() => setIsMobileDrawerOpen(false)}
+        />
+      )}
+
+      {/* Mobile Drawer (Slide-Over from Left) */}
+      <div 
+        className={`md:hidden fixed inset-y-0 left-0 w-72 max-w-[85vw] bg-slate-900 border-r border-slate-700/80 z-50 flex flex-col shadow-2xl transition-transform duration-300 ease-in-out ${
+          isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Mobile Drawer Header */}
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between h-16 shrink-0 bg-slate-950">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-xl shadow-md flex items-center justify-center font-black text-white text-base">
+              N
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white leading-none">Nexus</h2>
+              <span className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider">Project Cloud</span>
+            </div>
+          </div>
+          <button 
+            onClick={() => setIsMobileDrawerOpen(false)}
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+            title="Fechar menu"
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Mobile Quick Upload Action Button in Drawer */}
+        <div className="p-3 border-b border-slate-800 bg-slate-950/60">
+          <button
+            onClick={() => {
+              if (onOpenUpload) onOpenUpload();
+              setIsMobileDrawerOpen(false);
+            }}
+            className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95 transition-all"
+          >
+            <IconUpload className="w-4 h-4" />
+            <span>Importar Planilha / Backup</span>
+          </button>
+        </div>
+
+        {/* Mobile Navigation Links */}
+        <nav className="flex-1 min-h-0 p-3 space-y-1 overflow-y-auto custom-scrollbar">
+          {menuItems.map(item => {
+            const isActive = location.pathname === item.path;
+            return (
+              <button 
+                key={item.path} 
+                onClick={() => { 
+                  navigate(item.path); 
+                  setIsMobileDrawerOpen(false); 
+                }} 
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm font-medium ${
+                  isActive 
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50 font-semibold' 
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <span className="shrink-0">{item.icon}</span>
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Mobile Drawer Footer: Profile & Logout */}
+        <div className="p-3 border-t border-slate-800 bg-slate-950 shrink-0 space-y-2">
+          <div 
+            onClick={() => { 
+              navigate('/profile'); 
+              setIsMobileDrawerOpen(false); 
+            }} 
+            className="flex items-center gap-2.5 p-2 rounded-xl cursor-pointer hover:bg-slate-900 transition-colors"
+          >
+            <div className="w-9 h-9 rounded-full bg-slate-700 border-2 border-indigo-500/60 flex items-center justify-center text-xs font-bold text-indigo-300 overflow-hidden shrink-0">
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                (user?.name || 'U').substring(0, 2).toUpperCase()
+              )}
+            </div>
+            <div className="overflow-hidden flex-1 min-w-0">
+              <p className="text-xs font-semibold text-white truncate">{user?.name || 'Usuário'}</p>
+              <p className="text-[10px] text-slate-400 truncate font-mono">{user?.email || 'Sem email'}</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            {isGuestOrLocal && onGoogleLogin && (
+              <button
+                type="button"
+                onClick={() => { onGoogleLogin(); setIsMobileDrawerOpen(false); }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-indigo-900/50 hover:bg-indigo-800 border border-indigo-700 text-indigo-200 rounded-lg text-xs font-medium"
+              >
+                <span>Google</span>
+              </button>
+            )}
+            <button 
+              type="button" 
+              onClick={() => { onLogout(); setIsMobileDrawerOpen(false); }} 
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-rose-950/40 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded-lg text-xs font-semibold"
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Sidebar (hidden on mobile) */}
+      <aside className={`hidden md:flex ${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/80 backdrop-blur-xl border-r border-slate-700 flex-col h-full z-30 transition-all duration-300 ease-in-out relative shrink-0 select-none shadow-2xl`}>
         {/* Collapse toggle button */}
         <button 
           onClick={() => setIsCollapsed(!isCollapsed)} 
@@ -4851,7 +5002,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any)
           })}
         </nav>
 
-        {/* User profile & Logout - Pinned to bottom, ALWAYS visible */}
+        {/* User profile & Logout */}
         <div className="p-3 border-t border-slate-700/80 bg-slate-900/90 shrink-0 space-y-2">
           <div 
             onClick={() => navigate('/profile')} 
@@ -4877,7 +5028,6 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any)
             )}
           </div>
 
-          {/* Quick Action buttons */}
           <div className={`flex gap-1.5 ${isCollapsed ? 'flex-col items-center' : 'items-center'}`}>
             {isGuestOrLocal && onGoogleLogin && !isCollapsed && (
               <button
@@ -4914,69 +5064,55 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any)
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden relative flex flex-col">
         {/* Top Navbar */}
-        <header className="h-16 bg-slate-900/80 backdrop-blur-md flex items-center justify-between px-6 lg:px-8 z-30 sticky top-0 border-b border-slate-800 shrink-0">
-          {/* Cloud Badge */}
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1 rounded-full shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="hidden sm:inline">Firebase Nuvem</span> Ativo
+        <header className="h-16 bg-slate-900/90 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 z-30 sticky top-0 border-b border-slate-800 shrink-0 gap-2">
+          {/* Left: Mobile Hamburger & Brand/Status */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Hamburger Button on Mobile */}
+            <button
+              type="button"
+              onClick={() => setIsMobileDrawerOpen(true)}
+              className="md:hidden p-2 -ml-1 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors cursor-pointer"
+              title="Abrir menu lateral"
+            >
+              <IconMenu className="w-5 h-5" />
+            </button>
+
+            {/* Mobile Brand indicator */}
+            <div className="md:hidden flex items-center gap-2">
+              <div className="w-7 h-7 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg flex items-center justify-center font-black text-white text-xs shadow-md">
+                N
+              </div>
+            </div>
+
+            {/* Cloud Status Badge */}
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 sm:px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="hidden sm:inline">Firebase Nuvem</span>
+              <span className="sm:hidden text-[10px]">Nuvem</span>
             </span>
           </div>
 
           {/* Right Area: Action Buttons + Profile Chip + Google / Logout Buttons */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             <div className="pointer-events-auto flex items-center">
               {headerContent}
             </div>
 
-            <div className="w-px h-6 bg-slate-700 hidden sm:block"></div>
-
-            {/* Google Login button right in the top bar if on guest/local */}
-            {isGuestOrLocal && onGoogleLogin && (
-              <button
-                type="button"
-                onClick={onGoogleLogin}
-                className="hidden sm:flex items-center gap-2 bg-white hover:bg-slate-100 text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
-                title="Entrar com Conta Google no Firebase"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span>Entrar com Google</span>
-              </button>
-            )}
-
-            {/* Profile Button in Top Bar */}
+            {/* Profile Avatar Button */}
             <button
               type="button"
               onClick={() => navigate('/profile')}
-              className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700 text-slate-200 p-1 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
               title="Abrir Meu Perfil e Configurações"
             >
-              <div className="w-6 h-6 rounded-full bg-indigo-600 border border-indigo-400/50 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden shrink-0">
+              <div className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-indigo-600 border border-indigo-400/50 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden shrink-0">
                 {user?.avatar ? (
                   <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
                   (user?.name || 'U').substring(0, 2).toUpperCase()
                 )}
               </div>
-              <span className="hidden md:inline font-semibold">{user?.name?.split(' ')[0] || 'Perfil'}</span>
-            </button>
-
-            {/* Top Bar Logout Button */}
-            <button
-              type="button"
-              onClick={onLogout}
-              className="flex items-center gap-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-              title="Sair da conta e voltar para a tela de Login"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-              </svg>
-              <span className="hidden sm:inline">Sair</span>
+              <span className="hidden lg:inline font-semibold">{user?.name?.split(' ')[0] || 'Perfil'}</span>
             </button>
           </div>
         </header>
@@ -4985,9 +5121,66 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent }: any)
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" />
 
         {/* Main Content Viewport */}
-        <div className="flex-1 overflow-auto p-6 lg:p-10 z-10 relative">
+        <div className="flex-1 overflow-auto p-3.5 sm:p-5 md:p-6 lg:p-8 pb-24 md:pb-8 z-10 relative">
           {children}
         </div>
+
+        {/* Mobile Bottom Navigation Dock (Pinned to screen bottom on mobile) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 px-1.5 py-1 flex items-center justify-around shadow-2xl pb-[max(env(safe-area-inset-bottom),0.35rem)]">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] rounded-lg transition-colors cursor-pointer ${
+              location.pathname === '/' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconHome className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5 tracking-tight">Início</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/projects')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] rounded-lg transition-colors cursor-pointer ${
+              location.pathname === '/projects' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconProject className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5 tracking-tight">Projetos</span>
+          </button>
+
+          {/* Central Elevated Floating Action Button (+ Demanda) */}
+          <div className="flex-1 flex items-center justify-center -mt-5">
+            <button
+              type="button"
+              onClick={onCreateTask}
+              className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/40 hover:scale-105 active:scale-95 transition-transform border-2 border-slate-900 cursor-pointer"
+              title="Nova Demanda"
+            >
+              <IconPlus className="w-6 h-6 stroke-[2.5]" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/kanban')}
+            className={`flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] rounded-lg transition-colors cursor-pointer ${
+              location.pathname === '/kanban' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconKanban className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5 tracking-tight">Kanban</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsMobileDrawerOpen(true)}
+            className="flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] rounded-lg transition-colors cursor-pointer text-slate-400 hover:text-slate-200"
+          >
+            <IconMenu className="w-5 h-5" />
+            <span className="text-[10px] mt-0.5 tracking-tight">Menu</span>
+          </button>
+        </nav>
       </main>
     </div>
   );
@@ -5470,7 +5663,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         });
     };
 
-    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]"><div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button></div><div className="p-6 overflow-y-auto space-y-6 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all" /></div></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none" /></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-indigo-500"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-2 bg-rose-900/20 border border-rose-500/30 p-4 rounded-lg animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all" /></div>)}<div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
+    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh]"><div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-900/20 border border-rose-500/30 p-3 sm:p-4 rounded-lg animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-slate-900/30 p-3 rounded-xl border border-slate-700/50"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
 
         {/* Azure DevOps Integration Card */}
         <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/60 space-y-4">
@@ -5933,6 +6126,25 @@ export default function App() {
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
   const [backupExcelFile, setBackupExcelFile] = useState<File | null>(null);
   const [isProcessingBackupExcel, setIsProcessingBackupExcel] = useState(false);
+  const [uploadFeedback, setUploadFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [excelBackupPreview, setExcelBackupPreview] = useState<{
+    file: File;
+    snapshot: any;
+    stats: any;
+  } | null>(null);
+
+  // Sync state whenever backup restoration completes anywhere in the application
+  useEffect(() => {
+    const handleDataRestored = (e: any) => {
+      const payload = e.detail;
+      if (payload?.TASKS) setTasks(payload.TASKS);
+      if (payload?.DEVS && payload.DEVS.length > 0) setDevs(payload.DEVS);
+      if (payload?.ROBOTS && payload.ROBOTS.length > 0) setRobots(payload.ROBOTS);
+      if (payload?.SPRINTS && payload.SPRINTS.length > 0) setSprints(payload.SPRINTS);
+    };
+    window.addEventListener('nexus-data-restored', handleDataRestored);
+    return () => window.removeEventListener('nexus-data-restored', handleDataRestored);
+  }, []);
   const handleLogin = (loggedInUser: User) => {
     StorageService.clearAllMemory();
     setTasks([]);
@@ -6000,47 +6212,121 @@ export default function App() {
     uniqueAssignees.forEach(name => { if (name && !currentDevNames.has(name as string)) newDevsToAdd.push({ id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, name: name as string }); }); 
     if (newDevsToAdd.length > 0) { const updatedDevs = [...devs, ...newDevsToAdd]; setDevs(updatedDevs); StorageService.saveDevs(updatedDevs); } 
   };
-  const handleProcessAllUploads = async () => { let allNewTasks: Task[] = []; try { if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; processNewTasks(allNewTasks, 'Todas'); setIsUploadModalOpen(false); alert(`${allNewTasks.length} demandas processadas.`); } catch (e) { alert("Erro ao processar arquivos."); } };
-  const handleProcessSingleUpload = async (type: TaskType) => { const file = uploadFiles[type]; if (!file) return; try { const newTasks = await ExcelService.parseFile(file, type); processNewTasks(newTasks, type); alert(`${newTasks.length} demandas de ${type} processadas.`); setUploadFiles(prev => ({ ...prev, [type]: null })); } catch (e) { alert(`Erro ao processar ${type}.`); } };
-  const handleProcessBackupExcel = async () => {
-    if (!backupExcelFile) return;
+  const handleSelectBackupExcel = async (file: File | null) => {
+    setBackupExcelFile(file);
+    setUploadFeedback(null);
+    if (!file) {
+      setExcelBackupPreview(null);
+      return;
+    }
     setIsProcessingBackupExcel(true);
     try {
-      const res = await BackupService.importSnapshotFromExcel(backupExcelFile);
+      const res = await BackupService.importSnapshotFromExcel(file);
       if (res.success && res.snapshot) {
-        const stats = res.stats;
-        const confirmMsg = `Planilha de Backup Reconhecida com Sucesso!\n\n` +
-          `• Total de Demandas Reconhecidas: ${stats.tasksCount}\n` +
-          `• Incidentes: ${stats.incidentsCount}\n` +
-          `• Melhorias: ${stats.improvementsCount}\n` +
-          `• Novas Automações: ${stats.automationsCount}\n` +
-          `• Desenvolvedores: ${stats.devsCount}\n` +
-          `• Robôs RPA: ${stats.robotsCount}\n\n` +
-          `Deseja restaurar e sincronizar todas essas demandas diretamente no banco de dados agora?`;
-
-        if (window.confirm(confirmMsg)) {
-          const success = BackupService.restoreSnapshot(res.snapshot);
-          if (success) {
-            alert(`✔ Sucesso! ${stats.tasksCount} demandas foram sincronizadas diretamente com o banco de dados.`);
-            setIsUploadModalOpen(false);
-            setBackupExcelFile(null);
-            window.location.reload();
-          } else {
-            alert("Erro ao restaurar demandas no banco de dados.");
-          }
-        } else {
-          alert("Planilha adicionada ao histórico de backups (disponível na Central de Backup no Perfil).");
-          setIsUploadModalOpen(false);
-          setBackupExcelFile(null);
-        }
+        setExcelBackupPreview({
+          file,
+          snapshot: res.snapshot,
+          stats: res.stats
+        });
       } else {
-        alert(res.error || "Não foi possível reconhecer a planilha como backup.");
+        setUploadFeedback({ type: 'error', message: res.error || "Não foi possível reconhecer as colunas da planilha. Verifique o cabeçalho." });
       }
     } catch (err: any) {
-      alert(`Erro ao processar planilha: ${err.message || err}`);
+      setUploadFeedback({ type: 'error', message: `Erro ao processar planilha: ${err.message || err}` });
     } finally {
       setIsProcessingBackupExcel(false);
     }
+  };
+
+  const handleApplyExcelBackup = (mode: 'replace' | 'merge') => {
+    if (!excelBackupPreview) return;
+    const { snapshot, stats } = excelBackupPreview;
+    const newTasks = snapshot.dataPayload?.TASKS || [];
+    const newDevs = snapshot.dataPayload?.DEVS || [];
+    const newRobots = snapshot.dataPayload?.ROBOTS || [];
+
+    if (mode === 'replace') {
+      // 1. Immediately update in-memory React state
+      setTasks(newTasks);
+      if (newDevs.length > 0) setDevs(newDevs);
+      if (newRobots.length > 0) setRobots(newRobots);
+
+      // 2. Persist to storage service and cloud firestore
+      BackupService.restoreSnapshot(snapshot);
+
+      setUploadFeedback({
+        type: 'success',
+        message: `✔ Restauração Concluída! ${stats.tasksCount} demandas (${stats.incidentsCount} Incid., ${stats.improvementsCount} Melh., ${stats.automationsCount} Auto.) sincronizadas com sucesso!`
+      });
+    } else {
+      // Merge mode
+      const merged = StorageService.mergeTasks(newTasks);
+      setTasks(merged);
+
+      if (newDevs.length > 0) {
+        const currentDevs = StorageService.getDevs();
+        const currentNames = new Set(currentDevs.map(d => d.name));
+        const toAdd = newDevs.filter(d => !currentNames.has(d.name));
+        if (toAdd.length > 0) {
+          const updatedDevs = [...currentDevs, ...toAdd];
+          setDevs(updatedDevs);
+          StorageService.saveDevs(updatedDevs);
+        }
+      }
+
+      if (newRobots.length > 0) {
+        const currentRobots = StorageService.getRobots();
+        const currentNames = new Set(currentRobots.map(r => r.name.toLowerCase()));
+        const toAdd = newRobots.filter(r => !currentNames.has(r.name.toLowerCase()));
+        if (toAdd.length > 0) {
+          const updatedRobots = [...currentRobots, ...toAdd];
+          setRobots(updatedRobots);
+          StorageService.saveRobots(updatedRobots);
+        }
+      }
+
+      setUploadFeedback({
+        type: 'success',
+        message: `✔ Mesclagem Concluída! ${stats.tasksCount} demandas integradas à base existente!`
+      });
+    }
+
+    setTimeout(() => {
+      setIsUploadModalOpen(false);
+      setBackupExcelFile(null);
+      setExcelBackupPreview(null);
+      setUploadFeedback(null);
+    }, 1800);
+  };
+
+  const handleProcessAllUploads = async () => { 
+    let allNewTasks: Task[] = []; 
+    try { 
+      if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; 
+      if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; 
+      if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; 
+      processNewTasks(allNewTasks, 'Todas'); 
+      setUploadFeedback({ type: 'success', message: `✔ ${allNewTasks.length} demandas processadas e sincronizadas com sucesso!` });
+      setTimeout(() => { 
+        setIsUploadModalOpen(false); 
+        setUploadFeedback(null); 
+      }, 1500);
+    } catch (e) { 
+      setUploadFeedback({ type: 'error', message: "Erro ao processar arquivos de planilha." }); 
+    } 
+  };
+
+  const handleProcessSingleUpload = async (type: TaskType) => { 
+    const file = uploadFiles[type]; 
+    if (!file) return; 
+    try { 
+      const newTasks = await ExcelService.parseFile(file, type); 
+      processNewTasks(newTasks, type); 
+      setUploadFeedback({ type: 'success', message: `✔ ${newTasks.length} demandas de ${type} processadas com sucesso!` });
+      setUploadFiles(prev => ({ ...prev, [type]: null })); 
+    } catch (e) { 
+      setUploadFeedback({ type: 'error', message: `Erro ao processar ${type}.` }); 
+    } 
   };
   const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
   const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
@@ -6174,62 +6460,171 @@ export default function App() {
   };
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
-  const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions}>{isUploadModalOpen && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-slate-800 p-6 sm:p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
-      <div className="flex justify-between items-center mb-5 border-b border-slate-700 pb-3">
-        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+  const headerActions = (
+    <div className="flex items-center gap-1 sm:gap-2 bg-slate-800/90 p-1 rounded-xl backdrop-blur-md border border-slate-700/80">
+      <Button 
+        onClick={handleCreateTask} 
+        variant="primary" 
+        className="text-xs py-1.5 px-2.5 sm:px-3 bg-indigo-600 hover:bg-indigo-700 text-white border-none flex items-center gap-1.5 whitespace-nowrap shadow-sm font-semibold"
+      >
+        <IconPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> 
+        <span className="hidden sm:inline">Nova Demanda</span>
+        <span className="sm:hidden">+ Demanda</span>
+      </Button>
+      <div className="w-px bg-slate-700 h-5 self-center hidden sm:block"></div>
+      <Button 
+        onClick={() => setIsManageDevsOpen(true)} 
+        variant="secondary" 
+        className="hidden sm:flex text-xs py-1.5 px-2.5 bg-transparent border-none hover:bg-slate-700 text-slate-300 items-center gap-1.5"
+      >
+        <IconUsers className="w-3.5 h-3.5" /> Devs
+      </Button>
+      <Button 
+        onClick={() => setIsUploadModalOpen(true)} 
+        className="text-xs py-1.5 px-2 sm:px-2.5 flex items-center gap-1"
+        title="Importar Planilhas ou Backups"
+      >
+        <IconUpload className="w-3.5 h-3.5" /> 
+        <span className="hidden sm:inline">Upload</span>
+      </Button>
+    </div>
+  );
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)}>{isUploadModalOpen && (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+    <div className="bg-slate-800 p-5 sm:p-7 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+      <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-3">
+        <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
           <IconUpload className="w-5 h-5 text-indigo-400" />
           Importar Planilhas & Backups
         </h3>
-        <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+        <button onClick={() => { setIsUploadModalOpen(false); setExcelBackupPreview(null); setUploadFeedback(null); }} className="text-slate-400 hover:text-white p-1">✕</button>
       </div>
 
-      {/* Prominent Backup Excel Option */}
-      <div className="bg-gradient-to-r from-emerald-950/70 to-slate-900 border-2 border-emerald-500/50 rounded-xl p-4 mb-6 space-y-3">
+      {/* Real-time Notification Banner */}
+      {uploadFeedback && (
+        <div className={`p-3.5 rounded-xl text-xs font-semibold flex items-center gap-2.5 mb-4 animate-fade-in border ${
+          uploadFeedback.type === 'success' 
+            ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300' 
+            : uploadFeedback.type === 'error'
+            ? 'bg-rose-950/80 border-rose-500 text-rose-300'
+            : 'bg-indigo-950/80 border-indigo-500 text-indigo-300'
+        }`}>
+          {uploadFeedback.type === 'success' ? <IconCheck className="w-5 h-5 shrink-0 text-emerald-400" /> : <span className="text-base shrink-0">ℹ</span>}
+          <span>{uploadFeedback.message}</span>
+        </div>
+      )}
+
+      {/* Primary Section: Consolidated Backup Spreadsheet (.xlsx) */}
+      <div className="bg-gradient-to-r from-emerald-950/70 to-slate-900 border-2 border-emerald-500/50 rounded-xl p-4 mb-5 space-y-3 shadow-md">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-emerald-600/20 text-emerald-400 rounded-lg border border-emerald-500/30 flex-shrink-0 mt-0.5">
             <IconShieldCheck className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-white">Reconhecer Planilha Excel como Backup</h4>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="text-sm font-bold text-white">Planilha Excel Consolidada (Backup)</h4>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                Backup Consolidado
+                Auto Reconhecimento
               </span>
             </div>
             <p className="text-[11px] text-slate-300 mt-1">
-              Suba a planilha com todas as demandas (ID, Tipo, Resumo, etc.) para a ferramenta reconhecer e restaurar tudo diretamente no banco de dados.
+              Suba a planilha com todas as demandas (ID, Tipo, Resumo, Responsável, etc.) para carregar e sincronizar tudo diretamente no sistema.
             </p>
           </div>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
-          <input 
-            type="file" 
-            accept=".xlsx, .xls" 
-            onChange={(e) => setBackupExcelFile(e.target.files?.[0] || null)}
-            className="flex-1 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer border border-emerald-500/30 rounded-lg p-1 bg-slate-900/60"
-          />
-          <Button 
-            onClick={handleProcessBackupExcel} 
-            disabled={!backupExcelFile || isProcessingBackupExcel} 
-            className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold whitespace-nowrap py-2"
-          >
-            {isProcessingBackupExcel ? "Reconhecendo..." : "Restaurar Backup"}
-          </Button>
-        </div>
+
+        {/* File Picker or Preview */}
+        {!excelBackupPreview ? (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              disabled={isProcessingBackupExcel}
+              onChange={(e) => handleSelectBackupExcel(e.target.files?.[0] || null)}
+              className="flex-1 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer border border-emerald-500/30 rounded-lg p-1 bg-slate-900/60"
+            />
+            {isProcessingBackupExcel && (
+              <span className="text-xs text-emerald-400 font-semibold animate-pulse flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                Reconhecendo...
+              </span>
+            )}
+          </div>
+        ) : (
+          /* Preview and Confirmation Box */
+          <div className="bg-slate-900/90 border border-emerald-500/40 rounded-xl p-3.5 space-y-3 animate-fade-in">
+            <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span className="text-xs font-bold text-white truncate max-w-[240px]">
+                  {excelBackupPreview.file.name}
+                </span>
+              </div>
+              <button 
+                onClick={() => { setExcelBackupPreview(null); setBackupExcelFile(null); }}
+                className="text-[11px] text-slate-400 hover:text-rose-400 font-medium underline"
+              >
+                Trocar arquivo
+              </button>
+            </div>
+
+            {/* Badges Count */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
+              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+                <span className="block text-[10px] text-slate-400 uppercase font-semibold">Total Demandas</span>
+                <span className="text-base font-bold text-white">{excelBackupPreview.stats.tasksCount}</span>
+              </div>
+              <div className="bg-rose-950/30 p-2 rounded-lg border border-rose-500/30">
+                <span className="block text-[10px] text-rose-300 uppercase font-semibold">Incidentes</span>
+                <span className="text-base font-bold text-rose-400">{excelBackupPreview.stats.incidentsCount}</span>
+              </div>
+              <div className="bg-emerald-950/30 p-2 rounded-lg border border-emerald-500/30">
+                <span className="block text-[10px] text-emerald-300 uppercase font-semibold">Melhorias</span>
+                <span className="text-base font-bold text-emerald-400">{excelBackupPreview.stats.improvementsCount}</span>
+              </div>
+              <div className="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/30">
+                <span className="block text-[10px] text-indigo-300 uppercase font-semibold">Automações</span>
+                <span className="text-base font-bold text-indigo-400">{excelBackupPreview.stats.automationsCount}</span>
+              </div>
+              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+                <span className="block text-[10px] text-slate-400 uppercase font-semibold">Devs Detectados</span>
+                <span className="text-base font-bold text-slate-200">{excelBackupPreview.stats.devsCount}</span>
+              </div>
+              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+                <span className="block text-[10px] text-slate-400 uppercase font-semibold">Robôs RPA</span>
+                <span className="text-base font-bold text-slate-200">{excelBackupPreview.stats.robotsCount}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <Button 
+                onClick={() => handleApplyExcelBackup('replace')} 
+                className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 shadow-md shadow-emerald-900/40"
+              >
+                ✔ Substituir Banco de Dados
+              </Button>
+              <Button 
+                onClick={() => handleApplyExcelBackup('merge')} 
+                variant="secondary"
+                className="flex-1 text-xs font-semibold py-2"
+              >
+                ➕ Mesclar com Existentes
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-3 mb-5">
+      <div className="flex items-center gap-3 mb-4">
         <div className="h-px bg-slate-700 flex-1"></div>
         <span className="text-xs text-slate-400 font-medium">Ou importar planilhas por tipo individual:</span>
         <div className="h-px bg-slate-700 flex-1"></div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
-          <div key={type} className="flex items-end gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/60">
+          <div key={type} className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/60">
             <div className="flex-1">
               <label className="block text-xs font-semibold text-slate-300 mb-1">{type}</label>
               <input 
@@ -6242,18 +6637,26 @@ export default function App() {
             <Button 
               onClick={() => handleProcessSingleUpload(type as TaskType)} 
               disabled={!uploadFiles[type]} 
-              className="h-9 text-xs" 
+              className="h-8 sm:h-9 text-xs whitespace-nowrap self-end sm:self-auto" 
               variant="secondary"
             >
-              Processar
+              Processar {type}
             </Button>
           </div>
         ))}
       </div>
 
-      <div className="mt-6 flex justify-end gap-3 border-t border-slate-700 pt-4">
-        <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button>
-        <Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tipos</Button>
+      <div className="mt-5 flex justify-between items-center border-t border-slate-700 pt-3">
+        <Button variant="secondary" onClick={() => { setIsUploadModalOpen(false); setExcelBackupPreview(null); setUploadFeedback(null); }}>
+          Fechar
+        </Button>
+        <Button 
+          onClick={handleProcessAllUploads} 
+          disabled={!Object.values(uploadFiles).some(f => f !== null)}
+          className="text-xs"
+        >
+          Processar Todos os Tipos
+        </Button>
       </div>
     </div>
   </div>

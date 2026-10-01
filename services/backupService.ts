@@ -269,12 +269,12 @@ export const BackupService = {
 
       const payload = {
         TASKS: parsedResult.tasks,
-        DEVS: parsedResult.devs,
-        ROBOTS: parsedResult.robots,
-        SPRINTS: [],
-        WORKFLOW: [],
-        DOCUMENTS: [],
-        DEVOPS_CONFIG: { organization: '', project: '', pat: '', isActive: false }
+        DEVS: parsedResult.devs.length > 0 ? parsedResult.devs : StorageService.getDevs(),
+        ROBOTS: parsedResult.robots.length > 0 ? parsedResult.robots : StorageService.getRobots(),
+        SPRINTS: StorageService.getSprints(),
+        WORKFLOW: StorageService.getWorkflowConfig([]),
+        DOCUMENTS: StorageService.getDocumentsConfig([]),
+        DEVOPS_CONFIG: StorageService.getDevOpsConfig()
       };
 
       const jsonString = JSON.stringify(payload);
