@@ -13,8 +13,8 @@ const DEFAULT_CONFIG: BackupConfig = {
   maxSnapshotsRetention: 30,
 };
 
-// Global FileSystemDirectoryHandle reference in memory for current session if granted
 let dirHandleInMemory: any = null;
+let snapshotsInMemory: BackupSnapshot[] = [];
 
 export const BackupService = {
   getDirHandleInMemory: () => dirHandleInMemory,
@@ -39,15 +39,7 @@ export const BackupService = {
   },
 
   getSnapshots: (): BackupSnapshot[] => {
-    try {
-      const data = localStorage.getItem(SNAPSHOTS_KEY);
-      if (!data) return [];
-      const parsed = JSON.parse(data);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Error loading backup snapshots", e);
-      return [];
-    }
+    return snapshotsInMemory;
   },
 
   computeHash: (data: any): string => {
@@ -136,14 +128,14 @@ export const BackupService = {
         dataPayload: payload
       };
 
-      // 5. Atomic save to storage history with Retention Limit
+      // 5. Atomic save to memory history with Retention Limit
       let updatedSnapshots = [newSnapshot, ...snapshots];
       const maxRetention = config.maxSnapshotsRetention || 30;
       if (updatedSnapshots.length > maxRetention) {
         updatedSnapshots = updatedSnapshots.slice(0, maxRetention);
       }
 
-      localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(updatedSnapshots));
+      snapshotsInMemory = updatedSnapshots;
 
       // 6. Update config metadata
       const today = now.toISOString().split('T')[0];
@@ -245,7 +237,98 @@ export const BackupService = {
     URL.revokeObjectURL(url);
   },
 
+  // Export full backup directly to Excel (.xlsx) with all demand columns
+  exportBackupToExcel: (): void => {
+    const payload = StorageService.getFullBackup();
+    import('./excelService').then(({ ExcelService }) => {
+      ExcelService.exportBackupExcel(
+        payload.TASKS || [],
+        payload.ROBOTS || [],
+        payload.DEVS || []
+      );
+    });
+  },
+
+  // Parse and recognize Excel spreadsheet as backup snapshot
+  importSnapshotFromExcel: async (file: File): Promise<{ 
+    success: boolean; 
+    snapshot?: BackupSnapshot; 
+    stats?: any;
+    error?: string; 
+  }> => {
+    try {
+      const { ExcelService } = await import('./excelService');
+      const parsedResult = await ExcelService.parseBackupExcel(file);
+
+      if (!parsedResult.tasks || parsedResult.tasks.length === 0) {
+        return { 
+          success: false, 
+          error: 'Nenhuma demanda válida foi encontrada na planilha Excel. Verifique se a planilha possui colunas como ID, Tipo, Resumo ou Status.' 
+        };
+      }
+
+      const payload = {
+        TASKS: parsedResult.tasks,
+        DEVS: parsedResult.devs,
+        ROBOTS: parsedResult.robots,
+        SPRINTS: [],
+        WORKFLOW: [],
+        DOCUMENTS: [],
+        DEVOPS_CONFIG: { organization: '', project: '', pat: '', isActive: false }
+      };
+
+      const jsonString = JSON.stringify(payload);
+      const dataHash = BackupService.computeHash(jsonString);
+      const now = new Date();
+      const snapshot: BackupSnapshot = {
+        id: `snap-excel-${now.getTime()}`,
+        timestamp: now.toISOString(),
+        dateFormatted: now.toLocaleString('pt-BR'),
+        triggerReason: `Planilha Excel Reconhecida como Backup (${file.name})`,
+        dataHash,
+        stats: {
+          tasksCount: parsedResult.tasks.length,
+          robotsCount: parsedResult.robots.length,
+          sprintsCount: 0,
+          devsCount: parsedResult.devs.length,
+          workflowPhasesCount: 0,
+          documentsCount: 0
+        },
+        sizeKb: Math.round((new Blob([jsonString]).size / 1024) * 10) / 10,
+        dataPayload: payload
+      };
+
+      const snapshots = BackupService.getSnapshots();
+      snapshotsInMemory = [snapshot, ...snapshots];
+
+      window.dispatchEvent(new CustomEvent('nexus-auto-backup-completed', { detail: snapshot }));
+
+      return { 
+        success: true, 
+        snapshot, 
+        stats: parsedResult.stats 
+      };
+    } catch (err: any) {
+      console.error("Error importing Excel backup:", err);
+      return { 
+        success: false, 
+        error: `Erro ao processar planilha Excel: ${err.message || 'Arquivo corrompido ou formato incompatível.'}` 
+      };
+    }
+  },
+
   importSnapshotFromFile: async (file: File): Promise<{ success: boolean; snapshot?: BackupSnapshot; error?: string }> => {
+    // Check if uploaded file is an Excel file
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+      const excelRes = await BackupService.importSnapshotFromExcel(file);
+      return {
+        success: excelRes.success,
+        snapshot: excelRes.snapshot,
+        error: excelRes.error
+      };
+    }
+
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
@@ -298,8 +381,7 @@ export const BackupService = {
           };
 
           const snapshots = BackupService.getSnapshots();
-          const updated = [snapshot, ...snapshots];
-          localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(updated));
+          snapshotsInMemory = [snapshot, ...snapshots];
 
           resolve({ success: true, snapshot });
         } catch (err: any) {
@@ -312,19 +394,10 @@ export const BackupService = {
   },
 
   deleteSnapshot: (snapshotId: string): void => {
-    try {
-      const snapshots = BackupService.getSnapshots().filter(s => s.id !== snapshotId);
-      localStorage.setItem(SNAPSHOTS_KEY, JSON.stringify(snapshots));
-    } catch (e) {
-      console.error("Error deleting snapshot", e);
-    }
+    snapshotsInMemory = snapshotsInMemory.filter(s => s.id !== snapshotId);
   },
 
   clearAllSnapshots: (): void => {
-    try {
-      localStorage.removeItem(SNAPSHOTS_KEY);
-    } catch (e) {
-      console.error("Error clearing snapshots", e);
-    }
+    snapshotsInMemory = [];
   }
 };

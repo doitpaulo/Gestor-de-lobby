@@ -1,283 +1,247 @@
-
 import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig, normalizeStatus, normalizeTaskType } from '../types';
 import { BackupService } from './backupService';
 import { FirebaseService } from './firebase';
 
-const KEYS = {
-  TASKS: 'nexus_tasks_v2',
-  DEVS: 'nexus_devs_v2',
-  USER: 'nexus_user_active', // Active session
-  REGISTRY: 'nexus_users_registry', // All registered users
-  WORKFLOW: 'nexus_workflow_config_v4',
-  ROBOTS: 'nexus_robots_v1',
-  API_KEY: 'nexus_integration_key', // New Key
-  DOCUMENTS: 'nexus_docs_config_v1',
-  SPRINTS: 'nexus_sprints_v1',
-  DEVOPS_CONFIG: 'nexus_devops_config_v1'
-};
+// Purge all legacy localStorage data so that nothing is read from or saved to client disk
+try {
+  const legacyKeys = [
+    'nexus_tasks_v2',
+    'nexus_devs_v2',
+    'nexus_robots_v1',
+    'nexus_sprints_v1',
+    'nexus_workflow_config_v4',
+    'nexus_docs_config_v1',
+    'nexus_devops_config_v1',
+    'nexus_users_registry',
+    'nexus_backup_snapshots_v1',
+    'nexus_tasks',
+    'nexus_devs'
+  ];
+  legacyKeys.forEach(k => localStorage.removeItem(k));
+} catch (e) {
+  console.warn('Error purging legacy localStorage:', e);
+}
+
+// In-memory application store (Pure database runtime - no local storage persistence)
+let currentUserId: string | null = null;
+let inMemoryTasks: Task[] = [];
+let inMemoryDevs: Developer[] = []; // Starts strictly EMPTY [] (no mock/fake devs)
+let inMemoryRobots: Robot[] = [];
+let inMemorySprints: Sprint[] = [];
+let inMemoryWorkflow: WorkflowPhase[] = [];
+let inMemoryDocs: DocumentConfig[] = [];
+let inMemoryDevOps: DevOpsConfig = { organization: '', project: '', pat: '', isActive: false };
+let inMemoryUser: User | null = null;
+let inMemoryApiKey: string | null = null;
 
 export const StorageService = {
+  setCurrentUserId: (uid: string | null) => {
+    currentUserId = uid;
+  },
+
+  getCurrentUserId: () => currentUserId,
+
+  // Reset all state in memory to clean zero slate
+  clearAllMemory: () => {
+    currentUserId = null;
+    inMemoryTasks = [];
+    inMemoryDevs = [];
+    inMemoryRobots = [];
+    inMemorySprints = [];
+    inMemoryWorkflow = [];
+    inMemoryDocs = [];
+    inMemoryDevOps = { organization: '', project: '', pat: '', isActive: false };
+    inMemoryUser = null;
+  },
+
+  // --- Tasks ---
   getTasks: (): Task[] => {
-    try {
-      const data = localStorage.getItem(KEYS.TASKS);
-      if (!data) return [];
-      const parsed: any[] = JSON.parse(data);
-      if (!Array.isArray(parsed)) return [];
+    return inMemoryTasks;
+  },
 
-      let hasChanges = false;
-      const tasks: Task[] = parsed.map(t => {
-        const normStatus = normalizeStatus(t.status);
-        const normType = normalizeTaskType(t.type);
-        if (normStatus !== t.status || normType !== t.type) {
-          hasChanges = true;
-        }
-        return {
-          ...t,
-          status: normStatus,
-          type: normType
-        };
-      });
-
-      // Self-heal corrupted or misnamed statuses/types in storage
-      if (hasChanges) {
-        localStorage.setItem(KEYS.TASKS, JSON.stringify(tasks));
-      }
-
-      return tasks;
-    } catch (e) {
-      console.error("Error loading tasks", e);
-      return [];
-    }
+  setTasksInMemory: (tasks: Task[]) => {
+    inMemoryTasks = tasks.map(t => ({
+      ...t,
+      status: normalizeStatus(t.status),
+      type: normalizeTaskType(t.type)
+    }));
   },
 
   saveTasks: (tasks: Task[]) => {
-    try {
-      const sanitized = tasks.map(t => ({
-        ...t,
-        status: normalizeStatus(t.status),
-        type: normalizeTaskType(t.type)
-      }));
-      localStorage.setItem(KEYS.TASKS, JSON.stringify(sanitized));
-      BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
-      FirebaseService.saveTasksBatch(sanitized).catch(e => console.warn('Firebase batch sync warning:', e));
-    } catch (e) {
-      console.error("Error saving tasks", e);
-    }
+    const sanitized = tasks.map(t => ({
+      ...t,
+      status: normalizeStatus(t.status),
+      type: normalizeTaskType(t.type)
+    }));
+    inMemoryTasks = sanitized;
+    BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
+    FirebaseService.saveTasksBatch(sanitized, currentUserId || undefined).catch(e => console.warn('Firebase saveTasksBatch error:', e));
   },
   
   clearTasks: () => {
-    try {
-        localStorage.removeItem(KEYS.TASKS);
-        localStorage.removeItem(KEYS.ROBOTS);
-        BackupService.triggerAutoBackup("Reset / Limpeza de Dados");
-    } catch (e) {
-        console.error("Error clearing tasks", e);
-    }
+    inMemoryTasks = [];
+    inMemoryRobots = [];
+    BackupService.triggerAutoBackup("Reset / Limpeza de Dados");
+    FirebaseService.deleteAllTasks(currentUserId || undefined).catch(e => console.warn('Firebase deleteAllTasks error:', e));
   },
 
+  // --- Developers (starts empty - no pre-seeded default developers) ---
   getDevs: (): Developer[] => {
-    try {
-      const data = localStorage.getItem(KEYS.DEVS);
-      if (!data) {
-          const defaults = [
-              { id: '1', name: 'Ana Silva' },
-              { id: '2', name: 'Carlos Souza' },
-              { id: '3', name: 'Beatriz Costa' }
-          ];
-          localStorage.setItem(KEYS.DEVS, JSON.stringify(defaults));
-          return defaults;
-      }
-      return JSON.parse(data);
-    } catch (e) {
-      return [];
-    }
+    return inMemoryDevs;
+  },
+
+  setDevsInMemory: (devs: Developer[]) => {
+    inMemoryDevs = devs;
   },
 
   saveDevs: (devs: Developer[]) => {
-    localStorage.setItem(KEYS.DEVS, JSON.stringify(devs));
+    inMemoryDevs = devs;
     BackupService.triggerAutoBackup("Alteração na Equipe de Desenvolvedores");
-    FirebaseService.saveDevs(devs).catch(e => console.warn('Firebase saveDevs warning:', e));
+    FirebaseService.saveDevs(devs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
   },
 
   // --- Robots ---
   getRobots: (): Robot[] => {
-      try {
-          const data = localStorage.getItem(KEYS.ROBOTS);
-          return data ? JSON.parse(data) : [];
-      } catch {
-          return [];
-      }
+    return inMemoryRobots;
+  },
+
+  setRobotsInMemory: (robots: Robot[]) => {
+    inMemoryRobots = robots;
   },
 
   saveRobots: (robots: Robot[]) => {
-      localStorage.setItem(KEYS.ROBOTS, JSON.stringify(robots));
-      BackupService.triggerAutoBackup("Alteração nos Robôs RPA");
-      FirebaseService.saveRobots(robots).catch(e => console.warn('Firebase saveRobots warning:', e));
+    inMemoryRobots = robots;
+    BackupService.triggerAutoBackup("Alteração nos Robôs RPA");
+    FirebaseService.saveRobots(robots, currentUserId || undefined).catch(e => console.warn('Firebase saveRobots error:', e));
   },
 
   // --- Workflow Config ---
   getWorkflowConfig: (defaultConfig: WorkflowPhase[]): WorkflowPhase[] => {
-      try {
-          const data = localStorage.getItem(KEYS.WORKFLOW);
-          return data ? JSON.parse(data) : defaultConfig;
-      } catch {
-          return defaultConfig;
-      }
+    return inMemoryWorkflow.length > 0 ? inMemoryWorkflow : defaultConfig;
+  },
+
+  setWorkflowConfigInMemory: (config: WorkflowPhase[]) => {
+    inMemoryWorkflow = config;
   },
 
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
-      localStorage.setItem(KEYS.WORKFLOW, JSON.stringify(config));
-      BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
-      FirebaseService.saveSetting('workflow', config).catch(e => console.warn('Firebase saveSetting workflow warning:', e));
+    inMemoryWorkflow = config;
+    BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
+    FirebaseService.saveSetting('workflow', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting workflow error:', e));
   },
 
   // --- Documents Config ---
   getDocumentsConfig: (defaults: DocumentConfig[]): DocumentConfig[] => {
-      try {
-          const data = localStorage.getItem(KEYS.DOCUMENTS);
-          return data ? JSON.parse(data) : defaults;
-      } catch {
-          return defaults;
-      }
+    return inMemoryDocs.length > 0 ? inMemoryDocs : defaults;
+  },
+
+  setDocumentsConfigInMemory: (config: DocumentConfig[]) => {
+    inMemoryDocs = config;
   },
 
   saveDocumentsConfig: (config: DocumentConfig[]) => {
-      localStorage.setItem(KEYS.DOCUMENTS, JSON.stringify(config));
-      BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
-      FirebaseService.saveSetting('documents', config).catch(e => console.warn('Firebase saveSetting documents warning:', e));
+    inMemoryDocs = config;
+    BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
+    FirebaseService.saveSetting('documents', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting documents error:', e));
   },
 
   // --- Azure DevOps Configuration ---
   getDevOpsConfig: (): DevOpsConfig => {
-      try {
-          const data = localStorage.getItem(KEYS.DEVOPS_CONFIG);
-          return data ? JSON.parse(data) : { organization: '', project: '', pat: '', isActive: false };
-      } catch {
-          return { organization: '', project: '', pat: '', isActive: false };
-      }
+    return inMemoryDevOps;
+  },
+
+  setDevOpsConfigInMemory: (config: DevOpsConfig) => {
+    inMemoryDevOps = config;
   },
 
   saveDevOpsConfig: (config: DevOpsConfig) => {
-      localStorage.setItem(KEYS.DEVOPS_CONFIG, JSON.stringify(config));
-      BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
-      FirebaseService.saveSetting('devops', config).catch(e => console.warn('Firebase saveSetting devops warning:', e));
+    inMemoryDevOps = config;
+    BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
+    FirebaseService.saveSetting('devops', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting devops error:', e));
   },
 
   // --- API Key / Power BI ---
   getApiKey: (): string | null => {
-      return localStorage.getItem(KEYS.API_KEY);
+    return inMemoryApiKey;
   },
 
   saveApiKey: (key: string) => {
-      localStorage.setItem(KEYS.API_KEY, key);
+    inMemoryApiKey = key;
+    FirebaseService.saveSetting('apiKey', key, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting apiKey error:', e));
   },
 
   generateApiKey: (): string => {
-      const key = 'nx-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem(KEYS.API_KEY, key);
-      return key;
+    const key = 'nx-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    StorageService.saveApiKey(key);
+    return key;
   },
 
-  // --- Authentication Logic ---
-
-  getRegistry: (): User[] => {
-    const data = localStorage.getItem(KEYS.REGISTRY);
-    return data ? JSON.parse(data) : [];
-  },
-
-  registerUser: (user: User): boolean => {
-    const registry = StorageService.getRegistry();
-    if (registry.find(u => u.email === user.email)) {
-      return false; // User already exists
-    }
-    registry.push(user);
-    localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
-    BackupService.triggerAutoBackup("Novo Usuário Cadastrado");
-    return true;
-  },
-
-  authenticateUser: (email: string, password: string): User | null => {
-    const registry = StorageService.getRegistry();
-    const user = registry.find(u => u.email === email && u.password === password);
-    if (user) {
-      localStorage.setItem(KEYS.USER, JSON.stringify(user));
-      return user;
-    }
-    return null;
-  },
-
+  // --- User Session ---
   getUser: (): User | null => {
-    const data = localStorage.getItem(KEYS.USER);
-    return data ? JSON.parse(data) : null;
-  },
-
-  logout: () => {
-    localStorage.removeItem(KEYS.USER);
-    FirebaseService.logout().catch(e => console.warn('Firebase logout warning:', e));
+    return inMemoryUser;
   },
 
   updateUser: (updatedUser: User) => {
-    // 1. Update Active Session
-    localStorage.setItem(KEYS.USER, JSON.stringify(updatedUser));
+    inMemoryUser = updatedUser;
+    currentUserId = updatedUser.id;
+  },
 
-    // 2. Update Registry
-    const registry = StorageService.getRegistry();
-    const index = registry.findIndex(u => u.id === updatedUser.id);
-    if (index !== -1) {
-      registry[index] = updatedUser;
-      localStorage.setItem(KEYS.REGISTRY, JSON.stringify(registry));
-    }
-    BackupService.triggerAutoBackup("Atualização de Perfil de Usuário");
+  logout: () => {
+    StorageService.clearAllMemory();
+    FirebaseService.logout().catch(e => console.warn('Firebase logout warning:', e));
   },
 
   // --- Sprints ---
   getSprints: (): Sprint[] => {
-    try {
-      const data = localStorage.getItem(KEYS.SPRINTS);
-      const parsed = data ? JSON.parse(data) : [];
-      if (Array.isArray(parsed)) {
-        return parsed.map((s: any) => ({
-          ...s,
-          tasks: s && Array.isArray(s.tasks) ? s.tasks : []
-        }));
-      }
-      return [];
-    } catch {
-      return [];
-    }
+    return inMemorySprints;
+  },
+
+  setSprintsInMemory: (sprints: Sprint[]) => {
+    inMemorySprints = sprints;
   },
 
   saveSprints: (sprints: Sprint[]) => {
-    localStorage.setItem(KEYS.SPRINTS, JSON.stringify(sprints));
+    inMemorySprints = sprints;
     BackupService.triggerAutoBackup("Alteração nas Sprints");
-    FirebaseService.saveSprints(sprints).catch(e => console.warn('Firebase saveSprints warning:', e));
+    FirebaseService.saveSprints(sprints, currentUserId || undefined).catch(e => console.warn('Firebase saveSprints error:', e));
   },
 
-
-  // --- Backup & Restore ---
+  // --- Backup & Restore (Full Payload from Database memory) ---
   getFullBackup: () => {
-    const backup: Record<string, any> = {};
-    Object.entries(KEYS).forEach(([keyName, storageKey]) => {
-      const data = localStorage.getItem(storageKey);
-      if (data) {
-        try {
-          backup[keyName] = JSON.parse(data);
-        } catch {
-          backup[keyName] = data;
-        }
-      }
-    });
-    return backup;
+    return {
+      TASKS: inMemoryTasks,
+      DEVS: inMemoryDevs,
+      ROBOTS: inMemoryRobots,
+      SPRINTS: inMemorySprints,
+      WORKFLOW: inMemoryWorkflow,
+      DOCUMENTS: inMemoryDocs,
+      DEVOPS_CONFIG: inMemoryDevOps
+    };
   },
 
   restoreBackup: (backup: Record<string, any>) => {
     try {
-      Object.entries(backup).forEach(([keyName, data]) => {
-        const storageKey = (KEYS as any)[keyName];
-        if (storageKey && data !== undefined && data !== null) {
-          localStorage.setItem(storageKey, typeof data === 'string' ? data : JSON.stringify(data));
-        }
-      });
+      if (backup.TASKS && Array.isArray(backup.TASKS)) {
+        StorageService.saveTasks(backup.TASKS);
+      }
+      if (backup.DEVS && Array.isArray(backup.DEVS)) {
+        StorageService.saveDevs(backup.DEVS);
+      }
+      if (backup.ROBOTS && Array.isArray(backup.ROBOTS)) {
+        StorageService.saveRobots(backup.ROBOTS);
+      }
+      if (backup.SPRINTS && Array.isArray(backup.SPRINTS)) {
+        StorageService.saveSprints(backup.SPRINTS);
+      }
+      if (backup.WORKFLOW && Array.isArray(backup.WORKFLOW)) {
+        StorageService.saveWorkflowConfig(backup.WORKFLOW);
+      }
+      if (backup.DOCUMENTS && Array.isArray(backup.DOCUMENTS)) {
+        StorageService.saveDocumentsConfig(backup.DOCUMENTS);
+      }
+      if (backup.DEVOPS_CONFIG && typeof backup.DEVOPS_CONFIG === 'object') {
+        StorageService.saveDevOpsConfig(backup.DEVOPS_CONFIG);
+      }
       return true;
     } catch (e) {
       console.error("Error restoring backup", e);
@@ -285,7 +249,7 @@ export const StorageService = {
     }
   },
   
-  // Intelligent Merge Logic
+  // Intelligent Merge Logic directly into in-memory store and Firestore
   mergeTasks: (newTasks: Task[]) => {
     const currentTasks = StorageService.getTasks();
     const taskMap = new Map(currentTasks.map(t => [t.id, t]));
@@ -306,19 +270,18 @@ export const StorageService = {
           requester: newTask.requester,
           assignee: newTask.assignee ? newTask.assignee : existing.assignee,
           
-          // STRICTLY PRESERVE LOCAL FIELDS
           startDate: existing.startDate,
           endDate: existing.endDate,
           estimatedTime: existing.estimatedTime,
           actualTime: existing.actualTime,
-          projectData: existing.projectData, // Preserve project lifecycle
-          projectPath: existing.projectPath, // Preserve project path
-          automationName: newTask.automationName || existing.automationName, // Preserve automation name
-          fteValue: existing.fteValue, // Preserve FTE
-          managementArea: existing.managementArea, // Preserve Management Area
-          blocker: existing.blocker, // Preserve Blocker
-          docStatuses: existing.docStatuses, // Preserve Document Statuses
-          subTasks: existing.subTasks // Preserve Sub-tasks
+          projectData: existing.projectData,
+          projectPath: existing.projectPath,
+          automationName: newTask.automationName || existing.automationName,
+          fteValue: existing.fteValue,
+          managementArea: existing.managementArea,
+          blocker: existing.blocker,
+          docStatuses: existing.docStatuses,
+          subTasks: existing.subTasks
         };
 
         taskMap.set(newTask.id, mergedTask);
@@ -334,5 +297,12 @@ export const StorageService = {
     const merged = Array.from(taskMap.values());
     StorageService.saveTasks(merged);
     return merged;
+  },
+
+  // Completely wipe all data across tool and database
+  resetEverything: async () => {
+    const uid = currentUserId;
+    StorageService.clearAllMemory();
+    await FirebaseService.resetAllUserData(uid || undefined);
   }
 };

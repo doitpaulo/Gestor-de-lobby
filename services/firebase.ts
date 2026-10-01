@@ -40,6 +40,20 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
+// Helper to sanitize payload for Firestore (removes undefined values which cause Firestore errors)
+const cleanForFirestore = (obj: any): any => {
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(cleanForFirestore);
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      cleaned[key] = cleanForFirestore(value);
+    }
+  }
+  return cleaned;
+};
+
 // Authentication Helpers
 export const FirebaseService = {
   // Login with Google Popup
@@ -179,9 +193,48 @@ export const FirebaseService = {
 
   // --- Real-time Firestore Sync & Persistence ---
 
-  // Subscribe to real-time Tasks
-  subscribeTasks: (onTasks: (tasks: Task[]) => void) => {
-    const colRef = collection(db, 'tasks');
+  // Helper to resolve collection reference (user-scoped or global fallback)
+  getTargetCol: (colName: string, userId?: string) => {
+    const uid = userId || auth.currentUser?.uid;
+    if (uid) {
+      return collection(db, 'users', uid, colName);
+    }
+    return collection(db, colName);
+  },
+
+  getTargetDoc: (colName: string, docId: string, userId?: string) => {
+    const uid = userId || auth.currentUser?.uid;
+    if (uid) {
+      return doc(db, 'users', uid, colName, docId);
+    }
+    return doc(db, colName, docId);
+  },
+
+  // Migrate legacy top-level tasks to user collection if existing admin
+  migrateLegacyDataIfNeeded: async (user: User) => {
+    try {
+      if (!user || !user.id) return;
+      const userTasksCol = collection(db, 'users', user.id, 'tasks');
+      const userSnap = await getDocs(userTasksCol);
+      if (userSnap.empty && user.email === 'pauloo201113@gmail.com') {
+        const topSnap = await getDocs(collection(db, 'tasks'));
+        if (!topSnap.empty) {
+          const batch = writeBatch(db);
+          topSnap.forEach(d => {
+            batch.set(doc(db, 'users', user.id, 'tasks', d.id), d.data());
+          });
+          await batch.commit();
+          console.log(`[FirebaseService] Migrados ${topSnap.size} registros legados para o usuário.`);
+        }
+      }
+    } catch (e) {
+      console.warn('[FirebaseService] Migration notice:', e);
+    }
+  },
+
+  // Subscribe to real-time Tasks directly from Firestore
+  subscribeTasks: (onTasks: (tasks: Task[]) => void, userId?: string) => {
+    const colRef = FirebaseService.getTargetCol('tasks', userId);
     return onSnapshot(colRef, (snapshot) => {
       const tasks: Task[] = [];
       snapshot.forEach(docSnap => {
@@ -193,33 +246,35 @@ export const FirebaseService = {
     });
   },
 
-  // Save/Update a single task
-  saveTask: async (task: Task) => {
+  // Save/Update a single task directly in Firestore
+  saveTask: async (task: Task, userId?: string) => {
     try {
-      await setDoc(doc(db, 'tasks', task.id), {
+      const docRef = FirebaseService.getTargetDoc('tasks', task.id, userId);
+      const data = cleanForFirestore({
         ...task,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      });
+      await setDoc(docRef, data, { merge: true });
     } catch (error) {
       console.error('Error saving task to Firestore:', error);
       throw error;
     }
   },
 
-  // Batch save multiple tasks (e.g. from Excel upload or merge)
-  saveTasksBatch: async (tasks: Task[]) => {
+  // Batch save multiple tasks directly in Firestore
+  saveTasksBatch: async (tasks: Task[], userId?: string) => {
     try {
-      // Firestore batches support up to 500 writes
       const batchSize = 400;
       for (let i = 0; i < tasks.length; i += batchSize) {
         const slice = tasks.slice(i, i + batchSize);
         const batch = writeBatch(db);
         slice.forEach(t => {
-          const ref = doc(db, 'tasks', t.id);
-          batch.set(ref, {
+          const ref = FirebaseService.getTargetDoc('tasks', t.id, userId);
+          const data = cleanForFirestore({
             ...t,
             updatedAt: new Date().toISOString()
-          }, { merge: true });
+          });
+          batch.set(ref, data, { merge: true });
         });
         await batch.commit();
       }
@@ -228,20 +283,34 @@ export const FirebaseService = {
     }
   },
 
-  // Delete a task
-  deleteTask: async (taskId: string) => {
+  // Delete a task directly from Firestore
+  deleteTask: async (taskId: string, userId?: string) => {
     try {
-      await deleteDoc(doc(db, 'tasks', taskId));
+      const docRef = FirebaseService.getTargetDoc('tasks', taskId, userId);
+      await deleteDoc(docRef);
     } catch (error) {
       console.error('Error deleting task from Firestore:', error);
       throw error;
     }
   },
 
-  // Fetch all tasks once
-  fetchTasks: async (): Promise<Task[]> => {
+  // Delete all tasks for user
+  deleteAllTasks: async (userId?: string) => {
     try {
-      const snap = await getDocs(collection(db, 'tasks'));
+      const colRef = FirebaseService.getTargetCol('tasks', userId);
+      const snap = await getDocs(colRef);
+      const batch = writeBatch(db);
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    } catch (error) {
+      console.error('Error deleting all tasks:', error);
+    }
+  },
+
+  // Fetch all tasks once directly from Firestore
+  fetchTasks: async (userId?: string): Promise<Task[]> => {
+    try {
+      const snap = await getDocs(FirebaseService.getTargetCol('tasks', userId));
       const tasks: Task[] = [];
       snap.forEach(d => tasks.push(d.data() as Task));
       return tasks;
@@ -251,20 +320,22 @@ export const FirebaseService = {
     }
   },
 
-  // Devs sync
-  subscribeDevs: (onDevs: (devs: Developer[]) => void) => {
-    return onSnapshot(collection(db, 'devs'), snap => {
+  // Devs sync directly with Firestore
+  subscribeDevs: (onDevs: (devs: Developer[]) => void, userId?: string) => {
+    const colRef = FirebaseService.getTargetCol('devs', userId);
+    return onSnapshot(colRef, snap => {
       const devs: Developer[] = [];
       snap.forEach(d => devs.push(d.data() as Developer));
-      if (devs.length > 0) onDevs(devs);
+      onDevs(devs);
     }, (err) => console.warn('Devs snapshot error:', err));
   },
 
-  saveDevs: async (devs: Developer[]) => {
+  saveDevs: async (devs: Developer[], userId?: string) => {
     try {
       const batch = writeBatch(db);
       devs.forEach(d => {
-        batch.set(doc(db, 'devs', d.id), d, { merge: true });
+        const ref = FirebaseService.getTargetDoc('devs', d.id, userId);
+        batch.set(ref, d, { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -272,20 +343,22 @@ export const FirebaseService = {
     }
   },
 
-  // Robots sync
-  subscribeRobots: (onRobots: (robots: Robot[]) => void) => {
-    return onSnapshot(collection(db, 'robots'), snap => {
+  // Robots sync directly with Firestore
+  subscribeRobots: (onRobots: (robots: Robot[]) => void, userId?: string) => {
+    const colRef = FirebaseService.getTargetCol('robots', userId);
+    return onSnapshot(colRef, snap => {
       const robots: Robot[] = [];
       snap.forEach(d => robots.push(d.data() as Robot));
       onRobots(robots);
     }, (err) => console.warn('Robots snapshot error:', err));
   },
 
-  saveRobots: async (robots: Robot[]) => {
+  saveRobots: async (robots: Robot[], userId?: string) => {
     try {
       const batch = writeBatch(db);
       robots.forEach(r => {
-        batch.set(doc(db, 'robots', r.id), r, { merge: true });
+        const ref = FirebaseService.getTargetDoc('robots', r.id, userId);
+        batch.set(ref, r, { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -293,20 +366,22 @@ export const FirebaseService = {
     }
   },
 
-  // Sprints sync
-  subscribeSprints: (onSprints: (sprints: Sprint[]) => void) => {
-    return onSnapshot(collection(db, 'sprints'), snap => {
+  // Sprints sync directly with Firestore
+  subscribeSprints: (onSprints: (sprints: Sprint[]) => void, userId?: string) => {
+    const colRef = FirebaseService.getTargetCol('sprints', userId);
+    return onSnapshot(colRef, snap => {
       const sprints: Sprint[] = [];
       snap.forEach(d => sprints.push(d.data() as Sprint));
       onSprints(sprints);
     }, (err) => console.warn('Sprints snapshot error:', err));
   },
 
-  saveSprints: async (sprints: Sprint[]) => {
+  saveSprints: async (sprints: Sprint[], userId?: string) => {
     try {
       const batch = writeBatch(db);
       sprints.forEach(s => {
-        batch.set(doc(db, 'sprints', s.id), s, { merge: true });
+        const ref = FirebaseService.getTargetDoc('sprints', s.id, userId);
+        batch.set(ref, s, { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -314,18 +389,20 @@ export const FirebaseService = {
     }
   },
 
-  // Workflow & Pipeline Settings
-  saveSetting: async (key: string, value: any) => {
+  // Workflow & Pipeline Settings directly in Firestore
+  saveSetting: async (key: string, value: any, userId?: string) => {
     try {
-      await setDoc(doc(db, 'settings', key), { value, updatedAt: new Date().toISOString() });
+      const docRef = FirebaseService.getTargetDoc('settings', key, userId);
+      await setDoc(docRef, { value, updatedAt: new Date().toISOString() });
     } catch (e) {
       console.warn(`Error saving setting ${key}:`, e);
     }
   },
 
-  getSetting: async <T>(key: string, fallback: T): Promise<T> => {
+  getSetting: async <T>(key: string, fallback: T, userId?: string): Promise<T> => {
     try {
-      const snap = await getDoc(doc(db, 'settings', key));
+      const docRef = FirebaseService.getTargetDoc('settings', key, userId);
+      const snap = await getDoc(docRef);
       if (snap.exists() && snap.data()?.value !== undefined) {
         return snap.data().value as T;
       }
@@ -336,10 +413,11 @@ export const FirebaseService = {
   },
 
   // Cloud Backups stored directly in Firestore
-  saveCloudBackup: async (backupData: any, reason: string) => {
+  saveCloudBackup: async (backupData: any, reason: string, userId?: string) => {
     try {
       const backupId = `bkp_${Date.now()}`;
-      await setDoc(doc(db, 'backups', backupId), {
+      const docRef = FirebaseService.getTargetDoc('backups', backupId, userId);
+      await setDoc(docRef, {
         id: backupId,
         timestamp: new Date().toISOString(),
         reason,
@@ -352,9 +430,9 @@ export const FirebaseService = {
     }
   },
 
-  getCloudBackupsList: async () => {
+  getCloudBackupsList: async (userId?: string) => {
     try {
-      const snap = await getDocs(collection(db, 'backups'));
+      const snap = await getDocs(FirebaseService.getTargetCol('backups', userId));
       const list: Array<{ id: string, timestamp: string, reason: string }> = [];
       snap.forEach(d => {
         const item = d.data();
@@ -367,9 +445,10 @@ export const FirebaseService = {
     }
   },
 
-  restoreCloudBackup: async (backupId: string) => {
+  restoreCloudBackup: async (backupId: string, userId?: string) => {
     try {
-      const snap = await getDoc(doc(db, 'backups', backupId));
+      const docRef = FirebaseService.getTargetDoc('backups', backupId, userId);
+      const snap = await getDoc(docRef);
       if (snap.exists()) {
         return snap.data()?.data || null;
       }
@@ -377,5 +456,42 @@ export const FirebaseService = {
       console.error('Error restoring cloud backup:', e);
     }
     return null;
+  },
+
+  // Completely wipe all user data in Firestore
+  resetAllUserData: async (userId?: string) => {
+    try {
+      const collectionsToWipe = ['tasks', 'devs', 'robots', 'sprints', 'settings'];
+      for (const colName of collectionsToWipe) {
+        const colRef = FirebaseService.getTargetCol(colName, userId);
+        const snap = await getDocs(colRef);
+        if (!snap.empty) {
+          const batch = writeBatch(db);
+          snap.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+
+      // Also clean up top-level collections if admin user
+      const currentUid = userId || auth.currentUser?.uid;
+      if (currentUid) {
+        const userDoc = await getDoc(doc(db, 'users', currentUid));
+        const email = userDoc.exists() ? userDoc.data().email : '';
+        if (email === 'pauloo201113@gmail.com') {
+          for (const colName of ['tasks', 'devs', 'robots', 'sprints']) {
+            const topSnap = await getDocs(collection(db, colName));
+            if (!topSnap.empty) {
+              const batch = writeBatch(db);
+              topSnap.forEach(d => batch.delete(d.ref));
+              await batch.commit();
+            }
+          }
+        }
+      }
+      return true;
+    } catch (error) {
+      console.error('Error wiping all data in Firestore:', error);
+      throw error;
+    }
   }
 };

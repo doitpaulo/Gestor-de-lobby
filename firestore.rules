@@ -11,6 +11,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && (request.auth.uid == userId || !exists(/databases/$(database)/documents/users/$(userId)));
+
+      // User-specific isolated workspace (tasks, devs, robots, sprints, settings, backups)
+      match /{allSubcollections=**} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
     }
 
     // Tasks, automations, improvements, incidents

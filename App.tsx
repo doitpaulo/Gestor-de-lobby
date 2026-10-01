@@ -13,7 +13,7 @@ import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, normalizeStatus, normalizeTaskType } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
@@ -4532,11 +4532,31 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
   );
 };
 
-const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => void }) => {
-    const [name, setName] = useState(user.name); const [avatar, setAvatar] = useState(user.avatar || ''); const [password, setPassword] = useState(user.password || '');
+const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => Promise<boolean | void> | void }) => {
+    const [name, setName] = useState(user.name); 
+    const [avatar, setAvatar] = useState(user.avatar || ''); 
+    const [password, setPassword] = useState(user.password || '');
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
+    const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
+    const [resetSuccessMessage, setResetSuccessMessage] = useState('');
+
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
+
+    const handleConfirmReset = async () => {
+      setIsResetting(true);
+      try {
+        await onResetData();
+        setIsResetModalOpen(false);
+        setResetSuccessMessage('Todos os dados da ferramenta e do banco de dados foram apagados com sucesso!');
+        setTimeout(() => setResetSuccessMessage(''), 7000);
+      } catch (err: any) {
+        alert('Erro ao apagar dados do banco de dados: ' + (err.message || err));
+      } finally {
+        setIsResetting(false);
+      }
+    };
 
     return (
       <div className="max-w-4xl mx-auto space-y-8 pb-16 animate-fade-in">
@@ -4674,14 +4694,87 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
         {/* Danger Zone */}
         <div className="border-t border-slate-800 pt-8">
           <h3 className="text-lg font-bold text-rose-500 mb-2">Zona de Perigo</h3>
+
+          {resetSuccessMessage && (
+            <div className="mb-4 p-4 rounded-xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-sm flex items-center gap-3">
+              <span className="text-emerald-400 font-bold text-base">✓</span>
+              <span>{resetSuccessMessage}</span>
+            </div>
+          )}
+
           <div className="bg-rose-900/10 border border-rose-900/30 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <p className="text-slate-200 font-bold text-sm">Resetar Dados e Configurações</p>
               <p className="text-xs text-slate-400 mt-0.5">Apaga todas as tarefas e restaura as configurações de fábrica. Um backup preventivo será registrado automaticamente antes de resetar.</p>
             </div>
-            <Button variant="danger" onClick={() => { if(window.confirm("Tem certeza absoluta de que deseja apagar todas as demandas? Um backup de segurança será gravado antes da exclusão.")) onResetData(); }}>Resetar Tudo</Button>
+            <Button variant="danger" onClick={() => setIsResetModalOpen(true)}>Resetar Tudo</Button>
           </div>
         </div>
+
+        {/* Modal Popup Sim/Não para confirmação de exclusão total no banco de dados */}
+        {isResetModalOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left">
+              <div className="w-14 h-14 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-500 mb-4 mx-auto">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+
+              <h3 className="text-xl font-bold text-center text-white mb-2">
+                Apagar Todos os Dados do Banco de Dados?
+              </h3>
+
+              <div className="bg-rose-950/40 border border-rose-900/60 rounded-xl p-4 my-4 text-xs text-rose-200 space-y-2">
+                <p className="font-bold text-rose-400 text-sm">Aviso Importante: Esta ação é definitiva e irreversível!</p>
+                <p>Ao confirmar, <strong>todos os dados da ferramenta serão excluídos do banco de dados Firestore</strong>:</p>
+                <ul className="list-disc list-inside space-y-1 text-slate-300 pl-1">
+                  <li>Todas as Demandas, Projetos, Incidentes e Automações</li>
+                  <li>Toda a Equipe de Desenvolvedores</li>
+                  <li>Todos os Robôs RPA e Inventário de Automações</li>
+                  <li>Todas as Sprints e Cronogramas de Execução</li>
+                  <li>Configurações de Fases e Esteira Documental</li>
+                </ul>
+                <p className="text-slate-400 italic pt-1 text-[11px]">
+                  * Um backup preventivo de segurança será gerado automaticamente antes da exclusão.
+                </p>
+              </div>
+
+              <p className="text-sm text-center text-slate-300 mb-6">
+                Você confirma que deseja apagar permanentemente todos os registros do banco de dados?
+              </p>
+
+              <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsResetModalOpen(false)}
+                  disabled={isResetting}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition font-medium text-sm disabled:opacity-50 cursor-pointer"
+                >
+                  Não, Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReset}
+                  disabled={isResetting}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm shadow-lg shadow-rose-900/40 transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {isResetting ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Apagando do Banco...
+                    </>
+                  ) : (
+                    'Sim, Apagar Tudo'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
 };
@@ -4913,6 +5006,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
         setIsLoading(true);
         try {
             const user = await FirebaseService.loginWithGoogle();
+            StorageService.clearAllMemory();
             StorageService.updateUser(user);
             onLogin(user);
         } catch (err: any) {
@@ -4921,6 +5015,8 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                 setError('A janela de login do Google foi fechada antes de concluir.');
             } else if (err.code === 'auth/cancelled-popup-request') {
                 setError('Operação cancelada.');
+            } else if (err.code === 'auth/unauthorized-domain') {
+                setError(`Domínio não autorizado no Firebase (${window.location.hostname}). Adicione este domínio no Firebase Console > Authentication > Settings > Authorized domains.`);
             } else {
                 setError(err.message || 'Falha ao autenticar com Google.');
             }
@@ -4948,6 +5044,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                 }
                 try {
                     const fbUser = await FirebaseService.registerWithEmail(email, password, name);
+                    StorageService.clearAllMemory();
                     StorageService.updateUser(fbUser);
                     alert('Conta criada com sucesso no Firebase!');
                     onLogin(fbUser);
@@ -4959,15 +5056,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                     } else if (fbErr.code === 'auth/invalid-email') {
                         setError('Formato de e-mail inválido.');
                     } else {
-                        // Fallback to local registration if offline
-                        const newUser: User = { id: Date.now().toString(), email, name, password };
-                        const success = StorageService.registerUser(newUser);
-                        if (success) {
-                            alert('Conta criada localmente! Faça login.');
-                            setIsRegister(false);
-                        } else {
-                            setError('Email já cadastrado.');
-                        }
+                        setError(fbErr.message || 'Erro ao criar conta no Firebase.');
                     }
                 }
             } else {
@@ -4978,19 +5067,14 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                 }
                 try {
                     const fbUser = await FirebaseService.loginWithEmail(email, password);
+                    StorageService.clearAllMemory();
                     StorageService.updateUser(fbUser);
                     onLogin(fbUser);
                 } catch (fbErr: any) {
-                    // Try local fallback
-                    const localUser = StorageService.authenticateUser(email, password);
-                    if (localUser) {
-                        onLogin(localUser);
+                    if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
+                        setError('Email ou senha incorretos.');
                     } else {
-                        if (fbErr.code === 'auth/invalid-credential' || fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password') {
-                            setError('Email ou senha incorretos.');
-                        } else {
-                            setError(fbErr.message || 'Credenciais inválidas.');
-                        }
+                        setError(fbErr.message || 'Credenciais inválidas.');
                     }
                 }
             }
@@ -5003,10 +5087,12 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
         setIsLoading(true);
         try {
             const guestUser = await FirebaseService.loginAsGuest();
+            StorageService.clearAllMemory();
             StorageService.updateUser(guestUser);
             onLogin(guestUser);
         } catch {
-            const localGuest: User = { id: 'guest-1', name: 'Visitante', email: 'convidado@nexus.app' };
+            const localGuest: User = { id: 'guest-' + Date.now(), name: 'Visitante', email: 'convidado@nexus.app' };
+            StorageService.clearAllMemory();
             StorageService.updateUser(localGuest);
             onLogin(localGuest);
         } finally {
@@ -5599,12 +5685,12 @@ const PowerBIDataView = () => {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
-  const [tasks, setTasks] = useState<Task[]>(StorageService.getTasks());
-  const [devs, setDevs] = useState<Developer[]>(StorageService.getDevs());
-  const [robots, setRobots] = useState<Robot[]>(StorageService.getRobots());
-  const [sprints, setSprints] = useState<Sprint[]>(StorageService.getSprints());
-  const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
-  const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(StorageService.getDocumentsConfig(DEFAULT_DOCS));
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [devs, setDevs] = useState<Developer[]>([]);
+  const [robots, setRobots] = useState<Robot[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(DEFAULT_WORKFLOW);
+  const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(DEFAULT_DOCS);
 
   const syncTaskWithSprints = (task: Task, currentSprints: Sprint[]) => {
     const phaseId = task.projectData?.currentPhaseId || '1';
@@ -5779,53 +5865,60 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
-  // Firebase Firestore Real-Time Sync across devices
+  // Firebase Firestore Real-Time Sync across devices directly with Database
   useEffect(() => {
-    if (!user) return;
+    if (!user || !user.id) {
+      setTasks([]);
+      setDevs([]);
+      setRobots([]);
+      setSprints([]);
+      return;
+    }
 
-    // Initial check: if remote is empty but local has data, upload local data to Firestore
-    const initialSync = async () => {
-      try {
-        const remoteTasks = await FirebaseService.fetchTasks();
-        if (remoteTasks.length === 0 && tasks.length > 0) {
-          await FirebaseService.saveTasksBatch(tasks);
-        } else if (remoteTasks.length > 0) {
-          const merged = StorageService.mergeTasks(remoteTasks);
-          setTasks(merged);
-        }
-      } catch (e) {
-        console.warn('Initial Firebase sync warning:', e);
-      }
-    };
-    initialSync();
+    StorageService.setCurrentUserId(user.id);
+
+    // Migration of legacy data if needed (only for admin email)
+    FirebaseService.migrateLegacyDataIfNeeded(user);
+
+    // Load workflow & documents & devops settings from Firestore
+    FirebaseService.getSetting<WorkflowPhase[]>('workflow', DEFAULT_WORKFLOW, user.id).then(cfg => {
+      setWorkflowConfig(cfg);
+      StorageService.setWorkflowConfigInMemory(cfg);
+    });
+
+    FirebaseService.getSetting<DocumentConfig[]>('documents', DEFAULT_DOCS, user.id).then(cfg => {
+      setDocumentsConfig(cfg);
+      StorageService.setDocumentsConfigInMemory(cfg);
+    });
+
+    FirebaseService.getSetting<DevOpsConfig>('devops', { organization: '', project: '', pat: '', isActive: false }, user.id).then(cfg => {
+      StorageService.setDevOpsConfigInMemory(cfg);
+    });
 
     // Subscribe to Firestore collections in real time
     const unsubTasks = FirebaseService.subscribeTasks((remoteTasks) => {
-      if (remoteTasks && remoteTasks.length > 0) {
-        setTasks(remoteTasks);
-        try {
-          localStorage.setItem('nexus_tasks_v2', JSON.stringify(remoteTasks));
-        } catch {}
-      }
-    });
+      const cleanTasks = remoteTasks || [];
+      setTasks(cleanTasks);
+      StorageService.setTasksInMemory(cleanTasks);
+    }, user.id);
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
-      if (remoteDevs && remoteDevs.length > 0) {
-        setDevs(remoteDevs);
-      }
-    });
+      const cleanDevs = remoteDevs || [];
+      setDevs(cleanDevs);
+      StorageService.setDevsInMemory(cleanDevs);
+    }, user.id);
 
     const unsubRobots = FirebaseService.subscribeRobots((remoteRobots) => {
-      if (remoteRobots && remoteRobots.length > 0) {
-        setRobots(remoteRobots);
-      }
-    });
+      const cleanRobots = remoteRobots || [];
+      setRobots(cleanRobots);
+      StorageService.setRobotsInMemory(cleanRobots);
+    }, user.id);
 
     const unsubSprints = FirebaseService.subscribeSprints((remoteSprints) => {
-      if (remoteSprints && remoteSprints.length > 0) {
-        setSprints(remoteSprints);
-      }
-    });
+      const cleanSprints = remoteSprints || [];
+      setSprints(cleanSprints);
+      StorageService.setSprintsInMemory(cleanSprints);
+    }, user.id);
 
     return () => {
       unsubTasks();
@@ -5838,7 +5931,17 @@ export default function App() {
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
-  const handleLogin = (loggedInUser: User) => setUser(loggedInUser);
+  const [backupExcelFile, setBackupExcelFile] = useState<File | null>(null);
+  const [isProcessingBackupExcel, setIsProcessingBackupExcel] = useState(false);
+  const handleLogin = (loggedInUser: User) => {
+    StorageService.clearAllMemory();
+    setTasks([]);
+    setDevs([]);
+    setRobots([]);
+    setSprints([]);
+    StorageService.updateUser(loggedInUser);
+    setUser(loggedInUser);
+  };
   const handleLogout = async () => { 
     try {
       await FirebaseService.logout();
@@ -5847,15 +5950,26 @@ export default function App() {
     }
     StorageService.logout(); 
     setUser(null); 
+    setTasks([]);
+    setDevs([]);
+    setRobots([]);
+    setSprints([]);
   };
   const handleGoogleLoginDirect = async () => {
     try {
       const fbUser = await FirebaseService.loginWithGoogle();
+      StorageService.clearAllMemory();
+      setTasks([]);
+      setDevs([]);
+      setRobots([]);
+      setSprints([]);
       StorageService.updateUser(fbUser);
       setUser(fbUser);
     } catch (err: any) {
       console.error('Google login failed:', err);
-      if (err.code !== 'auth/popup-closed-by-user') {
+      if (err.code === 'auth/unauthorized-domain') {
+        alert(`Domínio não autorizado no Firebase (${window.location.hostname}). Acesse o Firebase Console -> Authentication -> Settings -> Authorized domains e adicione "${window.location.hostname}".`);
+      } else if (err.code !== 'auth/popup-closed-by-user') {
         alert(`Erro ao autenticar com Google: ${err.message || err}`);
       }
     }
@@ -5888,6 +6002,46 @@ export default function App() {
   };
   const handleProcessAllUploads = async () => { let allNewTasks: Task[] = []; try { if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; processNewTasks(allNewTasks, 'Todas'); setIsUploadModalOpen(false); alert(`${allNewTasks.length} demandas processadas.`); } catch (e) { alert("Erro ao processar arquivos."); } };
   const handleProcessSingleUpload = async (type: TaskType) => { const file = uploadFiles[type]; if (!file) return; try { const newTasks = await ExcelService.parseFile(file, type); processNewTasks(newTasks, type); alert(`${newTasks.length} demandas de ${type} processadas.`); setUploadFiles(prev => ({ ...prev, [type]: null })); } catch (e) { alert(`Erro ao processar ${type}.`); } };
+  const handleProcessBackupExcel = async () => {
+    if (!backupExcelFile) return;
+    setIsProcessingBackupExcel(true);
+    try {
+      const res = await BackupService.importSnapshotFromExcel(backupExcelFile);
+      if (res.success && res.snapshot) {
+        const stats = res.stats;
+        const confirmMsg = `Planilha de Backup Reconhecida com Sucesso!\n\n` +
+          `• Total de Demandas Reconhecidas: ${stats.tasksCount}\n` +
+          `• Incidentes: ${stats.incidentsCount}\n` +
+          `• Melhorias: ${stats.improvementsCount}\n` +
+          `• Novas Automações: ${stats.automationsCount}\n` +
+          `• Desenvolvedores: ${stats.devsCount}\n` +
+          `• Robôs RPA: ${stats.robotsCount}\n\n` +
+          `Deseja restaurar e sincronizar todas essas demandas diretamente no banco de dados agora?`;
+
+        if (window.confirm(confirmMsg)) {
+          const success = BackupService.restoreSnapshot(res.snapshot);
+          if (success) {
+            alert(`✔ Sucesso! ${stats.tasksCount} demandas foram sincronizadas diretamente com o banco de dados.`);
+            setIsUploadModalOpen(false);
+            setBackupExcelFile(null);
+            window.location.reload();
+          } else {
+            alert("Erro ao restaurar demandas no banco de dados.");
+          }
+        } else {
+          alert("Planilha adicionada ao histórico de backups (disponível na Central de Backup no Perfil).");
+          setIsUploadModalOpen(false);
+          setBackupExcelFile(null);
+        }
+      } else {
+        alert(res.error || "Não foi possível reconhecer a planilha como backup.");
+      }
+    } catch (err: any) {
+      alert(`Erro ao processar planilha: ${err.message || err}`);
+    } finally {
+      setIsProcessingBackupExcel(false);
+    }
+  };
   const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
   const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
   const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: new Date().toISOString(), requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
@@ -5996,9 +6150,112 @@ export default function App() {
         setEditingTask(null); 
     } 
   };
-  const handleResetData = () => { StorageService.clearTasks(); setTasks([]); alert("Todas as demandas foram apagadas."); };
+  const handleResetData = async () => {
+    try {
+      // 1. Generate preventive safety snapshot before wiping
+      BackupService.createSnapshot("Backup Preventivo Pré-Reset Geral", true);
+
+      // 2. Wipe all collections from Firestore and in-memory storage
+      await StorageService.resetEverything();
+
+      // 3. Reset in-memory React states
+      setTasks([]);
+      setDevs([]);
+      setRobots([]);
+      setSprints([]);
+      setWorkflowConfig(DEFAULT_WORKFLOW);
+      setDocumentsConfig(DEFAULT_DOCS);
+
+      return true;
+    } catch (error: any) {
+      console.error('Error during full reset:', error);
+      throw error;
+    }
+  };
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (<div className="flex gap-3 bg-slate-800/80 p-1 rounded-lg backdrop-blur-md border border-slate-700"><Button onClick={handleCreateTask} variant="primary" className="text-xs py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-none"><IconPlus className="w-4 h-4" /> Nova Demanda</Button><div className="w-px bg-slate-700 h-6 self-center"></div><Button onClick={() => setIsManageDevsOpen(true)} variant="secondary" className="text-xs py-1.5 bg-transparent border-none hover:bg-slate-700 text-slate-300"><IconUsers className="w-4 h-4" /> Devs</Button><Button onClick={() => setIsUploadModalOpen(true)} className="text-xs py-1.5"><IconUpload className="w-4 h-4" /> Upload</Button></div>);
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions}>{isUploadModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl"><h3 className="text-xl font-bold mb-6 text-white">Importar Planilhas</h3><div className="space-y-6">{['Incidente', 'Melhoria', 'Nova Automação'].map(type => (<div key={type} className="flex items-end gap-3"><div className="flex-1"><label className="block text-sm text-slate-400 mb-1">{type}</label><input type="file" accept=".xlsx, .xls" onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" /></div><Button onClick={() => handleProcessSingleUpload(type as TaskType)} disabled={!uploadFiles[type]} className="h-10 text-xs" variant="secondary">Processar</Button></div>))}</div><div className="mt-8 flex justify-end gap-3 border-t border-slate-700 pt-4"><Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button><Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tudo</Button></div></div></div>)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions}>{isUploadModalOpen && (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="bg-slate-800 p-6 sm:p-8 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div className="flex justify-between items-center mb-5 border-b border-slate-700 pb-3">
+        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <IconUpload className="w-5 h-5 text-indigo-400" />
+          Importar Planilhas & Backups
+        </h3>
+        <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      {/* Prominent Backup Excel Option */}
+      <div className="bg-gradient-to-r from-emerald-950/70 to-slate-900 border-2 border-emerald-500/50 rounded-xl p-4 mb-6 space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-emerald-600/20 text-emerald-400 rounded-lg border border-emerald-500/30 flex-shrink-0 mt-0.5">
+            <IconShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-bold text-white">Reconhecer Planilha Excel como Backup</h4>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Backup Consolidado
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 mt-1">
+              Suba a planilha com todas as demandas (ID, Tipo, Resumo, etc.) para a ferramenta reconhecer e restaurar tudo diretamente no banco de dados.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
+          <input 
+            type="file" 
+            accept=".xlsx, .xls" 
+            onChange={(e) => setBackupExcelFile(e.target.files?.[0] || null)}
+            className="flex-1 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer border border-emerald-500/30 rounded-lg p-1 bg-slate-900/60"
+          />
+          <Button 
+            onClick={handleProcessBackupExcel} 
+            disabled={!backupExcelFile || isProcessingBackupExcel} 
+            className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold whitespace-nowrap py-2"
+          >
+            {isProcessingBackupExcel ? "Reconhecendo..." : "Restaurar Backup"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mb-5">
+        <div className="h-px bg-slate-700 flex-1"></div>
+        <span className="text-xs text-slate-400 font-medium">Ou importar planilhas por tipo individual:</span>
+        <div className="h-px bg-slate-700 flex-1"></div>
+      </div>
+
+      <div className="space-y-4">
+        {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
+          <div key={type} className="flex items-end gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/60">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-slate-300 mb-1">{type}</label>
+              <input 
+                type="file" 
+                accept=".xlsx, .xls" 
+                onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} 
+                className="block w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" 
+              />
+            </div>
+            <Button 
+              onClick={() => handleProcessSingleUpload(type as TaskType)} 
+              disabled={!uploadFiles[type]} 
+              className="h-9 text-xs" 
+              variant="secondary"
+            >
+              Processar
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex justify-end gap-3 border-t border-slate-700 pt-4">
+        <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>Cancelar</Button>
+        <Button onClick={handleProcessAllUploads} disabled={!Object.values(uploadFiles).some(f => f !== null)}>Processar Tipos</Button>
+      </div>
+    </div>
+  </div>
+)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

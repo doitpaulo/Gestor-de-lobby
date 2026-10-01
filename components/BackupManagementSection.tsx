@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BackupService } from '../services/backupService';
+import { StorageService } from '../services/storageService';
 import { BackupConfig, BackupSnapshot } from '../types';
 import { 
   IconShieldCheck, IconFolder, IconDownload, IconUpload, IconRefresh, 
@@ -17,6 +18,13 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
   // Modals state
   const [inspectSnapshot, setInspectSnapshot] = useState<BackupSnapshot | null>(null);
   const [restoreConfirmSnapshot, setRestoreConfirmSnapshot] = useState<BackupSnapshot | null>(null);
+  const [excelImportResult, setExcelImportResult] = useState<{
+    snapshot: BackupSnapshot;
+    stats: any;
+    fileName: string;
+  } | null>(null);
+  const [excelRestoreMode, setExcelRestoreMode] = useState<'replace' | 'merge'>('replace');
+  const [isProcessingExcel, setIsProcessingExcel] = useState(false);
   const [statusNotification, setStatusNotification] = useState<string | null>(null);
 
   useEffect(() => {
@@ -119,6 +127,12 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+      handleImportExcelFile(e);
+      return;
+    }
+
     const res = await BackupService.importSnapshotFromFile(file);
     if (res.success && res.snapshot) {
       refreshData();
@@ -130,6 +144,70 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
       alert(res.error || "Erro ao importar arquivo de backup.");
     }
     e.target.value = '';
+  };
+
+  const handleImportExcelFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingExcel(true);
+    try {
+      const res = await BackupService.importSnapshotFromExcel(file);
+      if (res.success && res.snapshot) {
+        refreshData();
+        setExcelImportResult({
+          snapshot: res.snapshot,
+          stats: res.stats,
+          fileName: file.name
+        });
+        showNotification("✔ Planilha Excel reconhecida com sucesso!");
+      } else {
+        alert(res.error || "Erro ao reconhecer a planilha Excel.");
+      }
+    } catch (err: any) {
+      alert(`Falha ao ler o arquivo Excel: ${err.message || err}`);
+    } finally {
+      setIsProcessingExcel(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleExecuteExcelRestore = () => {
+    if (!excelImportResult) return;
+    const { snapshot, stats } = excelImportResult;
+
+    if (excelRestoreMode === 'replace') {
+      const success = BackupService.restoreSnapshot(snapshot);
+      if (success) {
+        alert(`✔ Restauração Concluída!\n\nForam reconhecidas e gravadas no banco de dados ${stats.tasksCount} demandas (${stats.incidentsCount} Incidentes, ${stats.improvementsCount} Melhorias, ${stats.automationsCount} Novas Automações).`);
+        setExcelImportResult(null);
+        if (onDataRestored) onDataRestored();
+        window.location.reload();
+      } else {
+        alert("Ocorreu um erro ao restaurar os dados.");
+      }
+    } else {
+      // Merge mode
+      try {
+        if (snapshot.dataPayload.TASKS) {
+          StorageService.mergeTasks(snapshot.dataPayload.TASKS);
+        }
+        if (snapshot.dataPayload.DEVS && snapshot.dataPayload.DEVS.length > 0) {
+          const currentDevs = StorageService.getDevs();
+          const devNames = new Set(currentDevs.map((d: any) => d.name));
+          const toAdd = snapshot.dataPayload.DEVS.filter((d: any) => !devNames.has(d.name));
+          if (toAdd.length > 0) {
+            StorageService.saveDevs([...currentDevs, ...toAdd]);
+          }
+        }
+        alert(`✔ Mesclagem Concluída!\n\nAs demandas da planilha foram integradas com sucesso ao banco de dados.`);
+        setExcelImportResult(null);
+        if (onDataRestored) onDataRestored();
+        window.location.reload();
+      } catch (err: any) {
+        alert(`Erro na mesclagem: ${err.message || err}`);
+      }
+    }
   };
 
   const filteredSnapshots = snapshots.filter(s => {
@@ -179,7 +257,7 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 flex-shrink-0">
               <button
                 onClick={handleCreateManualBackup}
                 disabled={isCreatingBackup}
@@ -187,6 +265,14 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
               >
                 <IconPlus className="w-4 h-4" />
                 {isCreatingBackup ? "Gerando..." : "Gerar Backup Agora"}
+              </button>
+              <button
+                onClick={() => BackupService.exportBackupToExcel()}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/40 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 whitespace-nowrap shadow-sm hover:border-emerald-400"
+                title="Exportar planilha Excel completa com todas as demandas para usar como backup"
+              >
+                <IconDownload className="w-4 h-4 text-emerald-400" />
+                Exportar Excel (.xlsx)
               </button>
               <button
                 onClick={handleSelectLocalFolder}
@@ -318,10 +404,23 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
               />
             </div>
 
+            {/* Excel Backup Import Button */}
+            <label className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-md shadow-emerald-600/25 flex items-center gap-1.5 flex-shrink-0">
+              <IconUpload className="w-4 h-4 text-white" />
+              <span>{isProcessingExcel ? "Lendo Excel..." : "Subir Planilha Excel (Backup)"}</span>
+              <input 
+                type="file" 
+                accept=".xlsx, .xls" 
+                onChange={handleImportExcelFile} 
+                disabled={isProcessingExcel}
+                className="hidden" 
+              />
+            </label>
+
             {/* External JSON Import Button */}
-            <label className="bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/40 text-emerald-300 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 flex-shrink-0">
-              <IconUpload className="w-4 h-4 text-emerald-400" />
-              Importar Backup (.json)
+            <label className="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 flex-shrink-0">
+              <IconUpload className="w-4 h-4 text-slate-400" />
+              <span>Importar JSON</span>
               <input type="file" accept=".json" onChange={handleImportFile} className="hidden" />
             </label>
           </div>
@@ -567,6 +666,141 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2"
               >
                 <IconCheck className="w-4 h-4" /> Restaurar Agora
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXCEL BACKUP RECOGNIZED CONFIRMATION MODAL */}
+      {excelImportResult && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-800 border-2 border-emerald-500/60 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5">
+            {/* Header */}
+            <div className="flex items-start gap-3 border-b border-slate-700/80 pb-4">
+              <div className="p-3 bg-emerald-950 rounded-2xl border border-emerald-500/40 text-emerald-400 flex-shrink-0">
+                <IconShieldCheck className="w-7 h-7 text-emerald-400" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-lg font-bold text-white">Planilha Excel Reconhecida como Backup</h4>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/30">
+                    Reconhecido
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1 font-mono truncate max-w-md">
+                  Arquivo: <strong className="text-slate-200">{excelImportResult.fileName}</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Stats Breakdown */}
+            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                📊 Dados identificados na planilha:
+              </p>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700 text-center">
+                  <span className="text-xl font-bold text-white block">{excelImportResult.stats.tasksCount}</span>
+                  <span className="text-[11px] text-slate-400">Total Demandas</span>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-rose-500/20 text-center">
+                  <span className="text-xl font-bold text-rose-400 block">{excelImportResult.stats.incidentsCount}</span>
+                  <span className="text-[11px] text-slate-400">Incidentes</span>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-amber-500/20 text-center">
+                  <span className="text-xl font-bold text-amber-400 block">{excelImportResult.stats.improvementsCount}</span>
+                  <span className="text-[11px] text-slate-400">Melhorias</span>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-sky-500/20 text-center">
+                  <span className="text-xl font-bold text-sky-400 block">{excelImportResult.stats.automationsCount}</span>
+                  <span className="text-[11px] text-slate-400">Novas Automações</span>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-indigo-500/20 text-center">
+                  <span className="text-xl font-bold text-indigo-400 block">{excelImportResult.stats.devsCount}</span>
+                  <span className="text-[11px] text-slate-400">Desenvolvedores</span>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-emerald-500/20 text-center">
+                  <span className="text-xl font-bold text-emerald-400 block">{excelImportResult.stats.robotsCount}</span>
+                  <span className="text-[11px] text-slate-400">Robôs RPA</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Restore Mode Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 block">
+                Selecione o modo de restauração no Banco de Dados:
+              </label>
+              <div className="space-y-2">
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${excelRestoreMode === 'replace' ? 'bg-indigo-950/40 border-indigo-500/80 text-white' : 'bg-slate-900/60 border-slate-700 text-slate-300 hover:bg-slate-900'}`}>
+                  <input
+                    type="radio"
+                    name="excelRestoreMode"
+                    value="replace"
+                    checked={excelRestoreMode === 'replace'}
+                    onChange={() => setExcelRestoreMode('replace')}
+                    className="mt-1 accent-indigo-500"
+                  />
+                  <div className="text-xs">
+                    <p className="font-bold text-white">Substituição Completa (Restauração Limpa)</p>
+                    <p className="text-slate-400 mt-0.5">
+                      Substitui todas as demandas do banco de dados pelo conteúdo desta planilha. Um backup de segurança do estado atual é criado automaticamente antes.
+                    </p>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${excelRestoreMode === 'merge' ? 'bg-indigo-950/40 border-indigo-500/80 text-white' : 'bg-slate-900/60 border-slate-700 text-slate-300 hover:bg-slate-900'}`}>
+                  <input
+                    type="radio"
+                    name="excelRestoreMode"
+                    value="merge"
+                    checked={excelRestoreMode === 'merge'}
+                    onChange={() => setExcelRestoreMode('merge')}
+                    className="mt-1 accent-indigo-500"
+                  />
+                  <div className="text-xs">
+                    <p className="font-bold text-white">Mesclagem Inteligente (Merge / Adicionar)</p>
+                    <p className="text-slate-400 mt-0.5">
+                      Atualiza demandas existentes que tiverem o mesmo ID/número e cadastra as novas demandas sem remover os registros já salvos.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Warning Info */}
+            <div className="bg-emerald-950/40 border border-emerald-500/30 p-3 rounded-xl text-[11px] text-emerald-300 flex items-center gap-2">
+              <IconShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+              <span>
+                Ao confirmar, todas as demandas serão gravadas diretamente no seu banco de dados na nuvem (Firestore) e estarão disponíveis instantaneamente em todos os módulos.
+              </span>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-slate-700">
+              <button
+                onClick={() => setExcelImportResult(null)}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  setExcelImportResult(null);
+                  showNotification("✔ Backup adicionado ao histórico de restauração.");
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-600 text-xs font-bold rounded-xl transition-colors"
+                title="Apenas adiciona ao histórico para restauração posterior"
+              >
+                Salvar Apenas no Histórico
+              </button>
+              <button
+                onClick={handleExecuteExcelRestore}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all hover:scale-[1.02]"
+              >
+                <IconCheck className="w-4 h-4" />
+                Sim, Restaurar Banco de Dados Agora
               </button>
             </div>
           </div>
