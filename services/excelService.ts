@@ -343,6 +343,9 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
     summary = longestText || `Demanda ${id}`;
   }
 
+  const descriptionRaw = getRowVal(row, ['description', 'Descrição', 'Descricao', 'Detalhes', 'Observações', 'Observacoes', 'Comments']);
+  const description = descriptionRaw ? String(descriptionRaw).trim() : undefined;
+
   // 3. Status
   const statusRaw = getRowVal(row, [
     'status', 'Status', 'Status Global', 'Estado', 'State', 'Situação', 'Situacao', 'Fase Atual', 'Fase', 'Etapa'
@@ -386,28 +389,132 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
 
   // 9. Determine Type
   const rawTypeCol = getRowVal(row, [
-    'type', 'Tipo', 'Tipo de Demanda', 'Tipo de Tarefa', 'Task Type', 'Classificação', 'Classificacao', 'Natureza'
+    'type', 'Tipo', 'Tipo de Demanda', 'Tipo de Tarefa', 'Tipo de Chamado', 'Tipo de Registro',
+    'Tipo de Solicitação', 'Tipo de Solicitacao', 'Tipo de Requisição', 'Tipo de Requisicao',
+    'Tipo de Item', 'Tipo de Atividade', 'Task Type', 'Issue Type', 'Demand Type', 'Request Type',
+    'Classificação', 'Classificacao', 'Classificação da Demanda', 'Classificacao da Demanda',
+    'Natureza', 'Natureza da Demanda', 'Categoria da Demanda', 'Categoria Demanda',
+    'Categoria', 'Subcategoria'
   ]);
+  
   let explicitType: TaskType | null = null;
   if (rawTypeCol) {
-    const et = String(rawTypeCol).toLowerCase().trim();
-    if (et.includes('melhoria') || et.includes('enhancement') || et.includes('feature') || et.includes('evolutiva')) explicitType = 'Melhoria';
-    else if (et.includes('auto') || et.includes('rpa') || et.includes('bot') || et.includes('robo') || et.includes('robô') || et.includes('projeto')) explicitType = 'Nova Automação';
-    else if (et.includes('incid') || et.includes('bug') || et.includes('defeito') || et.includes('erro') || et.includes('falha') || et.includes('corretiva') || et.includes('suporte')) explicitType = 'Incidente';
+    const et = String(rawTypeCol)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+
+    // 1. Melhoria check (includes "melhoria em robo", "melhoria rpa", "melhoria de automacao", "projeto de melhoria", "evolutiva", "ajuste", "otimizacao", "feature", "change", etc.)
+    if (
+      et.includes('melhoria') || 
+      et.includes('evolutiv') || 
+      et.includes('enhancement') || 
+      et.includes('feature') || 
+      et.includes('ajuste') || 
+      et.includes('otimiz') || 
+      et.includes('customiz') || 
+      et.includes('upgrade') || 
+      et.includes('mudanca') || 
+      et.includes('change') || 
+      et.includes('story') || 
+      et.includes('historia')
+    ) {
+      explicitType = 'Melhoria';
+    } 
+    // 2. Incidente check
+    else if (
+      et.includes('incid') || 
+      et.includes('bug') || 
+      et.includes('defeito') || 
+      et.includes('erro') || 
+      et.includes('falha') || 
+      et.includes('corretiv') || 
+      et.includes('suporte') || 
+      et.includes('problema') || 
+      et.includes('outage')
+    ) {
+      explicitType = 'Incidente';
+    } 
+    // 3. Nova Automação check (only if not an improvement, and explicitly refers to automation/bot/rpa)
+    // NOTE: NEVER treat the plain word 'projeto' as Nova Automação!
+    else if (
+      et.includes('nova automacao') || 
+      et.includes('novo robo') || 
+      et.includes('novo bot') || 
+      et.includes('desenvolvimento rpa') || 
+      et.includes('implantacao rpa') || 
+      et.includes('automacao') || 
+      et.includes('rpa') || 
+      et.includes('bot') || 
+      et.includes('robo')
+    ) {
+      explicitType = 'Nova Automação';
+    }
+  }
+
+  // Check Category or Subcategory if explicitType not found yet
+  if (!explicitType) {
+    const catScan = `${category} ${subcategory}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (catScan.includes('melhoria') || catScan.includes('evolutiv') || catScan.includes('enhancement') || catScan.includes('feature') || catScan.includes('ajuste')) {
+      explicitType = 'Melhoria';
+    } else if (catScan.includes('incid') || catScan.includes('bug') || catScan.includes('defeito') || catScan.includes('corretiv')) {
+      explicitType = 'Incidente';
+    } else if (catScan.includes('nova automacao') || (catScan.includes('automacao') && !catScan.includes('melhoria'))) {
+      explicitType = 'Nova Automação';
+    }
   }
 
   let type: TaskType = explicitType || defaultType || 'Incidente';
   if (!explicitType && !defaultType) {
-    const idLower = String(id).toLowerCase().trim();
-    if (idLower.startsWith('inc') || idLower.startsWith('bug') || idLower.startsWith('err')) {
+    const idClean = String(id).toUpperCase().trim();
+    if (idClean.match(/^(INC|BUG|ERR|DEF|CHAM|SUP)/i)) {
       type = 'Incidente';
-    } else if (idLower.startsWith('ritm') || idLower.startsWith('req') || idLower.startsWith('aut') || idLower.startsWith('rpa')) {
+    } else if (idClean.match(/^(MEL|IMP|ENH|FEAT|US|HIST|CHG|RFC)/i)) {
+      type = 'Melhoria';
+    } else if (idClean.match(/^(AUT|RPA|BOT)/i)) {
       type = 'Nova Automação';
     } else {
-      const textToScan = `${summary} ${subcategory} ${category}`.toLowerCase();
-      if (textToScan.includes('melhoria') || textToScan.includes('feature')) type = 'Melhoria';
-      else if (textToScan.includes('automação') || textToScan.includes('automacao') || textToScan.includes('rpa') || textToScan.includes('robô') || textToScan.includes('robo') || textToScan.includes('bot')) type = 'Nova Automação';
-      else type = 'Incidente';
+      const textToScan = `${summary} ${description || ''} ${subcategory} ${category}`
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      if (
+        textToScan.includes('melhoria') || 
+        textToScan.includes('evolutiv') || 
+        textToScan.includes('feature') || 
+        textToScan.includes('ajuste') || 
+        textToScan.includes('otimiz') || 
+        textToScan.includes('upgrade') || 
+        textToScan.includes('refatora') || 
+        textToScan.includes('enhancement')
+      ) {
+        type = 'Melhoria';
+      } else if (
+        textToScan.includes('incidente') || 
+        textToScan.includes('defeito') || 
+        textToScan.includes('falha') || 
+        textToScan.includes('erro') || 
+        textToScan.includes('bug') || 
+        textToScan.includes('corretiv') || 
+        textToScan.includes('travou') || 
+        textToScan.includes('parou')
+      ) {
+        type = 'Incidente';
+      } else if (
+        textToScan.includes('nova automacao') || 
+        textToScan.includes('novo robo') || 
+        textToScan.includes('novo bot') || 
+        textToScan.includes('desenvolver automacao') || 
+        textToScan.includes('construcao de robo')
+      ) {
+        type = 'Nova Automação';
+      } else if (idClean.match(/^(REQ|RITM|DEM)/i)) {
+        // In ServiceNow, REQ/RITM are standard service requests / improvements
+        type = 'Melhoria';
+      } else {
+        type = 'Incidente';
+      }
     }
   }
 
@@ -428,7 +535,6 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
   const managementArea = getRowVal(row, ['managementArea', 'Gerência', 'Gerencia', 'Área', 'Area', 'Departamento']);
   const projectPath = getRowVal(row, ['projectPath', 'Link SharePoint', 'SharePoint', 'Caminho Projeto', 'Pasta']);
   const blocker = getRowVal(row, ['blocker', 'Bloqueio', 'Motivo Bloqueio', 'Pendência', 'Pendencia', 'Impedimento']);
-  const description = getRowVal(row, ['description', 'Descrição', 'Descricao', 'Detalhes', 'Observações', 'Observacoes', 'Comments']);
 
   // 13. FTE Value
   const fteRaw = getRowVal(row, ['fteValue', 'FTE', 'Valor FTE', 'fte', 'Economia FTE']);
@@ -511,25 +617,49 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
 };
 
 export const ExcelService = {
-  // Parse single file or single sheet
+  // Parse single file or single sheet for a specific category
   parseFile: async (file: File, defaultType?: TaskType): Promise<Task[]> => {
-    try {
-      const backupResult = await ExcelService.parseBackupExcel(file);
-      if (backupResult.tasks.length > 0) {
-        return backupResult.tasks.map(t => ({
-          ...t,
-          type: defaultType && t.type === 'Incidente' && !t.id.toLowerCase().startsWith('inc') ? defaultType : t.type
-        }));
+    const workbook = await readWorkbookFromFile(file);
+    let allTasks: Task[] = [];
+
+    for (const sheetName of workbook.SheetNames) {
+      const lowerSheet = sheetName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      // Skip dev and robot sheets
+      if (
+        lowerSheet.includes('robo') || lowerSheet === 'rpa' || lowerSheet.includes('totem') ||
+        lowerSheet.includes('dev') || lowerSheet.includes('equipe') || lowerSheet.includes('desenvolvedor')
+      ) {
+        continue;
       }
-    } catch {
-      // Fallback
+
+      const worksheet = workbook.Sheets[sheetName];
+      const rows = extractRowsWithHeaderDetection(worksheet);
+      if (!rows || rows.length === 0) continue;
+
+      const tasksFromSheet = rows.map((row: any, idx: number) => {
+        const task = mapRowToTask(row, defaultType, idx);
+        // When defaultType is supplied (e.g. from "Processar Melhoria"), this upload explicitly targets this category
+        if (defaultType) {
+          task.type = defaultType;
+        }
+        return task;
+      });
+
+      allTasks = [...allTasks, ...tasksFromSheet.filter(t => t.id && t.summary)];
     }
 
-    const workbook = await readWorkbookFromFile(file);
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    const rows = extractRowsWithHeaderDetection(worksheet);
-    return rows.map((row: any, idx: number) => mapRowToTask(row, defaultType, idx));
+    // Fallback: If no sheets matched, try first sheet
+    if (allTasks.length === 0 && workbook.SheetNames.length > 0) {
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = extractRowsWithHeaderDetection(worksheet);
+      allTasks = rows.map((row: any, idx: number) => {
+        const task = mapRowToTask(row, defaultType, idx);
+        if (defaultType) task.type = defaultType;
+        return task;
+      }).filter(t => t.id && t.summary);
+    }
+
+    return allTasks;
   },
 
   // Parse robots file
@@ -546,6 +676,17 @@ export const ExcelService = {
   parseBackupExcel: async (file: File): Promise<ExcelBackupParseResult> => {
     const workbook = await readWorkbookFromFile(file);
     const sheetNames = workbook.SheetNames;
+
+    // Check if file name itself hints at a category
+    const lowerFileName = file.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let fileDefaultType: TaskType | undefined = undefined;
+    if (lowerFileName.includes('melhoria') || lowerFileName.includes('evolutiv') || lowerFileName.includes('enhancement') || lowerFileName.includes('feature')) {
+      fileDefaultType = 'Melhoria';
+    } else if (lowerFileName.includes('incid') || lowerFileName.includes('bug') || lowerFileName.includes('defeito') || lowerFileName.includes('chamado')) {
+      fileDefaultType = 'Incidente';
+    } else if (lowerFileName.includes('nova automacao') || lowerFileName.includes('novo robo') || (lowerFileName.includes('automacao') && !lowerFileName.includes('melhoria'))) {
+      fileDefaultType = 'Nova Automação';
+    }
     
     let parsedTasks: Task[] = [];
     let parsedRobots: Robot[] = [];
@@ -556,10 +697,10 @@ export const ExcelService = {
       const rows = extractRowsWithHeaderDetection(worksheet);
       if (!rows || rows.length === 0) continue;
 
-      const lowerSheet = sheetName.toLowerCase().trim();
+      const lowerSheet = sheetName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
       // 1. Robots / RPA sheet
-      if (lowerSheet.includes('robô') || lowerSheet.includes('robo') || lowerSheet.includes('rpa') || lowerSheet.includes('totem')) {
+      if (lowerSheet.includes('robo') || lowerSheet.includes('totem') || lowerSheet === 'rpa') {
         rows.forEach(row => {
           const r = mapRowToRobot(row);
           if (r.name && r.name !== 'Robô RPA') {
@@ -582,9 +723,10 @@ export const ExcelService = {
 
       // 3. Task / Demands sheet (or generic sheet)
       let sheetDefaultType: TaskType | undefined = undefined;
-      if (lowerSheet.includes('incid')) sheetDefaultType = 'Incidente';
-      else if (lowerSheet.includes('melhoria') || lowerSheet.includes('enhancement')) sheetDefaultType = 'Melhoria';
-      else if (lowerSheet.includes('auto') || lowerSheet.includes('projeto')) sheetDefaultType = 'Nova Automação';
+      if (lowerSheet.includes('incid') || lowerSheet.includes('bug') || lowerSheet.includes('chamado')) sheetDefaultType = 'Incidente';
+      else if (lowerSheet.includes('melhoria') || lowerSheet.includes('evolutiv') || lowerSheet.includes('enhancement') || lowerSheet.includes('feature')) sheetDefaultType = 'Melhoria';
+      else if (lowerSheet.includes('nova automacao') || (lowerSheet.includes('automacao') && !lowerSheet.includes('melhoria'))) sheetDefaultType = 'Nova Automação';
+      else if (fileDefaultType) sheetDefaultType = fileDefaultType;
 
       rows.forEach((row, idx) => {
         const task = mapRowToTask(row, sheetDefaultType, idx);
@@ -619,7 +761,7 @@ export const ExcelService = {
       const worksheet = workbook.Sheets[sheetNames[0]];
       const rows = extractRowsWithHeaderDetection(worksheet);
       rows.forEach((r, idx) => {
-        const t = mapRowToTask(r, undefined, idx);
+        const t = mapRowToTask(r, fileDefaultType, idx);
         if (t.id && t.summary) {
           parsedTasks.push(t);
           if (t.assignee) discoveredDevNames.add(t.assignee.trim());

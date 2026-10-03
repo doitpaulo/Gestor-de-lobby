@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
@@ -146,6 +147,7 @@ const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w10', type: 'hoursByProject', title: 'Horas por Projeto (Subtarefas)', size: 'full', visible: true, visualStyle: 'bar' },
     { id: 'w11', type: 'hoursByDev', title: 'Horas por Desenvolvedor (Subtarefas)', size: 'half', visible: true, visualStyle: 'bar' },
     { id: 'w12', type: 'estVsAct', title: 'Estimado vs Realizado (Total)', size: 'half', visible: true, visualStyle: 'bar' },
+    { id: 'w13', type: 'portfolioForecast', title: 'Previsão de Conclusão do Portfólio', size: 'full', visible: true },
 ];
 
 // --- Helper: Time Parser ---
@@ -4191,6 +4193,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
               if (!hasIncidentAuto) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'incidentByAuto'));
               if (!hasAutoManager) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'automationsByManager'));
               if (!parsed.find((w: Widget) => w.type === 'fteByManager')) merged.push(DEFAULT_WIDGETS.find(w => w.type === 'fteByManager'));
+              if (!parsed.find((w: Widget) => w.type === 'portfolioForecast')) {
+                const forecastWidget = DEFAULT_WIDGETS.find(w => w.type === 'portfolioForecast');
+                if (forecastWidget) merged.push(forecastWidget);
+              }
               return merged;
           }
           return DEFAULT_WIDGETS;
@@ -4209,6 +4215,15 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   }, [filterType, filterDev]);
 
   useEffect(() => { localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets)); }, [widgets]);
+  
+  useEffect(() => {
+    if (!selectedKpiModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedKpiModal(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedKpiModal]);
   
   const activeFilteredTasks = useMemo(() => { 
     return tasks.filter(t => { 
@@ -4346,6 +4361,111 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       { name: 'Realizado', value: totalAct }
     ];
   }, [tasks, filterDev, filterType]);
+
+  const portfolioForecastData = useMemo(() => {
+    const effectiveDevs = devs && devs.length > 0 ? devs : [{ id: 'default', name: 'Equipe', role: 'Dev' }];
+    const teamSize = effectiveDevs.length;
+    const hoursPerDayPerDev = 8;
+    const teamNominalDailyHours = teamSize * hoursPerDayPerDev; // e.g. 5 devs * 8h = 40h/dia
+    const teamWeeklyHours = teamNominalDailyHours * 5; // e.g. 200h/semana
+    
+    // Focus factor: 75% for realistic development throughput (taking meetings, reviews, blockers into account)
+    const teamRealisticDailyHours = Math.max(1, Math.round(teamNominalDailyHours * 0.75));
+    const teamConservativeDailyHours = Math.max(1, Math.round(teamNominalDailyHours * 0.55));
+
+    let totalBacklogHours = 0;
+    let incidentHours = 0;
+    let featureHours = 0;
+    let automationHours = 0;
+
+    activeFilteredTasks.forEach(t => {
+      let taskRemaining = 0;
+      if (t.subTasks && t.subTasks.length > 0) {
+        const subHours = t.subTasks.reduce((acc, st) => {
+          if (st.status === 'Concluído') return acc;
+          const est = st.estimatedHours || 0;
+          const act = st.actualHours || 0;
+          return acc + Math.max(0, est - act || (est > 0 ? est : 4));
+        }, 0);
+        taskRemaining = subHours;
+      }
+      
+      if (taskRemaining === 0) {
+        const est = parseDuration(t.estimatedTime);
+        const act = parseDuration(t.actualTime);
+        taskRemaining = Math.max(0, est - act);
+      }
+
+      if (taskRemaining === 0) {
+        if (t.type === 'Incidente') taskRemaining = 4;
+        else if (t.type === 'Melhoria') taskRemaining = 16;
+        else if (t.type === 'Nova Automação') taskRemaining = 40;
+        else taskRemaining = 8;
+      }
+
+      totalBacklogHours += taskRemaining;
+      if (t.type === 'Incidente') incidentHours += taskRemaining;
+      else if (t.type === 'Melhoria') featureHours += taskRemaining;
+      else if (t.type === 'Nova Automação') automationHours += taskRemaining;
+    });
+
+    const daysOptimistic = Math.max(1, Math.ceil(totalBacklogHours / teamNominalDailyHours));
+    const daysRealistic = Math.max(1, Math.ceil(totalBacklogHours / teamRealisticDailyHours));
+    const daysConservative = Math.max(1, Math.ceil(totalBacklogHours / teamConservativeDailyHours));
+
+    const addBusinessDays = (days: number): Date => {
+      const d = new Date();
+      let added = 0;
+      while (added < days) {
+        d.setDate(d.getDate() + 1);
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          added++;
+        }
+      }
+      return d;
+    };
+
+    const dateOptimistic = addBusinessDays(daysOptimistic);
+    const dateRealistic = addBusinessDays(daysRealistic);
+    const dateConservative = addBusinessDays(daysConservative);
+
+    const incPct = totalBacklogHours > 0 ? Math.round((incidentHours / totalBacklogHours) * 100) : 0;
+    const featPct = totalBacklogHours > 0 ? Math.round((featureHours / totalBacklogHours) * 100) : 0;
+    const autoPct = totalBacklogHours > 0 ? Math.max(0, 100 - incPct - featPct) : 0;
+
+    let healthStatus = { label: 'Excelente', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-500/40', dot: 'bg-emerald-400' };
+    if (daysRealistic > 90) {
+      healthStatus = { label: 'Sobrecarga Alta', color: 'text-rose-400', bg: 'bg-rose-950/60 border-rose-500/40', dot: 'bg-rose-400' };
+    } else if (daysRealistic > 45) {
+      healthStatus = { label: 'Atenção ao Prazo', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-500/40', dot: 'bg-amber-400' };
+    } else if (daysRealistic > 20) {
+      healthStatus = { label: 'Ritmo Estável', color: 'text-sky-400', bg: 'bg-sky-950/60 border-sky-500/40', dot: 'bg-sky-400' };
+    }
+
+    return {
+      teamSize,
+      teamNominalDailyHours,
+      teamWeeklyHours,
+      teamRealisticDailyHours,
+      totalBacklogHours: Math.round(totalBacklogHours),
+      activeTasksCount: activeFilteredTasks.length,
+      incidentHours: Math.round(incidentHours),
+      featureHours: Math.round(featureHours),
+      automationHours: Math.round(automationHours),
+      incPct,
+      featPct,
+      autoPct,
+      daysOptimistic,
+      daysRealistic,
+      daysConservative,
+      dateOptimistic,
+      dateRealistic,
+      dateConservative,
+      healthStatus,
+      avgHoursPerDev: Math.round(totalBacklogHours / teamSize)
+    };
+  }, [activeFilteredTasks, devs]);
 
   const toggleSize = (id: string) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, size: w.size === 'full' ? 'half' : 'full' } : w)); };
   const moveWidget = (index: number, direction: 'up' | 'down') => { const newWidgets = [...widgets]; if (direction === 'up' && index > 0) { [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]]; } else if (direction === 'down' && index < newWidgets.length - 1) { [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]]; } setWidgets(newWidgets); };
@@ -4492,6 +4612,171 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                   )}
                  {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between animate-fade-in transition-all hover:bg-indigo-900/20"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div style={{ animationDelay: '40ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div style={{ animationDelay: '80ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div style={{ animationDelay: '120ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div></div>)}
                  {widget.type === 'capacity' && (<div className="h-full flex flex-col">{capacityData.length > 0 && (<div className="bg-emerald-900/20 border border-emerald-700/50 px-4 py-4 rounded-lg mb-4 flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"><IconClock className="w-6 h-6" /></div><div><p className="text-[11px] text-emerald-400 font-bold uppercase tracking-widest mb-1">Sugestão (Disponível 1º)</p><p className="text-xl text-white font-bold leading-none">{capacityData[0].name}</p><p className="text-xs text-slate-400 mt-1">Livre em aprox. <span className="text-white font-mono">{formatDuration(capacityData[0].totalHours)}</span></p></div></div>)}<div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2"><table className="w-full text-sm"><thead className="text-xs text-slate-400 uppercase bg-slate-900/50"><tr><th className="text-left p-2 rounded-l">Dev</th><th className="text-center p-2">Qtd</th><th className="text-center p-2">Backlog</th><th className="text-center p-2">Dias Est.</th><th className="text-center p-2 rounded-r">Saúde</th></tr></thead><tbody className="divide-y divide-slate-700/50">{capacityData.map((dev, idx) => { const estimatedDays = Math.ceil(dev.totalHours / 8); let statusColor = 'bg-emerald-500 text-white'; let statusText = 'Livre'; let barColor = 'bg-emerald-500'; if (dev.totalHours > 40) { statusColor = 'bg-rose-500 text-white'; statusText = 'Sobrecarga'; barColor = 'bg-rose-500'; } else if (dev.totalHours > 24) { statusColor = 'bg-orange-500 text-white'; statusText = 'Ocupado'; barColor = 'bg-orange-500'; } else if (dev.totalHours > 8) { statusColor = 'bg-yellow-500 text-black'; statusText = 'Moderado'; barColor = 'bg-yellow-500'; } return (<tr key={dev.name} className="group hover:bg-slate-700/30"><td className="p-2"><div className="font-medium text-slate-200">{dev.name}</div><div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden"><div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div></div></td><td className="p-2 text-center text-slate-300 font-bold">{dev.activeTasksCount}</td><td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td><td className="p-2 text-center text-slate-400">{estimatedDays}d</td><td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusColor}`}>{statusText}</span></td></tr>) })}</tbody></table></div></div>)}
+                 {widget.type === 'portfolioForecast' && (
+                    <div className="flex flex-col h-full space-y-4 animate-fade-in">
+                      {/* Top Hero Banner with Projected Completion Date */}
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-950/70 via-dark-900 to-dark-850 p-4 sm:p-5 border border-indigo-500/30 shadow-lg">
+                        <div className="absolute right-0 top-0 -mt-4 -mr-4 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                                Projeção de Conclusão Estimada (Cenário Realista)
+                              </span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${portfolioForecastData.healthStatus.bg} ${portfolioForecastData.healthStatus.color}`}>
+                                {portfolioForecastData.healthStatus.label}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline gap-3 flex-wrap">
+                              <h4 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                                {portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                              </h4>
+                              <span className="text-xs text-indigo-300 font-medium capitalize">
+                                ({portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { weekday: 'long' })})
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400">
+                              Estimado em <strong className="text-white font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> (~{Math.max(1, Math.ceil(portfolioForecastData.daysRealistic / 5))} semanas) considerando <span className="text-indigo-300 font-semibold">75% de foco efetivo</span> da equipe em desenvolvimento.
+                            </p>
+                          </div>
+
+                          {/* Quick Capacity & Backlog Tag */}
+                          <div className="flex items-center gap-3 bg-dark-950/80 border border-slate-800 p-3 rounded-xl shrink-0">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center shrink-0">
+                              <IconClock className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-slate-400 uppercase font-semibold">Ritmo de Queima</div>
+                              <div className="text-sm font-bold text-white font-mono">
+                                {portfolioForecastData.teamRealisticDailyHours}h / dia útil
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {portfolioForecastData.teamSize} {portfolioForecastData.teamSize === 1 ? 'dev' : 'devs'} disponíveis
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3 Scenarios Comparison Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {/* Scenario 1: Optimistic */}
+                        <div className="bg-dark-900/60 p-3.5 rounded-xl border border-slate-800/80 hover:border-emerald-500/40 transition-all flex flex-col justify-between space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1 font-semibold">
+                              <span>⚡</span> Cenário Otimista
+                            </span>
+                            <span className="text-[10px] bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-semibold">
+                              100% Capacidade
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-lg font-bold text-white">
+                              {portfolioForecastData.dateOptimistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              <strong className="text-emerald-300 font-mono">{portfolioForecastData.daysOptimistic} dias úteis</strong> ({portfolioForecastData.teamNominalDailyHours}h/dia)
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500">Dedicação total sem bloqueios, incidentes críticos ou reuniões externas.</p>
+                        </div>
+
+                        {/* Scenario 2: Realistic (Featured) */}
+                        <div className="bg-indigo-950/20 p-3.5 rounded-xl border border-indigo-500/40 shadow-md shadow-indigo-950/20 flex flex-col justify-between space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1 font-semibold">
+                              <span>🎯</span> Cenário Realista
+                            </span>
+                            <span className="text-[10px] bg-indigo-900/60 border border-indigo-500/40 text-indigo-200 px-1.5 py-0.5 rounded font-mono font-bold">
+                              Recomendado (75%)
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-lg font-bold text-white">
+                              {portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              <strong className="text-indigo-300 font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> ({portfolioForecastData.teamRealisticDailyHours}h/dia)
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-400">Pondera cerimônias ágeis, code reviews e atividades de suporte operacional.</p>
+                        </div>
+
+                        {/* Scenario 3: Conservative */}
+                        <div className="bg-dark-900/60 p-3.5 rounded-xl border border-slate-800/80 hover:border-amber-500/40 transition-all flex flex-col justify-between space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1 font-semibold">
+                              <span>🛡</span> Cenário Conservador
+                            </span>
+                            <span className="text-[10px] bg-amber-950/60 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded font-mono font-semibold">
+                              Margem de Risco
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-lg font-bold text-white">
+                              {portfolioForecastData.dateConservative.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              <strong className="text-amber-300 font-mono">{portfolioForecastData.daysConservative} dias úteis</strong> (~55% vazão)
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500">Inclui margem de segurança para dependências externas e retrabalho.</p>
+                        </div>
+                      </div>
+
+                      {/* Metric Pillars Row */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                        <div className="bg-dark-900/50 p-3 rounded-xl border border-slate-800/70">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-0.5">Backlog Restante</span>
+                          <span className="text-xl font-bold text-white font-mono">{portfolioForecastData.totalBacklogHours}h</span>
+                          <span className="text-[10px] text-slate-500 block">{portfolioForecastData.activeTasksCount} demandas ativas</span>
+                        </div>
+                        <div className="bg-dark-900/50 p-3 rounded-xl border border-slate-800/70">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-0.5">Capacidade Diária</span>
+                          <span className="text-xl font-bold text-white font-mono">{portfolioForecastData.teamNominalDailyHours}h</span>
+                          <span className="text-[10px] text-slate-500 block">{portfolioForecastData.teamSize} devs × 8h/dia</span>
+                        </div>
+                        <div className="bg-dark-900/50 p-3 rounded-xl border border-slate-800/70">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-0.5">Capacidade Semanal</span>
+                          <span className="text-xl font-bold text-white font-mono">{portfolioForecastData.teamWeeklyHours}h</span>
+                          <span className="text-[10px] text-slate-500 block">40h semanais por dev</span>
+                        </div>
+                        <div className="bg-dark-900/50 p-3 rounded-xl border border-slate-800/70">
+                          <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-0.5">Média por Dev</span>
+                          <span className="text-xl font-bold text-white font-mono">{portfolioForecastData.avgHoursPerDev}h</span>
+                          <span className="text-[10px] text-slate-500 block">carga média equilibrada</span>
+                        </div>
+                      </div>
+
+                      {/* Backlog Composition Segmented Bar */}
+                      <div className="bg-dark-900/40 p-3.5 rounded-xl border border-slate-800/70 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-semibold text-slate-300">Distribuição do Backlog Pendente</span>
+                          <span className="text-slate-400 font-mono text-[11px]">Total Estimado: {portfolioForecastData.totalBacklogHours}h</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-dark-950 rounded-full overflow-hidden flex">
+                          <div style={{ width: `${portfolioForecastData.autoPct}%` }} className="bg-indigo-500 h-full transition-all" title={`Automações: ${portfolioForecastData.automationHours}h (${portfolioForecastData.autoPct}%)`}></div>
+                          <div style={{ width: `${portfolioForecastData.featPct}%` }} className="bg-emerald-500 h-full transition-all" title={`Melhorias: ${portfolioForecastData.featureHours}h (${portfolioForecastData.featPct}%)`}></div>
+                          <div style={{ width: `${portfolioForecastData.incPct}%` }} className="bg-rose-500 h-full transition-all" title={`Incidentes: ${portfolioForecastData.incidentHours}h (${portfolioForecastData.incPct}%)`}></div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1 gap-2">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                            <span>Automações: <strong className="text-slate-200 font-mono">{portfolioForecastData.automationHours}h</strong> ({portfolioForecastData.autoPct}%)</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span>Melhorias: <strong className="text-slate-200 font-mono">{portfolioForecastData.featureHours}h</strong> ({portfolioForecastData.featPct}%)</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                            <span>Incidentes: <strong className="text-slate-200 font-mono">{portfolioForecastData.incidentHours}h</strong> ({portfolioForecastData.incPct}%)</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                 )}
                  {['priority', 'status', 'devType', 'incidentByAuto', 'automationsByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<ResponsiveContainer width="100%" height="100%">{renderChartContent() as any}</ResponsiveContainer>)}
                  {widget.type === 'fteByManager' && renderChartContent()}
              </div>
@@ -4606,82 +4891,167 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
         ))}
       </div>
 
-      {/* Drilldown Modal for KPIs */}
-      {selectedKpiModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
-            <div className="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-900/90 rounded-t-2xl">
+      {/* Drilldown Modal for KPIs mounted in document.body via Portal to prevent any parent transform or scrolling issues */}
+      {selectedKpiModal && typeof document !== 'undefined' && createPortal(
+        <div 
+          onClick={() => setSelectedKpiModal(null)} 
+          className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-fade-in"
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="bg-dark-850/95 backdrop-blur-2xl rounded-2xl border border-slate-700/80 w-full max-w-4xl shadow-2xl shadow-black/80 flex flex-col max-h-[90vh] my-auto animate-fade-in"
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-dark-900/95 rounded-t-2xl">
               <div>
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-bold text-white">{modalTitle}</h3>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
+                    <span>📊</span>
+                    <span>{modalTitle}</span>
+                  </h3>
                   <span className="bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs px-2.5 py-0.5 rounded-full font-bold">
                     {modalTasks.length} {modalTasks.length === 1 ? 'demanda' : 'demandas'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Exibindo todas as demandas computadas neste indicador. Você pode trocar o Tipo ou marcar como Concluído diretamente.
-                </p>
+                {/* Category Navigation Tabs */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      selectedKpiModal === 'total'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-dark-800/80 text-slate-400 hover:text-white hover:bg-dark-750'
+                    }`}
+                  >
+                    Todas ({activeFilteredTasks.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedKpiModal('incidents'); setKpiSearch(''); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      selectedKpiModal === 'incidents'
+                        ? 'bg-rose-600 text-white shadow-md'
+                        : 'bg-dark-800/80 text-rose-300/70 hover:text-rose-200 hover:bg-rose-950/40'
+                    }`}
+                  >
+                    Incidentes ({metrics.incidents})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedKpiModal('features'); setKpiSearch(''); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      selectedKpiModal === 'features'
+                        ? 'bg-emerald-600 text-white shadow-md'
+                        : 'bg-dark-800/80 text-emerald-300/70 hover:text-emerald-200 hover:bg-emerald-950/40'
+                    }`}
+                  >
+                    Melhorias ({metrics.features})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedKpiModal('automations'); setKpiSearch(''); }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      selectedKpiModal === 'automations'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-dark-800/80 text-indigo-300/70 hover:text-indigo-200 hover:bg-indigo-950/40'
+                    }`}
+                  >
+                    Automações ({metrics.automations})
+                  </button>
+                </div>
               </div>
-              <button onClick={() => setSelectedKpiModal(null)} className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-700 text-lg transition-colors">✕</button>
+              <button 
+                type="button"
+                onClick={() => setSelectedKpiModal(null)} 
+                className="self-end sm:self-auto text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-base transition-colors cursor-pointer"
+                title="Fechar modal (Esc)"
+              >
+                ✕
+              </button>
             </div>
 
-            <div className="p-4 bg-slate-850 border-b border-slate-700 flex items-center gap-3">
+            {/* Search Filter Bar */}
+            <div className="p-3 sm:p-4 bg-dark-900/80 border-b border-slate-800/90 flex items-center gap-3">
               <input 
                 type="text" 
                 value={kpiSearch}
                 onChange={(e) => setKpiSearch(e.target.value)}
                 placeholder="Buscar por ID, título, responsável ou solicitante..."
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                className="flex-1 bg-dark-950/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
               />
               {kpiSearch && (
-                <button onClick={() => setKpiSearch('')} className="text-xs text-slate-400 hover:text-white">Limpar busca</button>
+                <button 
+                  type="button"
+                  onClick={() => setKpiSearch('')} 
+                  className="text-xs text-slate-400 hover:text-white px-2 py-1 bg-dark-800 rounded-lg cursor-pointer"
+                >
+                  Limpar
+                </button>
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
+            {/* Tasks List */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar">
               {modalTasks.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm">
-                  Nenhuma demanda encontrada neste filtro.
+                <div className="text-center py-12 text-slate-400 text-sm space-y-2">
+                  <div className="text-2xl">📋</div>
+                  <p className="font-semibold text-slate-300">Nenhuma demanda encontrada neste indicador.</p>
+                  <p className="text-xs text-slate-500">Tente ajustar o termo de busca ou selecione outra categoria.</p>
                 </div>
               ) : (
                 modalTasks.map(t => (
-                  <div key={t.id} className="bg-slate-900/70 border border-slate-700/80 hover:border-slate-600 rounded-xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors">
+                  <div key={t.id} className="bg-dark-900/80 border border-slate-800/90 hover:border-slate-700 rounded-xl p-3 sm:p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors shadow-sm">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-xs font-bold text-slate-400">{t.id}</span>
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-indigo-300">{t.id}</span>
                         <Badge type={t.type} />
                         <Badge type={t.priority} />
-                        <span className="text-[11px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">{t.status}</span>
+                        <span className="text-[10px] text-slate-400 bg-dark-800 px-2 py-0.5 rounded border border-slate-700/80">{t.status}</span>
                         {t.assignee && (
                           <span className="text-[11px] text-indigo-300 font-medium">👤 {t.assignee}</span>
                         )}
                       </div>
-                      <p className="text-sm font-medium text-slate-200 truncate" title={t.summary}>{t.summary}</p>
+                      <p className="text-xs sm:text-sm font-semibold text-slate-200 truncate" title={t.summary}>{t.summary}</p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 self-end md:self-center shrink-0">
-                      {t.type === 'Nova Automação' && (
+                    <div className="flex flex-wrap items-center gap-1.5 self-end md:self-center shrink-0">
+                      {t.type !== 'Melhoria' && (
                         <button 
+                          type="button"
                           onClick={() => handleQuickSwitchType(t, 'Melhoria')}
-                          className="text-xs bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                          className="text-[11px] bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                           title="Mudar classificação para Melhoria"
                         >
-                          🔄 Mudar p/ Melhoria
+                          🔄 p/ Melhoria
                         </button>
                       )}
-                      {t.type === 'Melhoria' && (
+                      {t.type !== 'Nova Automação' && (
                         <button 
+                          type="button"
                           onClick={() => handleQuickSwitchType(t, 'Nova Automação')}
-                          className="text-xs bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                          className="text-[11px] bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                           title="Mudar classificação para Automação"
                         >
-                          🔄 Mudar p/ Automação
+                          🔄 p/ Automação
+                        </button>
+                      )}
+                      {t.type !== 'Incidente' && (
+                        <button 
+                          type="button"
+                          onClick={() => handleQuickSwitchType(t, 'Incidente')}
+                          className="text-[11px] bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                          title="Mudar classificação para Incidente"
+                        >
+                          🔄 p/ Incidente
                         </button>
                       )}
                       
                       <button 
+                        type="button"
                         onClick={() => handleQuickComplete(t)}
-                        className="text-xs bg-slate-800 hover:bg-emerald-800/60 border border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1"
+                        className="text-[11px] bg-dark-800 hover:bg-emerald-950/80 border border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                         title="Marcar como Concluído"
                       >
                         ✓ Concluir
@@ -4689,8 +5059,9 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
 
                       {onEditTask && (
                         <button 
+                          type="button"
                           onClick={() => { setSelectedKpiModal(null); onEditTask(t); }}
-                          className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg transition-colors font-medium cursor-pointer"
                         >
                           Editar
                         </button>
@@ -4701,14 +5072,20 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
               )}
             </div>
 
-            <div className="p-4 border-t border-slate-700 bg-slate-900/80 rounded-b-2xl flex justify-between items-center text-xs text-slate-400">
-              <span>As alterações feitas aqui recalculam o painel em tempo real.</span>
-              <button onClick={() => setSelectedKpiModal(null)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors">
+            {/* Footer */}
+            <div className="p-3 sm:p-4 border-t border-slate-800/90 bg-dark-900/90 rounded-b-2xl flex justify-between items-center text-xs text-slate-400">
+              <span className="hidden sm:inline">Pressione <kbd className="px-1.5 py-0.5 rounded bg-dark-800 border border-slate-700 text-slate-300 font-mono text-[10px]">Esc</kbd> ou clique fora para fechar.</span>
+              <button 
+                type="button"
+                onClick={() => setSelectedKpiModal(null)} 
+                className="px-4 py-2 bg-dark-800 hover:bg-dark-750 text-white rounded-xl font-medium transition-colors border border-slate-700 cursor-pointer ml-auto"
+              >
                 Fechar
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -4894,9 +5271,16 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
         </div>
 
         {/* Modal Popup Sim/Não para confirmação de exclusão total no banco de dados */}
-        {isResetModalOpen && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in">
-            <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left">
+        {isResetModalOpen && typeof document !== 'undefined' && createPortal(
+          <div 
+            onClick={() => !isResetting && setIsResetModalOpen(false)}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[9999] p-4 animate-fade-in"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
+          >
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left"
+            >
               <div className="w-14 h-14 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-500 mb-4 mx-auto">
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -4955,7 +5339,8 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );
@@ -6867,6 +7252,50 @@ export default function App() {
               </div>
             </div>
 
+            {/* Category Override Control */}
+            <div className="bg-dark-900/90 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <span className="text-xs text-slate-300 font-semibold flex items-center gap-1.5">
+                <span className="text-base">🏷️</span> Categoria da Planilha:
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400">Classificar todas como:</span>
+                <select
+                  className="bg-slate-800 text-xs font-semibold text-slate-100 rounded-lg px-2.5 py-1.5 border border-slate-700 outline-none focus:border-indigo-500 cursor-pointer"
+                  onChange={(e) => {
+                    const chosen = e.target.value as TaskType | 'auto';
+                    if (!excelBackupPreview?.snapshot?.dataPayload?.TASKS) return;
+                    let updatedTasks = [...excelBackupPreview.snapshot.dataPayload.TASKS];
+                    if (chosen !== 'auto') {
+                      updatedTasks = updatedTasks.map(t => ({ ...t, type: chosen }));
+                    }
+                    const newStats = {
+                      ...excelBackupPreview.stats,
+                      incidentsCount: updatedTasks.filter(t => t.type === 'Incidente').length,
+                      improvementsCount: updatedTasks.filter(t => t.type === 'Melhoria').length,
+                      automationsCount: updatedTasks.filter(t => t.type === 'Nova Automação').length,
+                    };
+                    setExcelBackupPreview({
+                      ...excelBackupPreview,
+                      snapshot: {
+                        ...excelBackupPreview.snapshot,
+                        dataPayload: {
+                          ...excelBackupPreview.snapshot.dataPayload,
+                          TASKS: updatedTasks
+                        }
+                      },
+                      stats: newStats
+                    });
+                  }}
+                  defaultValue="auto"
+                >
+                  <option value="auto">Detecção Automática (Recomendado)</option>
+                  <option value="Melhoria">Forçar todas como Melhoria</option>
+                  <option value="Nova Automação">Forçar todas como Nova Automação</option>
+                  <option value="Incidente">Forçar todas como Incidente</option>
+                </select>
+              </div>
+            </div>
+
             {/* Visual Sample Preview Table */}
             {excelBackupPreview.snapshot?.dataPayload?.TASKS?.length > 0 && (
               <div className="bg-slate-900/90 border border-slate-700/80 rounded-xl p-3 space-y-2">
@@ -6875,7 +7304,7 @@ export default function App() {
                     <IconCheck className="w-3.5 h-3.5" /> Prévia dos Registros Reconhecidos:
                   </span>
                   <span className="text-slate-400 font-mono text-[10px]">
-                    Mostrando 4 de {excelBackupPreview.stats.tasksCount} demandas
+                    Mostrando até 6 de {excelBackupPreview.stats.tasksCount} demandas
                   </span>
                 </div>
                 <div className="overflow-x-auto">
@@ -6890,10 +7319,48 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                      {excelBackupPreview.snapshot.dataPayload.TASKS.slice(0, 4).map((t: any, i: number) => (
+                      {excelBackupPreview.snapshot.dataPayload.TASKS.slice(0, 6).map((t: any, i: number) => (
                         <tr key={t.id || i} className="hover:bg-slate-800/40">
                           <td className="py-1.5 pr-2 font-mono text-indigo-300 font-bold whitespace-nowrap">{t.id}</td>
-                          <td className="py-1.5 px-2 whitespace-nowrap"><Badge type={t.type} /></td>
+                          <td className="py-1.5 px-2 whitespace-nowrap">
+                            <select
+                              value={t.type}
+                              onChange={(e) => {
+                                const newType = e.target.value as TaskType;
+                                const updatedTasks = excelBackupPreview.snapshot.dataPayload.TASKS.map((task: any, idx: number) => 
+                                  (task.id === t.id || idx === i) ? { ...task, type: newType } : task
+                                );
+                                const newStats = {
+                                  ...excelBackupPreview.stats,
+                                  incidentsCount: updatedTasks.filter((task: any) => task.type === 'Incidente').length,
+                                  improvementsCount: updatedTasks.filter((task: any) => task.type === 'Melhoria').length,
+                                  automationsCount: updatedTasks.filter((task: any) => task.type === 'Nova Automação').length,
+                                };
+                                setExcelBackupPreview({
+                                  ...excelBackupPreview,
+                                  snapshot: {
+                                    ...excelBackupPreview.snapshot,
+                                    dataPayload: {
+                                      ...excelBackupPreview.snapshot.dataPayload,
+                                      TASKS: updatedTasks
+                                    }
+                                  },
+                                  stats: newStats
+                                });
+                              }}
+                              className={`text-[10px] font-bold rounded px-1.5 py-0.5 border outline-none cursor-pointer ${
+                                t.type === 'Melhoria'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                                  : t.type === 'Nova Automação'
+                                  ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                  : 'bg-rose-950/80 text-rose-300 border-rose-600/50'
+                              }`}
+                            >
+                              <option value="Melhoria">Melhoria</option>
+                              <option value="Nova Automação">Nova Automação</option>
+                              <option value="Incidente">Incidente</option>
+                            </select>
+                          </td>
                           <td className="py-1.5 px-2 truncate max-w-[200px]" title={t.summary}>{t.summary}</td>
                           <td className="py-1.5 px-2 whitespace-nowrap"><span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">{t.status}</span></td>
                           <td className="py-1.5 pl-2 text-slate-400 whitespace-nowrap">{t.assignee || 'Sem Dev'}</td>
@@ -6925,6 +7392,43 @@ export default function App() {
         )}
       </div>
 
+      {/* Quick Fix helper for recently miscategorized demands */}
+      {tasks.some(t => t.type === 'Nova Automação') && (
+        <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <span className="text-amber-400 font-bold text-base shrink-0 mt-0.5 sm:mt-0">💡</span>
+            <div>
+              <span className="text-amber-200 font-semibold block">
+                Subiu demandas que foram para "Nova Automação" por engano?
+              </span>
+              <span className="text-amber-300/80 text-[11px]">
+                Você pode converter as últimas demandas cadastradas diretamente para "Melhoria" com um clique.
+              </span>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const autoTasks = tasks.filter(t => t.type === 'Nova Automação');
+              if (autoTasks.length === 0) return;
+              const countToConvert = Math.min(autoTasks.length, 9);
+              const lastAutoTasks = autoTasks.slice(-countToConvert);
+              const lastIds = new Set(lastAutoTasks.map(t => t.id));
+              const updatedTasks = tasks.map(t => lastIds.has(t.id) ? { ...t, type: 'Melhoria' as TaskType } : t);
+              setTasks(updatedTasks);
+              StorageService.saveTasks(updatedTasks);
+              setUploadFeedback({
+                type: 'success',
+                message: `✔ ${countToConvert} demandas convertidas com sucesso para "Melhoria"!`
+              });
+            }}
+            className="text-[11px] py-1.5 px-3 font-bold whitespace-nowrap bg-amber-600 hover:bg-amber-500 text-white border-0 shadow-md shrink-0 cursor-pointer"
+          >
+            Converter últimas {Math.min(tasks.filter(t => t.type === 'Nova Automação').length, 9)} para Melhoria
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-4">
         <div className="h-px bg-slate-700 flex-1"></div>
         <span className="text-xs text-slate-400 font-medium">Ou importar planilhas por tipo individual:</span>
@@ -6932,10 +7436,25 @@ export default function App() {
       </div>
 
       <div className="space-y-3">
-        {['Incidente', 'Melhoria', 'Nova Automação'].map(type => (
+        {[
+          { type: 'Melhoria' as TaskType, desc: 'Evolutivas, melhorias em robôs/processos e novas features', badgeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
+          { type: 'Nova Automação' as TaskType, desc: 'Projetos de criação e implantação de novos robôs RPA', badgeColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' },
+          { type: 'Incidente' as TaskType, desc: 'Chamados técnicos, erros, falhas e correções', badgeColor: 'text-rose-400 bg-rose-500/10 border-rose-500/30' }
+        ].map(({ type, desc, badgeColor }) => (
           <div key={type} className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/60">
-            <div className="flex-1">
-              <label className="block text-xs font-semibold text-slate-300 mb-1">{type}</label>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <label className="text-xs font-bold text-slate-200">{type}</label>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badgeColor}`}>
+                  {type}
+                </span>
+                {uploadFiles[type] && (
+                  <span className="text-[10px] text-emerald-400 font-semibold truncate max-w-[180px]">
+                    ✔ {uploadFiles[type]?.name}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 mb-1.5">{desc}</p>
               <input 
                 type="file" 
                 accept=".xlsx, .xls, .csv" 
@@ -6944,10 +7463,12 @@ export default function App() {
               />
             </div>
             <Button 
-              onClick={() => handleProcessSingleUpload(type as TaskType)} 
+              onClick={() => handleProcessSingleUpload(type)} 
               disabled={!uploadFiles[type]} 
-              className="h-8 sm:h-9 text-xs whitespace-nowrap self-end sm:self-auto cursor-pointer" 
-              variant="secondary"
+              className={`h-8 sm:h-9 text-xs whitespace-nowrap self-end sm:self-auto cursor-pointer ${
+                type === 'Melhoria' ? 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold' : ''
+              }`} 
+              variant={type === 'Melhoria' ? 'primary' : 'secondary'}
             >
               Processar {type}
             </Button>
