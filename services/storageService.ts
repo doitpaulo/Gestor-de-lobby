@@ -22,17 +22,63 @@ try {
   console.warn('Error purging legacy localStorage:', e);
 }
 
-// In-memory application store (Pure database runtime - no local storage persistence)
-let currentUserId: string | null = null;
-let inMemoryTasks: Task[] = [];
-let inMemoryDevs: Developer[] = []; // Starts strictly EMPTY [] (no mock/fake devs)
-let inMemoryRobots: Robot[] = [];
-let inMemorySprints: Sprint[] = [];
-let inMemoryWorkflow: WorkflowPhase[] = [];
-let inMemoryDocs: DocumentConfig[] = [];
-let inMemoryDevOps: DevOpsConfig = { organization: '', project: '', pat: '', isActive: false };
-let inMemoryUser: User | null = null;
-let inMemoryApiKey: string | null = null;
+// Safe persistent workspace cache key for seamless offline & reload survival
+const WORKSPACE_CACHE_KEY = 'nexus_workspace_cache_v3';
+
+interface WorkspaceCachePayload {
+  tasks: Task[];
+  devs: Developer[];
+  robots: Robot[];
+  sprints: Sprint[];
+  workflow: WorkflowPhase[];
+  docs: DocumentConfig[];
+  devops: DevOpsConfig;
+  user: User | null;
+  apiKey: string | null;
+}
+
+const loadLocalCache = (): WorkspaceCachePayload | null => {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn('Could not read workspace cache:', e);
+    return null;
+  }
+};
+
+const saveLocalCache = () => {
+  try {
+    const payload: WorkspaceCachePayload = {
+      tasks: inMemoryTasks,
+      devs: inMemoryDevs,
+      robots: inMemoryRobots,
+      sprints: inMemorySprints,
+      workflow: inMemoryWorkflow,
+      docs: inMemoryDocs,
+      devops: inMemoryDevOps,
+      user: inMemoryUser,
+      apiKey: inMemoryApiKey
+    };
+    localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('Could not save workspace cache:', e);
+  }
+};
+
+// Initialize from local cache if present
+const initialCache = loadLocalCache();
+let currentUserId: string | null = initialCache?.user?.id || null;
+let inMemoryTasks: Task[] = initialCache?.tasks || [];
+let inMemoryDevs: Developer[] = initialCache?.devs || [];
+let inMemoryRobots: Robot[] = initialCache?.robots || [];
+let inMemorySprints: Sprint[] = initialCache?.sprints || [];
+let inMemoryWorkflow: WorkflowPhase[] = initialCache?.workflow || [];
+let inMemoryDocs: DocumentConfig[] = initialCache?.docs || [];
+let inMemoryDevOps: DevOpsConfig = initialCache?.devops || { organization: '', project: '', pat: '', isActive: false };
+let inMemoryUser: User | null = initialCache?.user || null;
+let inMemoryApiKey: string | null = initialCache?.apiKey || null;
 
 export const StorageService = {
   setCurrentUserId: (uid: string | null) => {
@@ -52,6 +98,10 @@ export const StorageService = {
     inMemoryDocs = [];
     inMemoryDevOps = { organization: '', project: '', pat: '', isActive: false };
     inMemoryUser = null;
+    inMemoryApiKey = null;
+    try {
+      localStorage.removeItem(WORKSPACE_CACHE_KEY);
+    } catch {}
   },
 
   // --- Tasks ---
@@ -65,6 +115,7 @@ export const StorageService = {
       status: normalizeStatus(t.status),
       type: normalizeTaskType(t.type)
     }));
+    saveLocalCache();
   },
 
   saveTasks: (tasks: Task[]) => {
@@ -74,6 +125,7 @@ export const StorageService = {
       type: normalizeTaskType(t.type)
     }));
     inMemoryTasks = sanitized;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
     FirebaseService.saveTasksBatch(sanitized, currentUserId || undefined).catch(e => console.warn('Firebase saveTasksBatch error:', e));
   },
@@ -81,6 +133,7 @@ export const StorageService = {
   clearTasks: () => {
     inMemoryTasks = [];
     inMemoryRobots = [];
+    saveLocalCache();
     BackupService.triggerAutoBackup("Reset / Limpeza de Dados");
     FirebaseService.deleteAllTasks(currentUserId || undefined).catch(e => console.warn('Firebase deleteAllTasks error:', e));
   },
@@ -92,10 +145,12 @@ export const StorageService = {
 
   setDevsInMemory: (devs: Developer[]) => {
     inMemoryDevs = devs;
+    saveLocalCache();
   },
 
   saveDevs: (devs: Developer[]) => {
     inMemoryDevs = devs;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração na Equipe de Desenvolvedores");
     FirebaseService.saveDevs(devs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
   },
@@ -107,10 +162,12 @@ export const StorageService = {
 
   setRobotsInMemory: (robots: Robot[]) => {
     inMemoryRobots = robots;
+    saveLocalCache();
   },
 
   saveRobots: (robots: Robot[]) => {
     inMemoryRobots = robots;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nos Robôs RPA");
     FirebaseService.saveRobots(robots, currentUserId || undefined).catch(e => console.warn('Firebase saveRobots error:', e));
   },
@@ -122,10 +179,12 @@ export const StorageService = {
 
   setWorkflowConfigInMemory: (config: WorkflowPhase[]) => {
     inMemoryWorkflow = config;
+    saveLocalCache();
   },
 
   saveWorkflowConfig: (config: WorkflowPhase[]) => {
     inMemoryWorkflow = config;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
     FirebaseService.saveSetting('workflow', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting workflow error:', e));
   },
@@ -137,10 +196,12 @@ export const StorageService = {
 
   setDocumentsConfigInMemory: (config: DocumentConfig[]) => {
     inMemoryDocs = config;
+    saveLocalCache();
   },
 
   saveDocumentsConfig: (config: DocumentConfig[]) => {
     inMemoryDocs = config;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
     FirebaseService.saveSetting('documents', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting documents error:', e));
   },
@@ -152,10 +213,12 @@ export const StorageService = {
 
   setDevOpsConfigInMemory: (config: DevOpsConfig) => {
     inMemoryDevOps = config;
+    saveLocalCache();
   },
 
   saveDevOpsConfig: (config: DevOpsConfig) => {
     inMemoryDevOps = config;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
     FirebaseService.saveSetting('devops', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting devops error:', e));
   },
@@ -167,6 +230,7 @@ export const StorageService = {
 
   saveApiKey: (key: string) => {
     inMemoryApiKey = key;
+    saveLocalCache();
     FirebaseService.saveSetting('apiKey', key, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting apiKey error:', e));
   },
 
@@ -184,6 +248,7 @@ export const StorageService = {
   updateUser: (updatedUser: User) => {
     inMemoryUser = updatedUser;
     currentUserId = updatedUser.id;
+    saveLocalCache();
   },
 
   logout: () => {
@@ -198,10 +263,12 @@ export const StorageService = {
 
   setSprintsInMemory: (sprints: Sprint[]) => {
     inMemorySprints = sprints;
+    saveLocalCache();
   },
 
   saveSprints: (sprints: Sprint[]) => {
     inMemorySprints = sprints;
+    saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nas Sprints");
     FirebaseService.saveSprints(sprints, currentUserId || undefined).catch(e => console.warn('Firebase saveSprints error:', e));
   },

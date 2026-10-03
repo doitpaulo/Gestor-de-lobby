@@ -373,39 +373,58 @@ const ConsolidatedReportService = {
 
 // --- Components Helpers ---
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title='' }: any) => {
-  const baseClass = "px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md justify-center text-sm";
-  const variants: any = {
-    primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/30",
-    secondary: "bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600",
-    danger: "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-500/30",
-    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30",
-    warning: "bg-amber-500 hover:bg-amber-600 text-black shadow-amber-500/30"
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', title = '' }: any) => {
+  const hasPx = /\b(px-\d|p-\d)\b/.test(className);
+  const hasPy = /\b(py-\d|p-\d|h-\d)\b/.test(className);
+  const hasTextSize = /\btext-(xs|sm|base|lg)\b/.test(className);
+  const hasRounded = /\brounded(-[a-z0-9]+)?\b/.test(className);
+
+  const basePadding = `${hasPx ? '' : 'px-3.5'} ${hasPy ? '' : 'py-2'}`.trim();
+  const baseSize = hasTextSize ? '' : 'text-sm';
+  const baseRounded = hasRounded ? '' : 'rounded-xl';
+
+  const variants: Record<string, string> = {
+    primary: "bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold border border-indigo-400/30 shadow-md shadow-indigo-950/50",
+    secondary: "bg-dark-800/90 hover:bg-dark-750 active:bg-dark-700 text-slate-200 hover:text-white border border-slate-700/80 shadow-sm",
+    danger: "bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-semibold border border-rose-400/30 shadow-md shadow-rose-950/50",
+    success: "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-semibold border border-emerald-400/30 shadow-md shadow-emerald-950/50",
+    warning: "bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold border border-amber-300/40 shadow-sm",
+    ghost: "bg-transparent hover:bg-slate-800/60 active:bg-slate-800 text-slate-300 hover:text-white border border-transparent",
+    outline: "bg-transparent hover:bg-slate-800/80 active:bg-slate-800 text-slate-200 border border-slate-700/80"
   };
+
+  const selectedVariant = variants[variant] || variants.primary;
+
   return (
-    <button type={type} onClick={onClick} disabled={disabled} title={title} className={`${baseClass} ${variants[variant]} ${className}`}>
+    <button 
+      type={type} 
+      onClick={onClick} 
+      disabled={disabled} 
+      title={title} 
+      className={`inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 active:scale-95 cursor-pointer select-none ${basePadding} ${baseSize} ${baseRounded} ${selectedVariant} ${className}`.trim()}
+    >
       {children}
     </button>
   );
 };
 
 const Card = ({ children, className = '', ...props }: any) => (
-  <div className={`bg-slate-800/80 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 shadow-xl ${className}`} {...props}>
+  <div className={`bg-dark-850/90 backdrop-blur-md border border-slate-800/90 hover:border-slate-750/90 rounded-2xl p-5 sm:p-6 shadow-xl shadow-black/25 transition-all duration-300 ${className}`} {...props}>
     {children}
   </div>
 );
 
 const Badge = ({ type, className='' }: { type: string, className?: string }) => {
-  let color = "bg-slate-700 text-slate-300 border-slate-600";
-  if (type === 'Incidente') color = "bg-rose-500/10 text-rose-400 border-rose-500/20";
-  if (type === 'Melhoria') color = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  if (type === 'Nova Automação') color = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
-  if (type === '1 - Crítica') color = "bg-red-600 text-white border-red-600";
-  if (type === '2 - Alta') color = "bg-orange-500 text-white border-orange-500";
-  if (type === '3 - Moderada') color = "bg-yellow-500 text-black border-yellow-500";
-  if (type === '4 - Baixa') color = "bg-blue-500 text-white border-blue-500";
+  let color = "bg-slate-800/80 text-slate-300 border-slate-700/80";
+  if (type === 'Incidente') color = "bg-rose-950/60 text-rose-300 border-rose-800/60";
+  if (type === 'Melhoria') color = "bg-emerald-950/60 text-emerald-300 border-emerald-800/60";
+  if (type === 'Nova Automação') color = "bg-indigo-950/60 text-indigo-300 border-indigo-800/60";
+  if (type === '1 - Crítica') color = "bg-red-950/90 text-red-200 border-red-700 font-bold";
+  if (type === '2 - Alta') color = "bg-orange-950/90 text-orange-200 border-orange-700/80 font-medium";
+  if (type === '3 - Moderada') color = "bg-amber-950/80 text-amber-200 border-amber-700/70";
+  if (type === '4 - Baixa') color = "bg-sky-950/80 text-sky-200 border-sky-700/70";
   
-  return <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${color} ${className}`}>{type}</span>;
+  return <span className={`text-[10px] px-2.5 py-0.5 rounded-md font-medium tracking-wide border font-mono ${color} ${className}`}>{type}</span>;
 };
 
 const MultiSelect = ({ label, options, selected, onChange, placeholder }: { label?: string, options: string[], selected: string[], onChange: (val: string[]) => void, placeholder: string }) => {
@@ -443,7 +462,7 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
             {label && <label className="block text-xs text-slate-400 mb-1">{label}</label>}
             <div 
                 onClick={() => setIsOpen(!isOpen)} 
-                className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 cursor-pointer flex justify-between items-center hover:border-slate-500 transition-colors"
+                className="bg-dark-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 h-9 text-xs text-slate-200 cursor-pointer flex justify-between items-center hover:border-slate-500 transition-colors shadow-sm"
             >
                 <span className="truncate max-w-[140px]">
                     {selected.length === 0 ? placeholder : selected.length === options.length ? `Todos (${options.length})` : `${selected.length} selecionados`}
@@ -453,23 +472,23 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
                 </svg>
             </div>
             {isOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-dark-900 border border-slate-700/90 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2">
                     <div 
                         onClick={toggleAll}
-                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-700 rounded cursor-pointer border-b border-slate-700 mb-1 pb-2"
+                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-800/80 rounded-lg cursor-pointer border-b border-slate-800 mb-1 pb-2"
                     >
-                         <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.length === options.length ? 'bg-indigo-600 border-indigo-600' : 'border-slate-500'}`}>
+                         <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.length === options.length ? 'bg-indigo-600 border-indigo-600' : 'border-slate-600'}`}>
                              {selected.length === options.length && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                          </div>
-                         <span className="text-xs font-bold text-slate-300">Selecionar Todos</span>
+                         <span className="text-xs font-bold text-slate-200">Selecionar Todos</span>
                     </div>
                     {options.map(opt => (
                         <div 
                             key={opt} 
                             onClick={() => toggleOption(opt)}
-                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-700 rounded cursor-pointer"
+                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-800/70 rounded-lg cursor-pointer"
                         >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.includes(opt) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-500'}`}>
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.includes(opt) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-600'}`}>
                                 {selected.includes(opt) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                             </div>
                             <span className="text-sm text-slate-300">{opt}</span>
@@ -481,13 +500,13 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
     )
 };
 
-const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: any, devs?: Developer[] }) => {
+const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: { filters: any, setFilters: any, devs?: Developer[], extraActions?: React.ReactNode, className?: string }) => {
   const handleChange = (key: string, value: any) => {
     setFilters((prev: any) => ({ ...prev, [key]: value }));
   };
 
   return (
-    <div className="flex flex-col xl:flex-row gap-3 bg-slate-800 p-3 rounded-xl border border-slate-700 mb-4 items-start xl:items-center">
+    <div className={`flex flex-col xl:flex-row gap-3 bg-dark-850/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/90 shadow-lg shadow-black/15 mb-4 items-start xl:items-center justify-between ${className}`}>
        <div className="flex-1 w-full xl:w-auto relative">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -495,13 +514,13 @@ const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: an
           <input 
             type="text" 
             placeholder="Buscar (ID, Resumo, Solicitante)..." 
-            className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+            className="w-full bg-dark-950/70 border border-slate-700/70 hover:border-slate-600 rounded-xl pl-9 pr-3 py-1.5 h-9 text-xs text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all"
             value={filters.search}
             onChange={(e) => handleChange('search', e.target.value)}
           />
        </div>
        
-       <div className="flex flex-wrap gap-2 w-full xl:w-auto">
+       <div className="flex flex-wrap gap-2 w-full xl:w-auto items-center">
            <MultiSelect 
                placeholder="Tipos"
                options={TASK_TYPES}
@@ -533,6 +552,8 @@ const FilterBar = ({ filters, setFilters, devs }: { filters: any, setFilters: an
                    onChange={(val) => handleChange('assignee', val)}
                />
            )}
+
+           {extraActions}
        </div>
     </div>
   )
@@ -607,13 +628,15 @@ const detectChanges = (original: Task, updated: Task, user: User): HistoryEntry[
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-slate-900 border border-slate-700 p-3 rounded shadow-xl text-xs z-50">
-        <p className="font-bold text-slate-200 mb-2 border-b border-slate-700 pb-1">{label}</p>
+      <div className="bg-dark-900/95 backdrop-blur-md border border-slate-700/80 p-3 rounded-xl shadow-2xl text-xs z-50 min-w-[140px]">
+        <p className="font-semibold text-slate-100 mb-2 border-b border-slate-800 pb-1.5">{label}</p>
         {payload.map((p: any, idx: number) => (
-          <div key={idx} className="flex items-center gap-2 mb-1">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color || p.fill }}></div>
-            <span className="text-slate-400 capitalize">{p.name}:</span>
-            <span className="text-slate-200 font-mono font-bold">{
+          <div key={idx} className="flex items-center justify-between gap-3 mb-1">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color || p.fill }}></div>
+              <span className="text-slate-400 capitalize">{p.name}:</span>
+            </div>
+            <span className="text-slate-100 font-mono font-bold tabular-nums">{
                 typeof p.value === 'number' ? (Number.isInteger(p.value) ? p.value : p.value.toFixed(2)) : p.value
             }</span>
           </div>
@@ -1560,6 +1583,10 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const [mobileSelectedCol, setMobileSelectedCol] = useState<string>('all');
   
+  const kanbanFilterKey = useMemo(() => {
+    return `${filters.search}_${filters.type.join(',')}_${filters.priority.join(',')}_${filters.assignee.join(',')}_${kanbanMode}_${mobileSelectedCol}`;
+  }, [filters, kanbanMode, mobileSelectedCol]);
+
   const columns = useMemo(() => {
       if (kanbanMode === 'assignee') {
         let cols = [ { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' }, ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })), { id: 'completed', title: 'Concluídos', type: 'completed' } ];
@@ -1755,13 +1782,29 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-800 p-3 rounded-xl border border-slate-700 mb-4 gap-3">
-          <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
-          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-700 self-start sm:self-auto flex-shrink-0">
-              <button onClick={() => setKanbanMode('assignee')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${kanbanMode === 'assignee' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>Por Responsável</button>
-              <button onClick={() => setKanbanMode('status')} className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${kanbanMode === 'status' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-white'}`}>Por Status</button>
+      <FilterBar 
+        filters={filters} 
+        setFilters={setFilters} 
+        devs={devs} 
+        extraActions={
+          <div className="flex bg-slate-900/80 p-0.5 rounded-xl border border-slate-700/80 shrink-0 h-9 items-center">
+            <button 
+              type="button"
+              onClick={() => setKanbanMode('assignee')} 
+              className={`h-full px-3 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${kanbanMode === 'assignee' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+            >
+              Por Responsável
+            </button>
+            <button 
+              type="button"
+              onClick={() => setKanbanMode('status')} 
+              className={`h-full px-3 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${kanbanMode === 'status' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+            >
+              Por Status
+            </button>
           </div>
-      </div>
+        }
+      />
       {/* Mobile Column Switcher (Pill Selector) */}
       <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 custom-scrollbar">
         <button
@@ -1796,9 +1839,12 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
         })}
       </div>
 
-      <div className="flex-1 overflow-x-auto pb-4 custom-scrollbar">
+      <div 
+        key={kanbanFilterKey} 
+        className="flex-1 overflow-x-auto pb-4 custom-scrollbar animate-fade-in"
+      >
         <div className={`flex gap-4 h-full px-1 items-start ${mobileSelectedCol === 'all' ? 'min-w-max' : 'w-full'}`}>
-          {columns.filter((col: any) => mobileSelectedCol === 'all' || col.id === mobileSelectedCol).map((col: any) => {
+          {columns.filter((col: any) => mobileSelectedCol === 'all' || col.id === mobileSelectedCol).map((col: any, colIdx: number) => {
             const colTasks = getTasksForColumn(col);
             const isCompletedCol = col.type === 'completed' || (col.type === 'status_group' && col.id === 'col-done');
             const isUnassignedCol = col.type === 'unassigned';
@@ -1822,39 +1868,49 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
             }
 
             return (
-                <div key={col.id} className={`${mobileSelectedCol !== 'all' ? 'w-full min-w-full' : 'w-[280px] sm:w-[320px] min-w-[280px] sm:min-w-[320px]'} flex-1 rounded-xl border flex flex-col transition-colors bg-slate-800/30 border-slate-700`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus)}>
-                <div className={`p-3 border-b rounded-t-xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${headerColor}`}>
-                    <div className="flex items-center gap-2">
+                <div 
+                  key={col.id} 
+                  style={{ animationDelay: `${colIdx * 35}ms` }}
+                  className={`${mobileSelectedCol !== 'all' ? 'w-full min-w-full' : 'w-[290px] sm:w-[330px] min-w-[290px] sm:min-w-[330px]'} flex-1 rounded-2xl border flex flex-col transition-all duration-300 bg-dark-900/50 backdrop-blur-sm border-slate-800/80 animate-fade-in shadow-xl shadow-black/15`} 
+                  onDragOver={(e) => e.preventDefault()} 
+                  onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus)}
+                >
+                <div className={`p-3.5 border-b rounded-t-2xl sticky top-0 backdrop-blur-md z-10 flex justify-between items-center ${headerColor}`}>
+                    <div className="flex items-center gap-2.5">
                          {icon}
-                        <h3 className="font-semibold text-white truncate max-w-[200px]">{col.title}</h3>
+                        <h3 className="font-bold text-slate-100 text-sm tracking-tight truncate max-w-[190px]">{col.title}</h3>
                     </div>
-                    <span className="bg-slate-900/50 text-xs px-2 py-1 rounded text-slate-400 font-mono">{colTasks.length}</span>
+                    <span className="bg-dark-950/70 border border-slate-700/60 text-xs px-2.5 py-0.5 rounded-full text-slate-300 font-mono font-semibold">{colTasks.length}</span>
                 </div>
-                <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar h-full min-h-[100px]">
-                    {colTasks.map(task => {
+                <div className="p-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar h-full min-h-[120px]">
+                    {colTasks.map((task, cardIdx) => {
                         const deadline = getDeadlineInfo(task);
                         const isBeingDraggedOver = dragOverTaskId === task.id;
 
                         return (
                             <div 
                                 key={task.id} 
+                                style={{ animationDelay: `${cardIdx * 25}ms` }}
                                 draggable 
                                 onDragStart={(e) => onDragStart(e, task.id)} 
                                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverTaskId(task.id); }}
                                 onDragLeave={() => setDragOverTaskId(null)}
                                 onDrop={(e) => onDrop(e, col.id, col.type, col.targetStatus, task.id)}
                                 onClick={() => onEditTask(task)} 
-                                className={`p-4 rounded-lg border hover:shadow-lg cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all 
-                                ${isBeingDraggedOver ? 'border-t-4 border-t-indigo-500 border-indigo-500/50 bg-indigo-900/10' : ''}
-                                ${isCompletedCol ? 'bg-slate-800/50 border-slate-700 opacity-70 hover:opacity-100' : 'bg-slate-700 border-slate-600 hover:border-indigo-500'}`}
+                                className={`p-4 rounded-xl border hover:shadow-2xl cursor-pointer active:cursor-grabbing group relative overflow-hidden transition-all duration-200 animate-fade-in
+                                ${isBeingDraggedOver ? 'border-t-4 border-t-indigo-500 border-indigo-500/50 bg-indigo-950/30' : ''}
+                                ${isCompletedCol ? 'bg-dark-850/40 border-slate-800/70 opacity-60 hover:opacity-100 hover:border-slate-700' : 'bg-dark-850/80 hover:bg-dark-800/95 border-slate-800/90 hover:border-indigo-500/50 shadow-md shadow-black/20'}`}
                             >
                             <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
-                            <div className="flex justify-between items-start mb-2 pl-2"><span className="text-[10px] text-slate-400 font-mono tracking-wide uppercase">{task.id}</span><Badge type={task.priority} /></div>
-                            <h4 className={`text-sm font-medium mb-2 pl-2 line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.summary}</h4>
+                            <div className="flex justify-between items-start mb-2 pl-2">
+                              <span className="text-[11px] text-slate-400 font-mono tracking-wider font-semibold group-hover:text-indigo-300 transition-colors">{task.id}</span>
+                              <Badge type={task.priority} />
+                            </div>
+                            <h4 className={`text-sm font-semibold mb-2.5 pl-2 leading-snug line-clamp-3 ${isCompletedCol ? 'text-slate-400 line-through' : 'text-slate-100 group-hover:text-white transition-colors'}`}>{task.summary}</h4>
                             
                             {deadline && (
-                                <div className={`ml-2 mb-3 flex items-center justify-between px-2 py-1 rounded border text-[10px] ${deadline.statusColor}`}>
-                                    <div className="flex items-center gap-1">
+                                <div className={`ml-2 mb-3 flex items-center justify-between px-2.5 py-1 rounded-lg border text-[10px] ${deadline.statusColor}`}>
+                                    <div className="flex items-center gap-1.5">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3 h-3"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
                                         <span className="font-mono">{deadline.range}</span>
                                     </div>
@@ -1862,13 +1918,13 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
                                 </div>
                             )}
 
-                            <div className="flex justify-between items-end pl-2 mt-auto">
+                            <div className="flex justify-between items-end pl-2 mt-auto pt-1">
                                 <div className="flex flex-col gap-1">
                                     <Badge type={task.type} />
-                                    <span className="text-[10px] text-slate-500 mt-1">{task.status}</span>
-                                    {kanbanMode === 'status' && <span className="text-[10px] text-indigo-400 font-bold">{task.assignee || 'Sem Dev'}</span>}
+                                    <span className="text-[10px] text-slate-400 font-medium mt-0.5">{task.status}</span>
+                                    {kanbanMode === 'status' && <span className="text-[11px] text-indigo-400 font-semibold">{task.assignee || 'Sem Dev'}</span>}
                                 </div>
-                                {task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800 px-2 py-1 rounded"><IconClock className="w-3 h-3" /> {task.estimatedTime}</div>)}
+                                {task.estimatedTime && (<div className="flex items-center gap-1 text-xs text-slate-400 bg-dark-950/70 border border-slate-800 px-2 py-1 rounded-lg font-mono"><IconClock className="w-3 h-3 text-indigo-400" /> {task.estimatedTime}</div>)}
                             </div>
                             </div>
                         )
@@ -1957,30 +2013,30 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
       
       {/* Visual Counters matching Dashboard */}
-      <div className="flex flex-wrap items-center gap-2 bg-slate-800/60 p-2.5 px-4 rounded-xl border border-slate-700/70 text-xs">
+      <div className="flex flex-wrap items-center gap-2 bg-dark-850/80 backdrop-blur-md p-2.5 px-4 rounded-2xl border border-slate-800/90 text-xs shadow-md shadow-black/15">
         <span className="text-slate-400 font-medium">Filtradas: <strong className="text-white font-bold">{filtered.length}</strong></span>
-        <span className="text-slate-600">|</span>
-        <span className="text-indigo-300 font-medium">Automações Ativas: <strong className="text-white bg-indigo-900/60 border border-indigo-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{autoActiveCount}</strong></span>
-        <span className="text-slate-600">|</span>
-        <span className="text-emerald-300 font-medium">Melhorias Ativas: <strong className="text-white bg-emerald-900/60 border border-emerald-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{featActiveCount}</strong></span>
-        <span className="text-slate-600">|</span>
-        <span className="text-rose-300 font-medium">Incidentes Ativos: <strong className="text-white bg-rose-900/60 border border-rose-500/40 px-2 py-0.5 rounded-full ml-1 font-bold">{incActiveCount}</strong></span>
-        <span className="text-slate-600">|</span>
-        <span className="text-slate-400 font-medium">Concluídos: <strong className="text-slate-200 bg-slate-900/80 border border-slate-700 px-2 py-0.5 rounded-full ml-1 font-bold">{completedCount}</strong></span>
+        <span className="text-slate-700">|</span>
+        <span className="text-indigo-300 font-medium">Automações Ativas: <strong className="text-white bg-indigo-950/80 border border-indigo-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{autoActiveCount}</strong></span>
+        <span className="text-slate-700">|</span>
+        <span className="text-emerald-300 font-medium">Melhorias Ativas: <strong className="text-white bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{featActiveCount}</strong></span>
+        <span className="text-slate-700">|</span>
+        <span className="text-rose-300 font-medium">Incidentes Ativos: <strong className="text-white bg-rose-950/80 border border-rose-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{incActiveCount}</strong></span>
+        <span className="text-slate-700">|</span>
+        <span className="text-slate-400 font-medium">Concluídos: <strong className="text-slate-200 bg-dark-900/90 border border-slate-700/80 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{completedCount}</strong></span>
       </div>
 
-      <div className="flex flex-wrap justify-between items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
+      <div className="flex flex-wrap justify-between items-center gap-4 bg-dark-850/80 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-slate-800/90 shadow-md shadow-black/15">
         <div className="flex flex-wrap gap-2 items-center w-full">
              {selected.size > 0 ? (
                  <>
-                    <span className="text-sm font-semibold text-indigo-300 mr-2 bg-indigo-950/70 px-2.5 py-1 rounded border border-indigo-500/40">{selected.size} selecionados</span>
-                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}>
+                    <span className="text-xs font-semibold text-indigo-300 mr-2 bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-500/40 font-mono">{selected.size} selecionados</span>
+                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}>
                         <option value="">Mudar Tipo</option>
                         <option value="Nova Automação">Nova Automação</option>
                         <option value="Melhoria">Melhoria</option>
                         <option value="Incidente">Incidente</option>
                     </select>
-                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}>
+                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}>
                         <option value="">Mudar Status</option>
                         <option value="Novo">Novo</option>
                         <option value="Backlog">Backlog</option>
@@ -1993,38 +2049,38 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         <option value="Fechado">Fechado</option>
                         <option value="Cancelado">Cancelado</option>
                     </select>
-                    <select className="bg-slate-700 text-xs rounded px-2.5 py-2 outline-none text-slate-200 border border-slate-600" onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}>
+                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}>
                         <option value="">Atribuir Dev</option>
                         {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                     </select>
-                    <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-2 px-3">Excluir</Button>
+                    <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-1.5 px-3">Excluir</Button>
                  </>
-             ) : <div className="text-sm text-slate-500">Selecione itens para ações em massa (Mudar Tipo, Status ou Dev)</div>}
+             ) : <div className="text-xs text-slate-400">Selecione itens para ações em massa (Mudar Tipo, Status ou Desenvolvedor)</div>}
              <div className="flex-1"></div>
-             <Button onClick={exportToExcel} variant="success" className="text-sm py-2"><IconDownload /> Excel</Button>
+             <Button onClick={exportToExcel} variant="success" className="text-xs py-1.5 px-3"><IconDownload className="w-3.5 h-3.5" /> Exportar Excel</Button>
         </div>
       </div>
-      <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden flex-1">
-        <div className="overflow-auto h-full">
+      <div className="bg-dark-850/80 backdrop-blur-md rounded-2xl border border-slate-800/90 overflow-hidden flex-1 shadow-xl shadow-black/20">
+        <div className="overflow-auto h-full custom-scrollbar">
             <table className="w-full text-left text-sm">
-            <thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md">
+            <thead className="bg-dark-950/90 backdrop-blur-md text-slate-400 font-semibold text-xs uppercase tracking-wider sticky top-0 z-10 border-b border-slate-800/80">
               <tr>
-                <th className="p-4 w-10 bg-slate-900"><input type="checkbox" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
-                <th className="p-4 bg-slate-900">ID</th>
-                <th className="p-4 bg-slate-900 min-w-[150px]">Tipo</th>
-                <th className="p-4 w-1/3 bg-slate-900">Título</th>
-                <th className="p-4 bg-slate-900">Prioridade</th>
-                <th className="p-4 bg-slate-900 min-w-[140px]">Status</th>
-                <th className="p-4 bg-slate-900">Atribuído</th>
-                <th className="p-4 text-right bg-slate-900">Ações</th>
+                <th className="p-3.5 w-10 bg-dark-950/90"><input type="checkbox" className="rounded accent-indigo-600" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
+                <th className="p-3.5 bg-dark-950/90">ID</th>
+                <th className="p-3.5 bg-dark-950/90 min-w-[150px]">Tipo</th>
+                <th className="p-3.5 w-1/3 bg-dark-950/90">Título</th>
+                <th className="p-3.5 bg-dark-950/90">Prioridade</th>
+                <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Status</th>
+                <th className="p-3.5 bg-dark-950/90">Atribuído</th>
+                <th className="p-3.5 text-right bg-dark-950/90">Ações</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-700">
+            <tbody className="divide-y divide-slate-800/70">
                 {filtered.map(task => (
-                <tr key={task.id} className="hover:bg-slate-700/30 transition-colors group">
-                    <td className="p-4"><input type="checkbox" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
-                    <td className="p-4 font-mono text-slate-500 group-hover:text-slate-300 font-medium">{task.id}</td>
-                    <td className="p-4">
+                <tr key={task.id} className="hover:bg-dark-800/60 transition-colors group">
+                    <td className="p-3.5"><input type="checkbox" className="rounded accent-indigo-600" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
+                    <td className="p-3.5 font-mono text-slate-400 group-hover:text-indigo-300 font-medium text-xs">{task.id}</td>
+                    <td className="p-3.5">
                       <div className="flex items-center gap-1.5">
                         <Badge type={task.type} />
                         <select 
@@ -2033,15 +2089,15 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                           title="Alterar tipo da demanda"
                           onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
                         >
-                          <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
-                          <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
-                          <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                          <option value="Nova Automação" className="bg-dark-900 text-white">Nova Automação</option>
+                          <option value="Melhoria" className="bg-dark-900 text-white">Melhoria</option>
+                          <option value="Incidente" className="bg-dark-900 text-white">Incidente</option>
                         </select>
                       </div>
                     </td>
-                    <td className="p-4 font-medium text-slate-200">{task.summary}</td>
-                    <td className="p-4"><Badge type={task.priority} /></td>
-                    <td className="p-4">
+                    <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">{task.summary}</td>
+                    <td className="p-3.5"><Badge type={task.priority} /></td>
+                    <td className="p-3.5">
                       <div className="flex items-center gap-1.5">
                         <span className={`text-xs ${isCompletedStatus(task.status) ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{task.status}</span>
                         <select 
@@ -2050,12 +2106,12 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                           title="Alterar status da demanda"
                           onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
                         >
-                          {STATUSES.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
+                          {STATUSES.map(s => <option key={s} value={s} className="bg-dark-900 text-white">{s}</option>)}
                         </select>
                       </div>
                     </td>
-                    <td className="p-4 text-slate-400">{task.assignee || '-'}</td>
-                    <td className="p-4 text-right"><button onClick={() => onEditTask(task)} className="text-indigo-400 hover:text-indigo-300 text-xs font-medium px-2 py-1 rounded border border-indigo-900/50 hover:bg-indigo-900/20">Editar</button></td>
+                    <td className="p-3.5 text-slate-400 text-xs font-medium">{task.assignee || '-'}</td>
+                    <td className="p-3.5 text-right"><button onClick={() => onEditTask(task)} className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2.5 py-1 rounded-lg border border-indigo-500/30 hover:bg-indigo-950/40 transition-colors cursor-pointer">Editar</button></td>
                 </tr>
                 ))}
             </tbody>
@@ -3815,11 +3871,35 @@ const RobotManagementView = ({ robots, setRobots }: { robots: Robot[], setRobots
     const filteredRobots = useMemo(() => { return robots.filter(r => { const matchSearch = r.name.toLowerCase().includes(searchTerm.toLowerCase()) || r.developer.toLowerCase().includes(searchTerm.toLowerCase()) || r.area.toLowerCase().includes(searchTerm.toLowerCase()); const matchStatus = statusFilter === 'Todos' || r.status === statusFilter; const matchArea = areaFilter === 'Todas' || r.area === areaFilter; return matchSearch && matchStatus && matchArea; }); }, [robots, searchTerm, statusFilter, areaFilter]);
     const statusData = useMemo(() => { const counts: Record<string, number> = {}; filteredRobots.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; }); return Object.entries(counts).map(([name, value]) => ({ name, value })); }, [filteredRobots]);
     const areaData = useMemo(() => { const counts: Record<string, number> = {}; filteredRobots.forEach(r => { counts[r.area] = (counts[r.area] || 0) + 1; }); return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value); }, [filteredRobots]);
-    const handleFileUpload = async () => { if (!file) return; try { const newRobots = await ExcelService.parseRobotFile(file); const merged = [...robots, ...newRobots]; setRobots(merged); StorageService.saveRobots(merged); alert(`${newRobots.length} robôs importados com sucesso.`); setFile(null); } catch (e) { alert('Erro ao importar arquivo.'); } };
+    const [robotFeedback, setRobotFeedback] = useState<string | null>(null);
+    const handleFileUpload = async () => { 
+      if (!file) return; 
+      try { 
+        const newRobots = await ExcelService.parseRobotFile(file); 
+        const currentNames = new Set(robots.map(r => r.name.toLowerCase()));
+        const toAdd = newRobots.filter(r => !currentNames.has(r.name.toLowerCase()));
+        const merged = [...robots, ...toAdd]; 
+        setRobots(merged); 
+        StorageService.saveRobots(merged); 
+        setRobotFeedback(`✔ ${newRobots.length} robôs identificados (${toAdd.length} novos cadastrados)!`); 
+        setFile(null); 
+        setTimeout(() => setRobotFeedback(null), 3000);
+      } catch (e) { 
+        setRobotFeedback('❌ Erro ao importar planilha de robôs.'); 
+        setTimeout(() => setRobotFeedback(null), 3000);
+      } 
+    };
     const handleSaveRobot = (robot: Robot) => { if (editingRobot) { const updated = robots.map(r => r.id === robot.id ? robot : r); setRobots(updated); StorageService.saveRobots(updated); } else { const newRobot = { ...robot, id: `rpa-${Date.now()}` }; const updated = [...robots, newRobot]; setRobots(updated); StorageService.saveRobots(updated); } setIsModalOpen(false); setEditingRobot(null); };
     const handleDeleteRobot = (id: string) => { if (window.confirm('Tem certeza que deseja excluir este robô?')) { const updated = robots.filter(r => r.id !== id); setRobots(updated); StorageService.saveRobots(updated); } };
     const handleExport = () => { const ws = XLSX.utils.json_to_sheet(filteredRobots.map(r => ({ 'NOME DO ROBÔ': r.name, 'PASTA QUE ESTÁ ARMAZENADO': r.folder, 'SITUAÇÃO': r.status, 'DESENVOLVEDOR': r.developer, 'OWNERS': r.owners, 'ÁREA': r.area, 'FTE': r.fte || 0, 'CHAMADO': r.ticketNumber || '' }))); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Robôs"); XLSX.writeFile(wb, "Nexus_Robots_Base.xlsx"); };
-    return (<div className="space-y-6 h-full flex flex-col pb-20"><div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div><h2 className="text-xl font-bold text-white">Gestão de RPAs</h2><p className="text-sm text-slate-400">Base de conhecimento e status dos robôs</p></div><div className="flex gap-2 items-center flex-wrap"><div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2"><input type="file" id="robotUpload" className="hidden" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] || null)} /><label htmlFor="robotUpload" className="text-xs text-slate-400 cursor-pointer hover:text-white py-2 px-1">{file ? file.name : 'Selecionar Planilha...'}</label>{file && <button onClick={handleFileUpload} className="text-xs text-emerald-400 font-bold hover:underline px-2">Importar</button>}</div><Button variant="success" onClick={handleExport} className="text-xs py-2"><IconUpload className="w-4 h-4" /> Exportar</Button><Button onClick={() => { setEditingRobot(null); setIsModalOpen(true); }} className="text-xs py-2"><IconPlus className="w-4 h-4" /> Novo Robô</Button></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Distribuição por Status</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label>{statusData.map((entry, index) => <Cell key={index} fill={entry.name === 'ATIVO' ? '#10b981' : entry.name === 'DESATIVO' ? '#f43f5e' : '#f59e0b'} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize:'10px'}} /></PieChart></ResponsiveContainer></div></Card><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Robôs por Área</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><BarChart data={areaData} layout="vertical" margin={{ left: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" hide /><YAxis type="category" dataKey="name" stroke="#94a3b8" width={100} tick={{fontSize: 10}} /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20}><LabelList dataKey="value" position="right" fill="#fff" fontSize={10} /></Bar></BarChart></ResponsiveContainer></div></Card></div><div className="flex flex-col md:flex-row gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div className="relative flex-1"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg><input type="text" placeholder="Buscar robô..." className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{statuses.map(s => <option key={s} value={s}>{s === 'Todos' ? 'Status: Todos' : s}</option>)}</select><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none max-w-[200px]" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>{areas.map(a => <option key={a} value={a}>{a === 'Todas' ? 'Área: Todas' : a}</option>)}</select></div><div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col"><div className="overflow-auto custom-scrollbar flex-1"><table className="w-full text-left text-sm"><thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md"><tr><th className="p-4">Nome do Robô</th><th className="p-4">Situação</th><th className="p-4">Área</th><th className="p-4">Chamado</th><th className="p-4">FTE</th><th className="p-4">Desenvolvedor</th><th className="p-4">Pasta</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-700">{filteredRobots.map(robot => (<tr key={robot.id} className="hover:bg-slate-800/50 transition-colors group"><td className="p-4 font-medium text-white">{robot.name}</td><td className="p-4"><span className={`px-2 py-0.5 text-[10px] rounded font-bold uppercase ${robot.status === 'ATIVO' ? 'bg-emerald-500/20 text-emerald-400' : robot.status === 'DESATIVO' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>{robot.status}</span></td><td className="p-4 text-slate-300">{robot.area}</td><td className="p-4 text-slate-400 font-mono text-xs">{robot.ticketNumber || '-'}</td><td className="p-4 text-slate-300">{robot.fte || '-'}</td><td className="p-4 text-slate-400">{robot.developer}</td><td className="p-4 text-xs text-slate-500 font-mono truncate max-w-[150px]" title={robot.folder}>{robot.folder}</td><td className="p-4 text-right"><button onClick={() => { setEditingRobot(robot); setIsModalOpen(true); }} className="text-indigo-400 hover:text-indigo-300 mr-3">Editar</button><button onClick={() => handleDeleteRobot(robot.id)} className="text-rose-400 hover:text-rose-300">Excluir</button></td></tr>))}</tbody></table>{filteredRobots.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum robô encontrado.</div>}</div></div>{isModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg shadow-2xl"><div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingRobot ? 'Editar Robô' : 'Novo Robô'}</h3></div><div className="p-6 space-y-4"><form id="robotForm" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const data = new FormData(form); handleSaveRobot({ id: editingRobot?.id || '', name: data.get('name') as string, folder: data.get('folder') as string, status: data.get('status') as string, developer: data.get('developer') as string, owners: data.get('owners') as string, area: data.get('area') as string, fte: parseFloat(data.get('fte') as string) || undefined, ticketNumber: data.get('ticketNumber') as string }); }}><div className="space-y-4"><div><label className="block text-xs text-slate-400 mb-1">Nome do Robô</label><input name="name" defaultValue={editingRobot?.name} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Área</label><input name="area" defaultValue={editingRobot?.area} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Situação</label><select name="status" defaultValue={editingRobot?.status || 'ATIVO'} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500"><option value="ATIVO">ATIVO</option><option value="DESATIVO">DESATIVO</option><option value="EM DESENVOLVIMENTO">EM DESENVOLVIMENTO</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label><input name="developer" defaultValue={editingRobot?.developer} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Owners</label><input name="owners" defaultValue={editingRobot?.owners} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1">Nº Chamado</label><input name="ticketNumber" defaultValue={editingRobot?.ticketNumber} placeholder="Ex: R12345" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">FTE</label><input type="number" step="0.01" name="fte" defaultValue={editingRobot?.fte} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div><label className="block text-xs text-slate-400 mb-1">Pasta de Armazenamento</label><input name="folder" defaultValue={editingRobot?.folder} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="flex justify-end gap-3 mt-6"><Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button><Button type="submit">Salvar</Button></div></form></div></div></div>)}</div>); };
+    return (<div className="space-y-6 h-full flex flex-col pb-20">
+      {robotFeedback && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-500 text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2">
+          <IconCheck className="w-4 h-4 text-emerald-400" />
+          <span>{robotFeedback}</span>
+        </div>
+      )}
+      <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div><h2 className="text-xl font-bold text-white">Gestão de RPAs</h2><p className="text-sm text-slate-400">Base de conhecimento e status dos robôs</p></div><div className="flex gap-2 items-center flex-wrap"><div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded-xl px-2.5 h-9"><input type="file" id="robotUpload" className="hidden" accept=".xlsx, .xls, .csv" onChange={(e) => setFile(e.target.files?.[0] || null)} /><label htmlFor="robotUpload" className="text-xs text-slate-400 cursor-pointer hover:text-white py-1.5 px-1 truncate max-w-[140px]">{file ? file.name : 'Selecionar Planilha...'}</label>{file && <button onClick={handleFileUpload} className="text-xs text-emerald-400 font-bold hover:underline px-2 cursor-pointer">Importar</button>}</div><Button variant="secondary" onClick={handleExport} className="h-9 px-3 text-xs"><IconDownload className="w-4 h-4 text-slate-300" /> Exportar</Button><Button variant="primary" onClick={() => { setEditingRobot(null); setIsModalOpen(true); }} className="h-9 px-3 text-xs font-bold"><IconPlus className="w-4 h-4" /> Novo Robô</Button></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Distribuição por Status</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label>{statusData.map((entry, index) => <Cell key={index} fill={entry.name === 'ATIVO' ? '#10b981' : entry.name === 'DESATIVO' ? '#f43f5e' : '#f59e0b'} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize:'10px'}} /></PieChart></ResponsiveContainer></div></Card><Card className="h-64 flex flex-col"><h3 className="text-sm font-bold text-slate-300 mb-2">Robôs por Área</h3><div className="flex-1"><ResponsiveContainer width="100%" height="100%"><BarChart data={areaData} layout="vertical" margin={{ left: 20 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" hide /><YAxis type="category" dataKey="name" stroke="#94a3b8" width={100} tick={{fontSize: 10}} /><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /><Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={20}><LabelList dataKey="value" position="right" fill="#fff" fontSize={10} /></Bar></BarChart></ResponsiveContainer></div></Card></div><div className="flex flex-col md:flex-row gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700"><div className="relative flex-1"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg><input type="text" placeholder="Buscar robô..." className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{statuses.map(s => <option key={s} value={s}>{s === 'Todos' ? 'Status: Todos' : s}</option>)}</select><select className="bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 outline-none max-w-[200px]" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>{areas.map(a => <option key={a} value={a}>{a === 'Todas' ? 'Área: Todas' : a}</option>)}</select></div><div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col"><div className="overflow-auto custom-scrollbar flex-1"><table className="w-full text-left text-sm"><thead className="bg-slate-900 text-slate-400 font-medium sticky top-0 z-10 shadow-md"><tr><th className="p-4">Nome do Robô</th><th className="p-4">Situação</th><th className="p-4">Área</th><th className="p-4">Chamado</th><th className="p-4">FTE</th><th className="p-4">Desenvolvedor</th><th className="p-4">Pasta</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-700">{filteredRobots.map(robot => (<tr key={robot.id} className="hover:bg-slate-800/50 transition-colors group"><td className="p-4 font-medium text-white">{robot.name}</td><td className="p-4"><span className={`px-2 py-0.5 text-[10px] rounded font-bold uppercase ${robot.status === 'ATIVO' ? 'bg-emerald-500/20 text-emerald-400' : robot.status === 'DESATIVO' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>{robot.status}</span></td><td className="p-4 text-slate-300">{robot.area}</td><td className="p-4 text-slate-400 font-mono text-xs">{robot.ticketNumber || '-'}</td><td className="p-4 text-slate-300">{robot.fte || '-'}</td><td className="p-4 text-slate-400">{robot.developer}</td><td className="p-4 text-xs text-slate-500 font-mono truncate max-w-[150px]" title={robot.folder}>{robot.folder}</td><td className="p-4 text-right"><button onClick={() => { setEditingRobot(robot); setIsModalOpen(true); }} className="text-indigo-400 hover:text-indigo-300 mr-3">Editar</button><button onClick={() => handleDeleteRobot(robot.id)} className="text-rose-400 hover:text-rose-300">Excluir</button></td></tr>))}</tbody></table>{filteredRobots.length === 0 && <div className="p-10 text-center text-slate-500">Nenhum robô encontrado.</div>}</div></div>{isModalOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-lg shadow-2xl"><div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingRobot ? 'Editar Robô' : 'Novo Robô'}</h3></div><div className="p-6 space-y-4"><form id="robotForm" onSubmit={(e) => { e.preventDefault(); const form = e.target as HTMLFormElement; const data = new FormData(form); handleSaveRobot({ id: editingRobot?.id || '', name: data.get('name') as string, folder: data.get('folder') as string, status: data.get('status') as string, developer: data.get('developer') as string, owners: data.get('owners') as string, area: data.get('area') as string, fte: parseFloat(data.get('fte') as string) || undefined, ticketNumber: data.get('ticketNumber') as string }); }}><div className="space-y-4"><div><label className="block text-xs text-slate-400 mb-1">Nome do Robô</label><input name="name" defaultValue={editingRobot?.name} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Área</label><input name="area" defaultValue={editingRobot?.area} required className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Situação</label><select name="status" defaultValue={editingRobot?.status || 'ATIVO'} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500"><option value="ATIVO">ATIVO</option><option value="DESATIVO">DESATIVO</option><option value="EM DESENVOLVIMENTO">EM DESENVOLVIMENTO</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-slate-400 mb-1">Desenvolvedor</label><input name="developer" defaultValue={editingRobot?.developer} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">Owners</label><input name="owners" defaultValue={editingRobot?.owners} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="grid grid-cols-2 gap-4 bg-slate-900/30 p-2 rounded"><div><label className="block text-xs text-slate-400 mb-1">Nº Chamado</label><input name="ticketNumber" defaultValue={editingRobot?.ticketNumber} placeholder="Ex: R12345" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div><div><label className="block text-xs text-slate-400 mb-1">FTE</label><input type="number" step="0.01" name="fte" defaultValue={editingRobot?.fte} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div><label className="block text-xs text-slate-400 mb-1">Pasta de Armazenamento</label><input name="folder" defaultValue={editingRobot?.folder} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" /></div></div><div className="flex justify-end gap-3 mt-6"><Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button><Button type="submit">Salvar</Button></div></form></div></div></div>)}</div>); };
 
 const AutomationTotemView = ({ tasks, setTasks, robots }: any) => {
     const [logs, setLogs] = useState([
@@ -4097,7 +4177,7 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     return (<div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden"><div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4"><h3 className="text-lg font-bold mb-4 text-white">Etapas Existentes</h3><div className="space-y-2">{currentConfig.map((phase: WorkflowPhase, idx: number) => (<div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}><div><span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span><span className="font-medium text-slate-200">{phase.name}</span><p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p></div><div className="flex gap-1"><button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400">✏️</button><button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400">🗑️</button></div></div>))}</div><div className="mt-4"><Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs"><IconPlus className="w-3 h-3" /> Adicionar Nova Fase</Button></div></div><div className="flex-1 flex flex-col"><h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3><div className="space-y-4 flex-1"><div><label className="block text-xs text-slate-400 mb-1">Nome da Fase</label><input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" /></div><div><label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não Iniciado, Em Andamento, Concluído..." /></div><div><label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." /></div></div><div className="flex justify-end gap-2 mt-6"><Button variant="secondary" onClick={onClose}>Fechar</Button><Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button></div></div></div>);
 };
 
-const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void }) => {
+const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, onCreateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void, onOpenUpload?: () => void, onCreateTask?: () => void }) => {
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       try {
           const saved = localStorage.getItem('nexus_dashboard_widgets');
@@ -4123,6 +4203,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
   const [filterType, setFilterType] = useState<string[]>([]);
   const [selectedKpiModal, setSelectedKpiModal] = useState<'total' | 'incidents' | 'features' | 'automations' | null>(null);
   const [kpiSearch, setKpiSearch] = useState('');
+
+  const dashboardFilterKey = useMemo(() => {
+    return `${filterType.slice().sort().join(',')}_${filterDev.slice().sort().join(',')}`;
+  }, [filterType, filterDev]);
 
   useEffect(() => { localStorage.setItem('nexus_dashboard_widgets', JSON.stringify(widgets)); }, [widgets]);
   
@@ -4344,7 +4428,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
                       <div 
                         onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }} 
-                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-slate-400/80 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-slate-400/80 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver a lista de todas as demandas ativas"
                       >
                         <div className="flex items-center justify-between">
@@ -4359,7 +4443,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
                       
                       <div 
                         onClick={() => { setSelectedKpiModal('incidents'); setKpiSearch(''); }} 
-                        className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 hover:border-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        style={{ animationDelay: '40ms' }}
+                        className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 hover:border-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver os Incidentes"
                       >
                         <div className="flex items-center justify-between">
@@ -4374,7 +4459,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
                       
                       <div 
                         onClick={() => { setSelectedKpiModal('features'); setKpiSearch(''); }} 
-                        className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        style={{ animationDelay: '80ms' }}
+                        className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver as Melhorias"
                       >
                         <div className="flex items-center justify-between">
@@ -4389,7 +4475,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
                       
                       <div 
                         onClick={() => { setSelectedKpiModal('automations'); setKpiSearch(''); }} 
-                        className="bg-indigo-950/20 p-4 rounded-xl border border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg"
+                        style={{ animationDelay: '120ms' }}
+                        className="bg-indigo-950/20 p-4 rounded-xl border border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver as Automações"
                       >
                         <div className="flex items-center justify-between">
@@ -4403,7 +4490,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
                       </div>
                     </div>
                   )}
-                 {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div></div>)}
+                 {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between animate-fade-in transition-all hover:bg-indigo-900/20"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div style={{ animationDelay: '40ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div style={{ animationDelay: '80ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div style={{ animationDelay: '120ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div></div>)}
                  {widget.type === 'capacity' && (<div className="h-full flex flex-col">{capacityData.length > 0 && (<div className="bg-emerald-900/20 border border-emerald-700/50 px-4 py-4 rounded-lg mb-4 flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"><IconClock className="w-6 h-6" /></div><div><p className="text-[11px] text-emerald-400 font-bold uppercase tracking-widest mb-1">Sugestão (Disponível 1º)</p><p className="text-xl text-white font-bold leading-none">{capacityData[0].name}</p><p className="text-xs text-slate-400 mt-1">Livre em aprox. <span className="text-white font-mono">{formatDuration(capacityData[0].totalHours)}</span></p></div></div>)}<div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2"><table className="w-full text-sm"><thead className="text-xs text-slate-400 uppercase bg-slate-900/50"><tr><th className="text-left p-2 rounded-l">Dev</th><th className="text-center p-2">Qtd</th><th className="text-center p-2">Backlog</th><th className="text-center p-2">Dias Est.</th><th className="text-center p-2 rounded-r">Saúde</th></tr></thead><tbody className="divide-y divide-slate-700/50">{capacityData.map((dev, idx) => { const estimatedDays = Math.ceil(dev.totalHours / 8); let statusColor = 'bg-emerald-500 text-white'; let statusText = 'Livre'; let barColor = 'bg-emerald-500'; if (dev.totalHours > 40) { statusColor = 'bg-rose-500 text-white'; statusText = 'Sobrecarga'; barColor = 'bg-rose-500'; } else if (dev.totalHours > 24) { statusColor = 'bg-orange-500 text-white'; statusText = 'Ocupado'; barColor = 'bg-orange-500'; } else if (dev.totalHours > 8) { statusColor = 'bg-yellow-500 text-black'; statusText = 'Moderado'; barColor = 'bg-yellow-500'; } return (<tr key={dev.name} className="group hover:bg-slate-700/30"><td className="p-2"><div className="font-medium text-slate-200">{dev.name}</div><div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden"><div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div></div></td><td className="p-2 text-center text-slate-300 font-bold">{dev.activeTasksCount}</td><td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td><td className="p-2 text-center text-slate-400">{estimatedDays}d</td><td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusColor}`}>{statusText}</span></td></tr>) })}</tbody></table></div></div>)}
                  {['priority', 'status', 'devType', 'incidentByAuto', 'automationsByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<ResponsiveContainer width="100%" height="100%">{renderChartContent() as any}</ResponsiveContainer>)}
                  {widget.type === 'fteByManager' && renderChartContent()}
@@ -4418,13 +4505,22 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
           <h2 className="text-2xl font-bold text-white">One Page Report</h2>
           <p className="text-slate-400 text-sm">Visão executiva e operacional do projeto</p>
         </div>
-        <div className="flex flex-wrap gap-4 w-full md:w-auto items-center">
+        <div className="flex flex-wrap gap-2.5 w-full md:w-auto items-center">
           <div className="flex gap-2 w-full md:w-auto">
             <MultiSelect options={TASK_TYPES} selected={filterType} onChange={setFilterType} placeholder="Tipos: Todos" />
             <MultiSelect options={devs.map(d => d.name)} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" />
           </div>
-          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"}>{isEditMode ? 'Salvar Layout' : 'Editar Layout'}</Button>
-          <Button onClick={exportPPT} variant="primary"><IconDownload /> Exportar PPT</Button>
+          {onOpenUpload && (
+            <Button onClick={onOpenUpload} variant="success" className="h-9 px-3.5 text-xs font-bold shadow-sm shadow-emerald-950/40">
+              <IconUpload className="w-3.5 h-3.5" /> Importar Planilha
+            </Button>
+          )}
+          <Button onClick={() => setIsEditMode(!isEditMode)} variant={isEditMode ? "success" : "secondary"} className="h-9 px-3.5 text-xs font-semibold">
+            {isEditMode ? '✔ Salvar Layout' : '⚙ Editar Layout'}
+          </Button>
+          <Button onClick={exportPPT} variant="primary" className="h-9 px-3.5 text-xs font-semibold shadow-sm shadow-indigo-950/40">
+            <IconDownload className="w-3.5 h-3.5" /> Exportar PPT
+          </Button>
         </div>
       </div>
       {isEditMode && widgets.some(w => !w.visible) && (
@@ -4437,10 +4533,61 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[
           ))}
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+
+      {/* Helpful Empty State Banner if no tasks exist yet */}
+      {tasks.length === 0 && (
+        <div className="bg-gradient-to-r from-indigo-950/70 via-slate-900 to-emerald-950/70 border-2 border-dashed border-indigo-500/40 rounded-2xl p-6 sm:p-8 text-center space-y-3 shadow-xl animate-fade-in">
+          <div className="w-14 h-14 bg-indigo-600/20 text-indigo-400 rounded-2xl border border-indigo-500/30 flex items-center justify-center mx-auto shadow-inner">
+            <IconUpload className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg sm:text-xl font-bold text-white">Sua Base de Demandas está Pronta para Começar</h3>
+          <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
+            Faça upload da sua planilha Excel de backup (.xlsx, .xls ou .csv) para sincronizar automaticamente todas as demandas, robôs e desenvolvedores no sistema.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {onOpenUpload && (
+              <button 
+                type="button"
+                onClick={onOpenUpload}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-900/40 flex items-center gap-2 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+              >
+                <IconUpload className="w-4 h-4" />
+                Importar Planilha Excel / Backup
+              </button>
+            )}
+            {onCreateTask && (
+              <button 
+                type="button"
+                onClick={onCreateTask}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-900/40 flex items-center gap-2 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+              >
+                <IconPlus className="w-4 h-4" />
+                Cadastrar Demanda Manual
+              </button>
+            )}
+            <button 
+              type="button"
+              onClick={() => ExcelService.downloadTemplateExcel()}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-medium flex items-center gap-2 cursor-pointer transition-colors"
+              title="Baixar planilha de exemplo com as colunas recomendadas"
+            >
+              <IconDownload className="w-4 h-4" />
+              Baixar Planilha Modelo (.xlsx)
+            </button>
+          </div>
+        </div>
+      )}
+      <div 
+        key={dashboardFilterKey} 
+        className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 animate-fade-in"
+      >
         {widgets.filter(w => w.visible).map((widget, index) => (
-          <div key={widget.id} className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300`}>
-            <Card className="h-full min-h-[340px] flex flex-col">{renderWidget(widget)}</Card>
+          <div 
+            key={`${widget.id}-${dashboardFilterKey}`} 
+            style={{ animationDelay: `${index * 45}ms` }}
+            className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300 animate-fade-in`}
+          >
+            <Card className="h-full min-h-[340px] flex flex-col transition-all duration-300 hover:border-slate-600/70 hover:shadow-2xl">{renderWidget(widget)}</Card>
             {isEditMode && (
               <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 p-1.5 rounded border border-slate-700 shadow-xl z-20">
                 {index > 0 && (
@@ -4957,24 +5104,29 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
       </div>
 
       {/* Desktop Sidebar (hidden on mobile) */}
-      <aside className={`hidden md:flex ${isCollapsed ? 'w-20' : 'w-64'} bg-slate-800/80 backdrop-blur-xl border-r border-slate-700 flex-col h-full z-30 transition-all duration-300 ease-in-out relative shrink-0 select-none shadow-2xl`}>
+      <aside className={`hidden md:flex ${isCollapsed ? 'w-20' : 'w-64'} bg-dark-900/95 backdrop-blur-2xl border-r border-slate-800/80 flex-col h-full z-30 transition-all duration-300 ease-in-out relative shrink-0 select-none shadow-2xl shadow-black/40`}>
         {/* Collapse toggle button */}
         <button 
+          type="button"
           onClick={() => setIsCollapsed(!isCollapsed)} 
-          className="absolute -right-3 top-7 bg-indigo-600 hover:bg-indigo-500 text-white p-1 rounded-full shadow-lg transition-colors z-50 cursor-pointer"
+          className="absolute -right-3.5 top-5 w-7 h-7 rounded-full bg-dark-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 hover:border-indigo-400 shadow-md shadow-black/40 flex items-center justify-center transition-all duration-200 z-50 cursor-pointer hover:scale-110 active:scale-95 group focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
           title={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+          aria-label={isCollapsed ? 'Expandir menu lateral' : 'Recolher menu lateral'}
         >
-          <IconChevronLeft className={`w-3.5 h-3.5 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
+          <IconChevronLeft 
+            strokeWidth={2.5} 
+            className={`w-3.5 h-3.5 transform transition-transform duration-300 ${isCollapsed ? 'rotate-180 translate-x-0.5' : '-translate-x-0.5'}`} 
+          />
         </button>
 
         {/* Brand header */}
-        <div className={`p-4 border-b border-slate-700 flex items-center gap-3 h-16 shrink-0 ${isCollapsed ? 'justify-center px-0' : ''}`}>
-          <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-xl shadow-lg shadow-indigo-500/40 flex items-center justify-center font-black text-white text-base">
+        <div className={`p-4 border-b border-slate-800/80 flex items-center gap-3 h-16 shrink-0 ${isCollapsed ? 'justify-center px-0' : ''}`}>
+          <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-tr from-indigo-500 via-indigo-600 to-emerald-400 rounded-xl shadow-lg shadow-indigo-500/25 flex items-center justify-center font-black text-white text-base tracking-tight">
             N
           </div>
           <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
             <h1 className="text-lg font-bold tracking-tight text-white leading-none">Nexus</h1>
-            <span className="text-[10px] text-indigo-400 font-semibold tracking-wider uppercase">Project Cloud</span>
+            <span className="text-[10px] text-indigo-400/90 font-mono font-semibold tracking-wider uppercase">Project Cloud</span>
           </div>
         </div>
 
@@ -4989,8 +5141,8 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
                 title={isCollapsed ? item.label : ''} 
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group text-sm cursor-pointer ${
                   isActive 
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50 font-semibold' 
-                    : 'text-slate-400 hover:bg-slate-700/60 hover:text-white'
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-semibold' 
+                    : 'text-slate-400 hover:bg-dark-800/70 hover:text-slate-100'
                 } ${isCollapsed ? 'justify-center px-0' : ''}`}
               >
                 <span className="shrink-0">{item.icon}</span>
@@ -5003,13 +5155,13 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
         </nav>
 
         {/* User profile & Logout */}
-        <div className="p-3 border-t border-slate-700/80 bg-slate-900/90 shrink-0 space-y-2">
+        <div className="p-3 border-t border-slate-800/80 bg-dark-950/90 shrink-0 space-y-2">
           <div 
             onClick={() => navigate('/profile')} 
-            className={`flex items-center gap-2.5 p-2 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-700 group ${isCollapsed ? 'justify-center px-0' : ''}`}
+            className={`flex items-center gap-2.5 p-2 rounded-xl cursor-pointer hover:bg-dark-800/70 transition-colors border border-slate-800/60 hover:border-slate-700/80 group ${isCollapsed ? 'justify-center px-0' : ''}`}
             title="Clique para abrir Meu Perfil e Configurações"
           >
-            <div className="w-9 h-9 rounded-full bg-slate-700 border-2 border-indigo-500/60 flex items-center justify-center text-xs font-bold text-indigo-300 overflow-hidden shrink-0 shadow-sm group-hover:border-indigo-400 transition-colors">
+            <div className="w-9 h-9 rounded-full bg-slate-800 border-2 border-indigo-500/60 flex items-center justify-center text-xs font-bold text-indigo-300 overflow-hidden shrink-0 shadow-sm group-hover:border-indigo-400 transition-colors">
               {user?.avatar ? (
                 <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
@@ -5033,7 +5185,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
               <button
                 type="button"
                 onClick={onGoogleLogin}
-                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-indigo-900/50 hover:bg-indigo-800/60 border border-indigo-700/50 text-indigo-200 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-200 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
                 title="Conectar Conta Google"
               >
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
@@ -5064,14 +5216,14 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden relative flex flex-col">
         {/* Top Navbar */}
-        <header className="h-16 bg-slate-900/90 backdrop-blur-md flex items-center justify-between px-3 sm:px-6 lg:px-8 z-30 sticky top-0 border-b border-slate-800 shrink-0 gap-2">
-          {/* Left: Mobile Hamburger & Brand/Status */}
+        <header className="h-16 bg-dark-900/80 backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 lg:px-8 z-30 sticky top-0 border-b border-slate-800/80 shrink-0 gap-2">
+          {/* Left: Mobile Hamburger & Desktop Title / Cloud Status */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Hamburger Button on Mobile */}
             <button
               type="button"
               onClick={() => setIsMobileDrawerOpen(true)}
-              className="md:hidden p-2 -ml-1 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors cursor-pointer"
+              className="md:hidden p-2 -ml-1 text-slate-300 hover:text-white hover:bg-dark-800/80 rounded-xl transition-colors cursor-pointer"
               title="Abrir menu lateral"
             >
               <IconMenu className="w-5 h-5" />
@@ -5079,16 +5231,27 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
 
             {/* Mobile Brand indicator */}
             <div className="md:hidden flex items-center gap-2">
-              <div className="w-7 h-7 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-lg flex items-center justify-center font-black text-white text-xs shadow-md">
+              <div className="w-7 h-7 bg-gradient-to-tr from-indigo-500 via-indigo-600 to-emerald-400 rounded-lg flex items-center justify-center font-black text-white text-xs shadow-md">
                 N
               </div>
             </div>
 
-            {/* Cloud Status Badge */}
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 sm:px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+            {/* Desktop Active View Title + Cloud Status Badge */}
+            <div className="hidden md:flex items-center gap-2.5">
+              <span className="text-white font-bold text-sm tracking-tight">
+                {menuItems.find(m => m.path === location.pathname)?.label || 'Dashboard'}
+              </span>
+              <span className="text-slate-700 text-xs">•</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="font-mono">Nuvem Conectada</span>
+              </span>
+            </div>
+
+            {/* Mobile Cloud Status Badge */}
+            <span className="md:hidden inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="hidden sm:inline">Firebase Nuvem</span>
-              <span className="sm:hidden text-[10px]">Nuvem</span>
+              <span className="font-mono">Nuvem</span>
             </span>
           </div>
 
@@ -5102,10 +5265,10 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             <button
               type="button"
               onClick={() => navigate('/profile')}
-              className="flex items-center gap-1.5 bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700 text-slate-200 p-1 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+              className="h-9 flex items-center gap-2 bg-dark-800/90 hover:bg-dark-750 border border-slate-700/80 text-slate-200 px-2 sm:px-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-sm"
               title="Abrir Meu Perfil e Configurações"
             >
-              <div className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-indigo-600 border border-indigo-400/50 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden shrink-0">
+              <div className="w-6 h-6 rounded-full bg-indigo-600 border border-indigo-400/50 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden shrink-0">
                 {user?.avatar ? (
                   <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
@@ -5118,7 +5281,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
         </header>
 
         {/* Ambient Gradient Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/10 via-dark-900 to-emerald-900/10 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/20 via-dark-900 to-slate-950 pointer-events-none" />
 
         {/* Main Content Viewport */}
         <div className="flex-1 overflow-auto p-3.5 sm:p-5 md:p-6 lg:p-8 pb-24 md:pb-8 z-10 relative">
@@ -5126,7 +5289,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
         </div>
 
         {/* Mobile Bottom Navigation Dock (Pinned to screen bottom on mobile) */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800 px-1.5 py-1 flex items-center justify-around shadow-2xl pb-[max(env(safe-area-inset-bottom),0.35rem)]">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-dark-900/95 backdrop-blur-2xl border-t border-slate-800/90 px-1.5 py-1 flex items-center justify-around shadow-2xl pb-[max(env(safe-area-inset-bottom),0.35rem)]">
           <button
             type="button"
             onClick={() => navigate('/')}
@@ -5135,7 +5298,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             }`}
           >
             <IconHome className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5 tracking-tight">Início</span>
+            <span className="text-[10px] mt-0.5 tracking-tight font-medium">Início</span>
           </button>
 
           <button
@@ -5146,7 +5309,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             }`}
           >
             <IconProject className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5 tracking-tight">Projetos</span>
+            <span className="text-[10px] mt-0.5 tracking-tight font-medium">Projetos</span>
           </button>
 
           {/* Central Elevated Floating Action Button (+ Demanda) */}
@@ -5154,7 +5317,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             <button
               type="button"
               onClick={onCreateTask}
-              className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/40 hover:scale-105 active:scale-95 transition-transform border-2 border-slate-900 cursor-pointer"
+              className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-600 to-emerald-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/40 hover:scale-105 active:scale-95 transition-transform border-2 border-dark-900 cursor-pointer"
               title="Nova Demanda"
             >
               <IconPlus className="w-6 h-6 stroke-[2.5]" />
@@ -5169,7 +5332,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             }`}
           >
             <IconKanban className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5 tracking-tight">Kanban</span>
+            <span className="text-[10px] mt-0.5 tracking-tight font-medium">Kanban</span>
           </button>
 
           <button
@@ -5178,7 +5341,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             className="flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] rounded-lg transition-colors cursor-pointer text-slate-400 hover:text-slate-200"
           >
             <IconMenu className="w-5 h-5" />
-            <span className="text-[10px] mt-0.5 tracking-tight">Menu</span>
+            <span className="text-[10px] mt-0.5 tracking-tight font-medium">Menu</span>
           </button>
         </nav>
       </main>
@@ -5299,14 +5462,14 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
             <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px]"></div>
             <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-[120px]"></div>
             
-            <div className="w-full max-w-md p-8 md:p-10 bg-slate-800/80 backdrop-blur-xl border border-slate-700/70 rounded-2xl shadow-2xl z-10 relative">
+            <div className="w-full max-w-md p-8 md:p-10 bg-dark-850/90 backdrop-blur-2xl border border-slate-800/90 rounded-2xl shadow-2xl shadow-black/50 z-10 relative">
                 <div className="flex justify-center mb-5">
                     <div className="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-emerald-500 rounded-2xl shadow-2xl shadow-indigo-500/40 flex items-center justify-center">
                         <span className="text-3xl text-white font-bold tracking-wider">N</span>
                     </div>
                 </div>
                 
-                <h2 className="text-2xl md:text-3xl font-bold text-center text-white mb-1">Nexus Project</h2>
+                <h2 className="text-2xl md:text-3xl font-bold text-center text-white mb-1 tracking-tight">Nexus Project</h2>
                 <p className="text-center text-slate-400 mb-6 text-xs md:text-sm">
                     {isRegister ? 'Crie sua conta para acessar seus projetos de qualquer lugar' : 'Acesse seus projetos em nuvem com Firebase'}
                 </p>
@@ -5314,7 +5477,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                 {/* Cloud Sync Status Pill */}
                 <div className="mb-6 flex items-center justify-center gap-2 bg-indigo-950/60 border border-indigo-500/30 px-3 py-1.5 rounded-full text-indigo-300 text-xs font-medium">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>Firebase Cloud Ativo (Firestore + Auth)</span>
+                    <span className="font-mono">Firebase Cloud Ativo (Firestore + Auth)</span>
                 </div>
 
                 {/* Google Sign In Button */}
@@ -5322,7 +5485,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                     type="button"
                     onClick={handleGoogleLogin}
                     disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-800 font-semibold py-3 px-4 rounded-xl shadow-md transition-all duration-200 active:scale-[0.98] mb-5 disabled:opacity-50 cursor-pointer"
+                    className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-semibold py-3 px-4 rounded-xl shadow-md transition-all duration-200 active:scale-[0.98] mb-5 disabled:opacity-50 cursor-pointer"
                 >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
                         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -5334,9 +5497,9 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                 </button>
 
                 <div className="relative flex py-2 items-center mb-5">
-                    <div className="flex-grow border-t border-slate-700"></div>
-                    <span className="flex-shrink mx-4 text-slate-500 text-xs uppercase tracking-wider">ou com email</span>
-                    <div className="flex-grow border-t border-slate-700"></div>
+                    <div className="flex-grow border-t border-slate-800"></div>
+                    <span className="flex-shrink mx-4 text-slate-500 text-xs uppercase tracking-wider font-mono">ou com email</span>
+                    <div className="flex-grow border-t border-slate-800"></div>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -5347,7 +5510,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                                 type="text" 
                                 value={name} 
                                 onChange={(e) => setName(e.target.value)} 
-                                className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                                className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm placeholder-slate-500" 
                                 placeholder="Seu nome" 
                                 required
                             />
@@ -5359,7 +5522,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                             type="email" 
                             value={email} 
                             onChange={(e) => setEmail(e.target.value)} 
-                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                            className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm placeholder-slate-500 font-mono" 
                             placeholder="seu.email@exemplo.com" 
                             required
                         />
@@ -5370,7 +5533,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                             type="password" 
                             value={password} 
                             onChange={(e) => setPassword(e.target.value)} 
-                            className="w-full bg-slate-900/80 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm" 
+                            className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-4 py-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm placeholder-slate-500" 
                             placeholder="••••••••" 
                             required
                         />
@@ -5663,7 +5826,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         });
     };
 
-    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh]"><div className="p-4 sm:p-6 border-b border-slate-700 flex justify-between items-center bg-slate-900 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-900/20 border border-rose-500/30 p-3 sm:p-4 rounded-lg animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-900 border border-rose-500/50 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-slate-900/30 p-3 rounded-xl border border-slate-700/50"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 sm:p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
+    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-dark-850/95 backdrop-blur-2xl rounded-2xl border border-slate-800 w-full max-w-2xl shadow-2xl shadow-black/50 flex flex-col max-h-[92vh] animate-fade-in"><div className="p-4 sm:p-5 border-b border-slate-800/90 flex justify-between items-center bg-dark-900/90 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-dark-800/80 cursor-pointer">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-950/40 border border-rose-500/30 p-3 sm:p-4 rounded-xl animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-dark-900/90 border border-rose-500/50 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-dark-900/40 p-3.5 rounded-xl border border-slate-800/80"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
 
         {/* Azure DevOps Integration Card */}
         <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/60 space-y-4">
@@ -5867,7 +6030,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             </div>
         </div>
     </div>
-)}{formData.history && formData.history.length > 0 && (<div className="mt-6 border-t border-slate-700 pt-4"><h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações</h4><div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">{formData.history.slice().reverse().map((entry: HistoryEntry) => (<div key={entry.id} className="text-xs bg-slate-900/60 p-3 rounded border border-slate-700/50 hover:border-slate-600 transition-colors"><div className="flex justify-between text-slate-500 mb-1"><span className="font-mono">{new Date(entry.date).toLocaleString()}</span><span className="font-medium text-indigo-400">{entry.user}</span></div><p className="text-slate-300">{entry.action}</p></div>))}</div></div>)}</div><div className="p-6 border-t border-slate-700 flex justify-between bg-slate-900 rounded-b-2xl"><Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button><div className="flex gap-3"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={() => onSave(formData)}>Salvar Alterações</Button></div></div></div></div>)
+)}{formData.history && formData.history.length > 0 && (<div className="mt-6 border-t border-slate-800/80 pt-4"><h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações</h4><div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">{formData.history.slice().reverse().map((entry: HistoryEntry) => (<div key={entry.id} className="text-xs bg-dark-900/60 p-3 rounded-xl border border-slate-800/60 hover:border-slate-750 transition-colors"><div className="flex justify-between text-slate-500 mb-1"><span className="font-mono">{new Date(entry.date).toLocaleString()}</span><span className="font-medium text-indigo-400">{entry.user}</span></div><p className="text-slate-300">{entry.action}</p></div>))}</div></div>)}</div><div className="p-4 sm:p-5 border-t border-slate-800/90 flex justify-between bg-dark-900/90 rounded-b-2xl"><Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button><div className="flex gap-2.5"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={() => onSave(formData)}>Salvar Alterações</Button></div></div></div></div>)
 }
 
 const PowerBIDataView = () => {
@@ -6091,26 +6254,62 @@ export default function App() {
     // Subscribe to Firestore collections in real time
     const unsubTasks = FirebaseService.subscribeTasks((remoteTasks) => {
       const cleanTasks = remoteTasks || [];
-      setTasks(cleanTasks);
-      StorageService.setTasksInMemory(cleanTasks);
+      if (cleanTasks.length > 0) {
+        setTasks(cleanTasks);
+        StorageService.setTasksInMemory(cleanTasks);
+      } else {
+        const localTasks = StorageService.getTasks();
+        if (localTasks.length > 0) {
+          FirebaseService.saveTasksBatch(localTasks, user.id).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
+        } else {
+          setTasks([]);
+        }
+      }
     }, user.id);
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
       const cleanDevs = remoteDevs || [];
-      setDevs(cleanDevs);
-      StorageService.setDevsInMemory(cleanDevs);
+      if (cleanDevs.length > 0) {
+        setDevs(cleanDevs);
+        StorageService.setDevsInMemory(cleanDevs);
+      } else {
+        const localDevs = StorageService.getDevs();
+        if (localDevs.length > 0) {
+          FirebaseService.saveDevs(localDevs, user.id).catch(e => console.warn('Sync local devs notice:', e));
+        } else {
+          setDevs([]);
+        }
+      }
     }, user.id);
 
     const unsubRobots = FirebaseService.subscribeRobots((remoteRobots) => {
       const cleanRobots = remoteRobots || [];
-      setRobots(cleanRobots);
-      StorageService.setRobotsInMemory(cleanRobots);
+      if (cleanRobots.length > 0) {
+        setRobots(cleanRobots);
+        StorageService.setRobotsInMemory(cleanRobots);
+      } else {
+        const localRobots = StorageService.getRobots();
+        if (localRobots.length > 0) {
+          FirebaseService.saveRobots(localRobots, user.id).catch(e => console.warn('Sync local robots notice:', e));
+        } else {
+          setRobots([]);
+        }
+      }
     }, user.id);
 
     const unsubSprints = FirebaseService.subscribeSprints((remoteSprints) => {
       const cleanSprints = remoteSprints || [];
-      setSprints(cleanSprints);
-      StorageService.setSprintsInMemory(cleanSprints);
+      if (cleanSprints.length > 0) {
+        setSprints(cleanSprints);
+        StorageService.setSprintsInMemory(cleanSprints);
+      } else {
+        const localSprints = StorageService.getSprints();
+        if (localSprints.length > 0) {
+          FirebaseService.saveSprints(localSprints, user.id).catch(e => console.warn('Sync local sprints notice:', e));
+        } else {
+          setSprints([]);
+        }
+      }
     }, user.id);
 
     return () => {
@@ -6305,6 +6504,12 @@ export default function App() {
       if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; 
       if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; 
       if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; 
+      
+      if (allNewTasks.length === 0) {
+        setUploadFeedback({ type: 'error', message: "Nenhuma demanda válida foi encontrada nos arquivos selecionados. Verifique as colunas das planilhas." });
+        return;
+      }
+
       processNewTasks(allNewTasks, 'Todas'); 
       setUploadFeedback({ type: 'success', message: `✔ ${allNewTasks.length} demandas processadas e sincronizadas com sucesso!` });
       setTimeout(() => { 
@@ -6321,6 +6526,10 @@ export default function App() {
     if (!file) return; 
     try { 
       const newTasks = await ExcelService.parseFile(file, type); 
+      if (newTasks.length === 0) {
+        setUploadFeedback({ type: 'error', message: `Nenhuma demanda válida encontrada no arquivo de ${type}. Verifique o formato.` });
+        return;
+      }
       processNewTasks(newTasks, type); 
       setUploadFeedback({ type: 'success', message: `✔ ${newTasks.length} demandas de ${type} processadas com sucesso!` });
       setUploadFiles(prev => ({ ...prev, [type]: null })); 
@@ -6461,43 +6670,70 @@ export default function App() {
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
   const headerActions = (
-    <div className="flex items-center gap-1 sm:gap-2 bg-slate-800/90 p-1 rounded-xl backdrop-blur-md border border-slate-700/80">
+    <div className="flex items-center gap-1.5 sm:gap-2 bg-dark-850/90 p-1 sm:p-1.5 rounded-2xl backdrop-blur-md border border-slate-800/90 shadow-lg shadow-black/20">
       <Button 
         onClick={handleCreateTask} 
         variant="primary" 
-        className="text-xs py-1.5 px-2.5 sm:px-3 bg-indigo-600 hover:bg-indigo-700 text-white border-none flex items-center gap-1.5 whitespace-nowrap shadow-sm font-semibold"
+        className="h-9 px-3 sm:px-3.5 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-indigo-950/50"
+        title="Criar nova demanda ou chamado"
       >
-        <IconPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> 
+        <IconPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" /> 
         <span className="hidden sm:inline">Nova Demanda</span>
         <span className="sm:hidden">+ Demanda</span>
       </Button>
-      <div className="w-px bg-slate-700 h-5 self-center hidden sm:block"></div>
+
+      <div className="w-px bg-slate-800 h-5 self-center hidden sm:block"></div>
+
+      <Button
+        onClick={() => setIsUploadModalOpen(true)} 
+        variant="success"
+        className="h-9 px-2.5 sm:px-3 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-emerald-950/40"
+        title="Subir Planilha Excel de Backup ou Demandas (.xlsx, .xls, .csv)"
+      >
+        <IconUpload className="w-3.5 h-3.5 text-white" /> 
+        <span className="hidden md:inline">Importar Planilha</span>
+        <span className="md:hidden">Upload</span>
+      </Button>
+
+      <Button
+        onClick={() => ExcelService.exportBackupExcel(tasks, robots, devs)} 
+        variant="secondary"
+        className="hidden lg:inline-flex h-9 px-3 text-xs font-semibold gap-1.5 whitespace-nowrap"
+        title="Exportar planilha Excel completa com todas as demandas"
+      >
+        <IconDownload className="w-3.5 h-3.5 text-slate-300" /> 
+        <span>Exportar Excel</span>
+      </Button>
+
       <Button 
         onClick={() => setIsManageDevsOpen(true)} 
-        variant="secondary" 
-        className="hidden sm:flex text-xs py-1.5 px-2.5 bg-transparent border-none hover:bg-slate-700 text-slate-300 items-center gap-1.5"
+        variant="ghost" 
+        className="hidden sm:inline-flex h-9 px-2.5 text-xs font-medium gap-1.5 text-slate-300 hover:text-white hover:bg-dark-800/80 border border-slate-800/80"
+        title="Gerenciar lista de desenvolvedores"
       >
-        <IconUsers className="w-3.5 h-3.5" /> Devs
-      </Button>
-      <Button 
-        onClick={() => setIsUploadModalOpen(true)} 
-        className="text-xs py-1.5 px-2 sm:px-2.5 flex items-center gap-1"
-        title="Importar Planilhas ou Backups"
-      >
-        <IconUpload className="w-3.5 h-3.5" /> 
-        <span className="hidden sm:inline">Upload</span>
+        <IconUsers className="w-3.5 h-3.5 text-slate-400" /> Devs
       </Button>
     </div>
   );
   return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)}>{isUploadModalOpen && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
-    <div className="bg-slate-800 p-5 sm:p-7 rounded-2xl border border-slate-600 max-w-xl w-full shadow-2xl max-h-[92vh] overflow-y-auto custom-scrollbar">
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-4">
+    <div className="bg-dark-850/95 backdrop-blur-2xl p-5 sm:p-7 rounded-2xl border border-slate-800 max-w-2xl w-full shadow-2xl shadow-black/50 max-h-[92vh] overflow-y-auto custom-scrollbar">
       <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-3">
-        <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-          <IconUpload className="w-5 h-5 text-indigo-400" />
-          Importar Planilhas & Backups
-        </h3>
-        <button onClick={() => { setIsUploadModalOpen(false); setExcelBackupPreview(null); setUploadFeedback(null); }} className="text-slate-400 hover:text-white p-1">✕</button>
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-emerald-600/20 rounded-xl border border-emerald-500/30 text-emerald-400">
+            <IconUpload className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-lg sm:text-xl font-bold text-white">Importar Planilhas & Backups</h3>
+            <p className="text-xs text-slate-400">Suporte a arquivos Excel (.xlsx, .xls) e CSV (.csv)</p>
+          </div>
+        </div>
+        <button 
+          onClick={() => { setIsUploadModalOpen(false); setExcelBackupPreview(null); setUploadFeedback(null); }} 
+          className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-700/60 transition-colors"
+        >
+          ✕
+        </button>
       </div>
 
       {/* Real-time Notification Banner */}
@@ -6514,55 +6750,90 @@ export default function App() {
         </div>
       )}
 
-      {/* Primary Section: Consolidated Backup Spreadsheet (.xlsx) */}
-      <div className="bg-gradient-to-r from-emerald-950/70 to-slate-900 border-2 border-emerald-500/50 rounded-xl p-4 mb-5 space-y-3 shadow-md">
-        <div className="flex items-start gap-3">
-          <div className="p-2 bg-emerald-600/20 text-emerald-400 rounded-lg border border-emerald-500/30 flex-shrink-0 mt-0.5">
-            <IconShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h4 className="text-sm font-bold text-white">Planilha Excel Consolidada (Backup)</h4>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                Auto Reconhecimento
-              </span>
+      {/* Primary Section: Consolidated Backup Spreadsheet */}
+      <div className="bg-gradient-to-r from-emerald-950/70 via-slate-900 to-slate-900 border-2 border-emerald-500/50 rounded-2xl p-4 sm:p-5 mb-5 space-y-4 shadow-lg">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-emerald-600/20 text-emerald-400 rounded-xl border border-emerald-500/30 flex-shrink-0 mt-0.5">
+              <IconShieldCheck className="w-5 h-5" />
             </div>
-            <p className="text-[11px] text-slate-300 mt-1">
-              Suba a planilha com todas as demandas (ID, Tipo, Resumo, Responsável, etc.) para carregar e sincronizar tudo diretamente no sistema.
-            </p>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="text-sm sm:text-base font-bold text-white">Planilha Consolidada (Auto Reconhecimento)</h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  .xlsx, .xls, .csv
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                Reconhece automaticamente todas as colunas (ID, Resumo, Tipo, Status, Responsável, FTE, Robôs, etc.).
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => ExcelService.downloadTemplateExcel()}
+            className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 underline whitespace-nowrap cursor-pointer shrink-0"
+            title="Baixar planilha de exemplo com as colunas recomendadas"
+          >
+            <IconDownload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Baixar Modelo</span>
+          </button>
         </div>
 
-        {/* File Picker or Preview */}
+        {/* File Picker / Drag Drop Area */}
         {!excelBackupPreview ? (
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
-            <input 
-              type="file" 
-              accept=".xlsx, .xls" 
-              disabled={isProcessingBackupExcel}
-              onChange={(e) => handleSelectBackupExcel(e.target.files?.[0] || null)}
-              className="flex-1 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer border border-emerald-500/30 rounded-lg p-1 bg-slate-900/60"
-            />
+          <div className="space-y-2">
+            <div 
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const droppedFile = e.dataTransfer.files?.[0];
+                if (droppedFile) handleSelectBackupExcel(droppedFile);
+              }}
+              className="border-2 border-dashed border-emerald-500/40 hover:border-emerald-400 rounded-xl p-5 text-center bg-slate-950/40 hover:bg-slate-950/60 transition-all cursor-pointer group"
+              onClick={() => document.getElementById('excelBackupFileInput')?.click()}
+            >
+              <input 
+                id="excelBackupFileInput"
+                type="file" 
+                accept=".xlsx, .xls, .csv" 
+                disabled={isProcessingBackupExcel}
+                onChange={(e) => handleSelectBackupExcel(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+              <IconUpload className="w-8 h-8 text-emerald-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <p className="text-xs sm:text-sm font-bold text-white">
+                Clique para selecionar ou arraste sua planilha aqui
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Formatos aceitos: Microsoft Excel (.xlsx, .xls) ou CSV (.csv)
+              </p>
+            </div>
+
             {isProcessingBackupExcel && (
-              <span className="text-xs text-emerald-400 font-semibold animate-pulse flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                Reconhecendo...
-              </span>
+              <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-xl flex items-center justify-center gap-2 text-xs text-emerald-300 font-bold animate-pulse">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                <span>Analisando e reconhecendo colunas da planilha...</span>
+              </div>
             )}
           </div>
         ) : (
           /* Preview and Confirmation Box */
-          <div className="bg-slate-900/90 border border-emerald-500/40 rounded-xl p-3.5 space-y-3 animate-fade-in">
-            <div className="flex justify-between items-center border-b border-slate-700/60 pb-2">
+          <div className="bg-slate-950/80 border border-emerald-500/50 rounded-xl p-4 space-y-3.5 animate-fade-in">
+            <div className="flex justify-between items-center border-b border-slate-700/60 pb-2.5">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                <span className="text-xs font-bold text-white truncate max-w-[240px]">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate max-w-[320px]">
                   {excelBackupPreview.file.name}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  ({Math.round(excelBackupPreview.file.size / 1024)} KB)
                 </span>
               </div>
               <button 
                 onClick={() => { setExcelBackupPreview(null); setBackupExcelFile(null); }}
-                className="text-[11px] text-slate-400 hover:text-rose-400 font-medium underline"
+                className="text-xs text-slate-400 hover:text-rose-400 font-semibold underline cursor-pointer"
               >
                 Trocar arquivo
               </button>
@@ -6570,44 +6841,82 @@ export default function App() {
 
             {/* Badges Count */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
-              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+              <div className="bg-slate-800/90 p-2.5 rounded-lg border border-slate-700">
                 <span className="block text-[10px] text-slate-400 uppercase font-semibold">Total Demandas</span>
-                <span className="text-base font-bold text-white">{excelBackupPreview.stats.tasksCount}</span>
+                <span className="text-lg font-bold text-white">{excelBackupPreview.stats.tasksCount}</span>
               </div>
-              <div className="bg-rose-950/30 p-2 rounded-lg border border-rose-500/30">
+              <div className="bg-rose-950/30 p-2.5 rounded-lg border border-rose-500/30">
                 <span className="block text-[10px] text-rose-300 uppercase font-semibold">Incidentes</span>
-                <span className="text-base font-bold text-rose-400">{excelBackupPreview.stats.incidentsCount}</span>
+                <span className="text-lg font-bold text-rose-400">{excelBackupPreview.stats.incidentsCount}</span>
               </div>
-              <div className="bg-emerald-950/30 p-2 rounded-lg border border-emerald-500/30">
+              <div className="bg-emerald-950/30 p-2.5 rounded-lg border border-emerald-500/30">
                 <span className="block text-[10px] text-emerald-300 uppercase font-semibold">Melhorias</span>
-                <span className="text-base font-bold text-emerald-400">{excelBackupPreview.stats.improvementsCount}</span>
+                <span className="text-lg font-bold text-emerald-400">{excelBackupPreview.stats.improvementsCount}</span>
               </div>
-              <div className="bg-indigo-950/30 p-2 rounded-lg border border-indigo-500/30">
+              <div className="bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-500/30">
                 <span className="block text-[10px] text-indigo-300 uppercase font-semibold">Automações</span>
-                <span className="text-base font-bold text-indigo-400">{excelBackupPreview.stats.automationsCount}</span>
+                <span className="text-lg font-bold text-indigo-400">{excelBackupPreview.stats.automationsCount}</span>
               </div>
-              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+              <div className="bg-slate-800/90 p-2.5 rounded-lg border border-slate-700">
                 <span className="block text-[10px] text-slate-400 uppercase font-semibold">Devs Detectados</span>
-                <span className="text-base font-bold text-slate-200">{excelBackupPreview.stats.devsCount}</span>
+                <span className="text-lg font-bold text-slate-200">{excelBackupPreview.stats.devsCount}</span>
               </div>
-              <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
+              <div className="bg-slate-800/90 p-2.5 rounded-lg border border-slate-700">
                 <span className="block text-[10px] text-slate-400 uppercase font-semibold">Robôs RPA</span>
-                <span className="text-base font-bold text-slate-200">{excelBackupPreview.stats.robotsCount}</span>
+                <span className="text-lg font-bold text-slate-200">{excelBackupPreview.stats.robotsCount}</span>
               </div>
             </div>
 
+            {/* Visual Sample Preview Table */}
+            {excelBackupPreview.snapshot?.dataPayload?.TASKS?.length > 0 && (
+              <div className="bg-slate-900/90 border border-slate-700/80 rounded-xl p-3 space-y-2">
+                <div className="flex justify-between items-center text-[11px] text-slate-300">
+                  <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                    <IconCheck className="w-3.5 h-3.5" /> Prévia dos Registros Reconhecidos:
+                  </span>
+                  <span className="text-slate-400 font-mono text-[10px]">
+                    Mostrando 4 de {excelBackupPreview.stats.tasksCount} demandas
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[11px] border-collapse">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="pb-1.5 pr-2">ID</th>
+                        <th className="pb-1.5 px-2">Tipo</th>
+                        <th className="pb-1.5 px-2">Resumo</th>
+                        <th className="pb-1.5 px-2">Status</th>
+                        <th className="pb-1.5 pl-2">Responsável</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                      {excelBackupPreview.snapshot.dataPayload.TASKS.slice(0, 4).map((t: any, i: number) => (
+                        <tr key={t.id || i} className="hover:bg-slate-800/40">
+                          <td className="py-1.5 pr-2 font-mono text-indigo-300 font-bold whitespace-nowrap">{t.id}</td>
+                          <td className="py-1.5 px-2 whitespace-nowrap"><Badge type={t.type} /></td>
+                          <td className="py-1.5 px-2 truncate max-w-[200px]" title={t.summary}>{t.summary}</td>
+                          <td className="py-1.5 px-2 whitespace-nowrap"><span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">{t.status}</span></td>
+                          <td className="py-1.5 pl-2 text-slate-400 whitespace-nowrap">{t.assignee || 'Sem Dev'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
               <Button 
                 onClick={() => handleApplyExcelBackup('replace')} 
-                className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 shadow-md shadow-emerald-900/40"
+                className="flex-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 shadow-lg shadow-emerald-950/50 cursor-pointer active:scale-95 transition-all"
               >
-                ✔ Substituir Banco de Dados
+                ✔ Substituir Banco ({excelBackupPreview.stats.tasksCount} demandas)
               </Button>
               <Button 
                 onClick={() => handleApplyExcelBackup('merge')} 
                 variant="secondary"
-                className="flex-1 text-xs font-semibold py-2"
+                className="flex-1 text-xs font-semibold py-2.5 cursor-pointer active:scale-95 transition-all"
               >
                 ➕ Mesclar com Existentes
               </Button>
@@ -6629,7 +6938,7 @@ export default function App() {
               <label className="block text-xs font-semibold text-slate-300 mb-1">{type}</label>
               <input 
                 type="file" 
-                accept=".xlsx, .xls" 
+                accept=".xlsx, .xls, .csv" 
                 onChange={(e) => setUploadFiles({...uploadFiles, [type]: e.target.files?.[0] || null})} 
                 className="block w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600 cursor-pointer border border-slate-600 rounded-lg" 
               />
@@ -6637,7 +6946,7 @@ export default function App() {
             <Button 
               onClick={() => handleProcessSingleUpload(type as TaskType)} 
               disabled={!uploadFiles[type]} 
-              className="h-8 sm:h-9 text-xs whitespace-nowrap self-end sm:self-auto" 
+              className="h-8 sm:h-9 text-xs whitespace-nowrap self-end sm:self-auto cursor-pointer" 
               variant="secondary"
             >
               Processar {type}
@@ -6653,12 +6962,12 @@ export default function App() {
         <Button 
           onClick={handleProcessAllUploads} 
           disabled={!Object.values(uploadFiles).some(f => f !== null)}
-          className="text-xs"
+          className="text-xs cursor-pointer"
         >
           Processar Todos os Tipos
         </Button>
       </div>
     </div>
   </div>
-)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-md w-full"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700"><span className="text-sm text-white">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-500 hover:text-rose-400">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome..." className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 text-sm text-white outline-none" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="py-1">+</Button></div><div className="mt-4 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"><div className="bg-dark-850/95 backdrop-blur-2xl p-6 rounded-2xl border border-slate-800 max-w-md w-full shadow-2xl shadow-black/50 animate-fade-in"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar pr-1">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-dark-900/90 p-2.5 rounded-xl border border-slate-800"><span className="text-sm font-medium text-slate-200">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-400 hover:text-rose-300 p-1 hover:bg-rose-950/40 rounded transition-colors cursor-pointer">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome do desenvolvedor..." className="flex-1 bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 transition-all" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="px-4 py-2 font-bold">+</Button></div><div className="mt-5 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

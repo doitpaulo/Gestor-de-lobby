@@ -115,11 +115,12 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
   const handleExecuteRestore = (snapshot: BackupSnapshot) => {
     const success = BackupService.restoreSnapshot(snapshot);
     if (success) {
-      alert(`✔ Restauração concluída com sucesso para a versão de ${snapshot.dateFormatted}! O sistema será recarregado.`);
+      showNotification(`✔ Restauração concluída com sucesso para o ponto: ${snapshot.dateFormatted}!`);
+      window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: snapshot.dataPayload }));
       if (onDataRestored) onDataRestored();
-      window.location.reload();
+      refreshData();
     } else {
-      alert("Erro ao restaurar o backup. Verifique se a estrutura de dados é válida.");
+      showNotification("❌ Erro ao restaurar o backup. Verifique se a estrutura de dados é válida.");
     }
   };
 
@@ -128,7 +129,7 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
     if (!file) return;
 
     const lower = file.name.toLowerCase();
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+    if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv')) {
       handleImportExcelFile(e);
       return;
     }
@@ -137,11 +138,9 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
     if (res.success && res.snapshot) {
       refreshData();
       showNotification("✔ Backup importado com sucesso para a lista de restauração!");
-      if (window.confirm("Backup importado com sucesso! Deseja restaurar a ferramenta imediatamente para o ponto deste arquivo?")) {
-        handleExecuteRestore(res.snapshot);
-      }
+      handleExecuteRestore(res.snapshot);
     } else {
-      alert(res.error || "Erro ao importar arquivo de backup.");
+      showNotification(res.error || "❌ Erro ao importar arquivo de backup.");
     }
     e.target.value = '';
   };
@@ -160,12 +159,12 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
           stats: res.stats,
           fileName: file.name
         });
-        showNotification("✔ Planilha Excel reconhecida com sucesso!");
+        showNotification("✔ Planilha Excel/CSV reconhecida com sucesso!");
       } else {
-        alert(res.error || "Erro ao reconhecer a planilha Excel.");
+        showNotification(res.error || "❌ Não foi possível reconhecer as colunas da planilha.");
       }
     } catch (err: any) {
-      alert(`Falha ao ler o arquivo Excel: ${err.message || err}`);
+      showNotification(`❌ Falha ao ler a planilha: ${err.message || err}`);
     } finally {
       setIsProcessingExcel(false);
       e.target.value = '';
@@ -190,8 +189,9 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
     } else {
       // Merge mode
       try {
+        let mergedTasks: any[] = [];
         if (snapshot.dataPayload.TASKS) {
-          StorageService.mergeTasks(snapshot.dataPayload.TASKS);
+          mergedTasks = StorageService.mergeTasks(snapshot.dataPayload.TASKS);
         }
         if (snapshot.dataPayload.DEVS && snapshot.dataPayload.DEVS.length > 0) {
           const currentDevs = StorageService.getDevs();
@@ -203,7 +203,7 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
         }
         showNotification(`✔ Mesclagem Concluída! ${stats.tasksCount} demandas integradas ao banco de dados.`);
         setExcelImportResult(null);
-        window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: snapshot.dataPayload }));
+        window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: { ...snapshot.dataPayload, TASKS: mergedTasks } }));
         if (onDataRestored) onDataRestored();
         refreshData();
       } catch (err: any) {
@@ -412,7 +412,7 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
               <span>{isProcessingExcel ? "Lendo Excel..." : "Subir Planilha Excel (Backup)"}</span>
               <input 
                 type="file" 
-                accept=".xlsx, .xls" 
+                accept=".xlsx, .xls, .csv" 
                 onChange={handleImportExcelFile} 
                 disabled={isProcessingExcel}
                 className="hidden" 

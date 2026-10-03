@@ -215,6 +215,7 @@ export const BackupService = {
       const success = StorageService.restoreBackup(snapshot.dataPayload);
       if (success) {
         BackupService.createSnapshot(`Restauração efetuada para o ponto: ${snapshot.dateFormatted}`, true);
+        window.dispatchEvent(new CustomEvent('nexus-data-restored', { detail: snapshot.dataPayload }));
       }
       return success;
     } catch (e) {
@@ -320,7 +321,7 @@ export const BackupService = {
   importSnapshotFromFile: async (file: File): Promise<{ success: boolean; snapshot?: BackupSnapshot; error?: string }> => {
     // Check if uploaded file is an Excel file
     const lowerName = file.name.toLowerCase();
-    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+    if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv')) {
       const excelRes = await BackupService.importSnapshotFromExcel(file);
       return {
         success: excelRes.success,

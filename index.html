@@ -4,36 +4,89 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nexus Project</title>
+    <meta name="description" content="Sistema de gerenciamento de demandas de desenvolvimento com suporte a upload de Excel, Kanban, Dashboards, gestão de desenvolvedores e Sistema de Backup Automático e Restauração." />
+    <meta property="og:title" content="Nexus Project" />
+    <meta property="og:description" content="Sistema de gerenciamento de demandas de desenvolvimento com suporte a upload de Excel, Kanban, Dashboards, gestão de desenvolvedores e Sistema de Backup Automático e Restauração." />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
             colors: {
               dark: {
-                900: '#0f172a',
-                800: '#1e293b',
-                700: '#334155',
+                950: '#060911',
+                900: '#0a0f1d',
+                850: '#0f172a',
+                800: '#131c31',
+                750: '#19243c',
+                700: '#21304e',
+              },
+              brand: {
+                500: '#6366f1',
+                600: '#4f46e5',
+                700: '#4338ca',
               }
             }
           }
         }
       }
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      body { font-family: 'Inter', sans-serif; }
-      /* Scrollbar customizada */
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: #0f172a; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+      body { 
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif; 
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+      }
+      /* Scrollbar customizada moderna */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #21304e; border-radius: 9999px; }
+      ::-webkit-scrollbar-thumb:hover { background: #334a75; }
       
       /* Fix para legibilidade de dropdowns em modo escuro */
       select option {
-        background-color: #1e293b; /* bg-slate-800 */
+        background-color: #131c31; /* bg-dark-800 */
         color: #f1f5f9; /* text-slate-100 */
+      }
+
+      /* Transição suave fade-in */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .animate-fade-in {
+        animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      @keyframes fadeInSubtle {
+        from {
+          opacity: 0;
+          transform: translateY(3px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .animate-fade-in-subtle {
+        animation: fadeInSubtle 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
     </style>
   <script type="importmap">
