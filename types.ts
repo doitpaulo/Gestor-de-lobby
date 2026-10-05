@@ -174,7 +174,18 @@ export interface BackupSnapshot {
 }
 
 // Helper utilities for status and task type normalization
-export const isCompletedStatus = (status?: string | null): boolean => {
+export const isCancelledStatus = (status?: string | null): boolean => {
+  if (!status) return false;
+  const s = status.trim().toLowerCase();
+  return (
+    s === 'cancelado' ||
+    s === 'cancelada' ||
+    s === 'cancelled' ||
+    s === 'canceled'
+  );
+};
+
+export const isDeliveredStatus = (status?: string | null): boolean => {
   if (!status) return false;
   const s = status.trim().toLowerCase();
   return (
@@ -185,8 +196,6 @@ export const isCompletedStatus = (status?: string | null): boolean => {
     s === 'resolvida' ||
     s === 'fechado' ||
     s === 'fechada' ||
-    s === 'cancelado' ||
-    s === 'cancelada' ||
     s === 'encerrado' ||
     s === 'encerrada' ||
     s === 'finalizado' ||
@@ -194,10 +203,80 @@ export const isCompletedStatus = (status?: string | null): boolean => {
     s === 'closed' ||
     s === 'resolved' ||
     s === 'completed' ||
-    s === 'cancelled' ||
-    s === 'canceled' ||
     s === 'done'
   );
+};
+
+// isCompletedStatus returns true ONLY for delivered/resolved tasks (does NOT include cancelled tasks)
+export const isCompletedStatus = (status?: string | null): boolean => {
+  return isDeliveredStatus(status);
+};
+
+// isTerminalStatus returns true for any finished state (delivered OR cancelled)
+export const isTerminalStatus = (status?: string | null): boolean => {
+  return isDeliveredStatus(status) || isCancelledStatus(status);
+};
+
+// Safe civil date parser & formatter (prevents 1-day timezone offset)
+export const formatCivilDate = (dateStr?: string | null, options?: { includeYear?: boolean }): string => {
+  if (!dateStr) return '';
+  const clean = String(dateStr).split('T')[0].trim();
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    if (year.length === 4 && month.length === 2 && day.length === 2) {
+      return options?.includeYear ? `${day}/${month}/${year}` : `${day}/${month}`;
+    }
+  }
+  return clean;
+};
+
+export const parseCivilDate = (dateStr?: string | null): Date | null => {
+  if (!dateStr) return null;
+  const clean = String(dateStr).split('T')[0].trim();
+  const parts = clean.split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+      return new Date(year, month, day, 12, 0, 0); // Noon local prevents UTC/DST date jumps
+    }
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Safe duration parser (returns strictly positive finite number in hours, never NaN or negative)
+export const parseDuration = (timeStr?: string | number | null): number => {
+  if (timeStr === undefined || timeStr === null) return 0;
+  if (typeof timeStr === 'number') return Math.max(0, isFinite(timeStr) ? timeStr : 0);
+  
+  const raw = String(timeStr).trim().toLowerCase();
+  if (!raw) return 0;
+
+  // Handle format "16h", "2.5h", "2d", "1w", "30m"
+  if (raw.endsWith('d')) {
+    const days = parseFloat(raw.replace('d', '').trim());
+    return Math.max(0, isFinite(days) ? days * 8 : 0);
+  }
+  if (raw.endsWith('w')) {
+    const weeks = parseFloat(raw.replace('w', '').trim());
+    return Math.max(0, isFinite(weeks) ? weeks * 40 : 0);
+  }
+  if (raw.endsWith('m') && !raw.endsWith('min')) {
+    const mins = parseFloat(raw.replace('m', '').trim());
+    return Math.max(0, isFinite(mins) ? mins / 60 : 0);
+  }
+  const numeric = parseFloat(raw.replace(/[hms\s]/g, ''));
+  return Math.max(0, isFinite(numeric) ? numeric : 0);
+};
+
+export const isValidDurationString = (timeStr?: string | null): boolean => {
+  if (!timeStr || !timeStr.trim()) return true; // optional
+  const clean = timeStr.trim().toLowerCase();
+  // Valid patterns: "8h", "2.5h", "2d", "1w", "4", "4.5"
+  return /^(\d+(\.\d+)?)\s*(h|d|w|m)?$/i.test(clean);
 };
 
 export const normalizeStatus = (status?: string | null): string => {

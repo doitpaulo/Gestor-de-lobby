@@ -429,7 +429,7 @@ const Badge = ({ type, className='' }: { type: string, className?: string }) => 
   return <span className={`text-[10px] px-2.5 py-0.5 rounded-md font-medium tracking-wide border font-mono ${color} ${className}`}>{type}</span>;
 };
 
-const MultiSelect = ({ label, options, selected, onChange, placeholder }: { label?: string, options: string[], selected: string[], onChange: (val: string[]) => void, placeholder: string }) => {
+const MultiSelect = ({ label, options, selected, onChange, placeholder, alignRight = false }: { label?: string, options: string[], selected: string[], onChange: (val: string[]) => void, placeholder: string, alignRight?: boolean }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -439,8 +439,17 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
                 setIsOpen(false);
             }
         };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setIsOpen(false);
+            }
+        };
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
     }, []);
 
     const toggleOption = (option: string) => {
@@ -459,47 +468,134 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder }: { labe
         }
     };
 
+    const clearAll = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onChange([]);
+    };
+
+    // Clean display title
+    let displayTitle = placeholder;
+    let badgeText: string | null = null;
+    if (selected.length === 0) {
+        displayTitle = placeholder;
+        badgeText = 'Todos';
+    } else if (selected.length === options.length) {
+        displayTitle = placeholder.replace(': Todos', '').trim();
+        badgeText = `Todos (${options.length})`;
+    } else if (selected.length === 1) {
+        displayTitle = selected[0];
+        badgeText = '1';
+    } else {
+        displayTitle = placeholder.replace(': Todos', '').trim();
+        badgeText = `${selected.length}`;
+    }
+
     return (
-        <div className="relative w-full md:w-auto min-w-[160px]" ref={containerRef}>
-            {label && <label className="block text-xs text-slate-400 mb-1">{label}</label>}
+        <div className={`relative w-full md:w-auto min-w-[170px] ${isOpen ? 'z-[90]' : 'z-10'}`} ref={containerRef}>
+            {label && <label className="block text-xs font-semibold text-slate-300 mb-1">{label}</label>}
             <div 
                 onClick={() => setIsOpen(!isOpen)} 
-                className="bg-dark-900/90 border border-slate-700/80 rounded-xl px-3 py-1.5 h-9 text-xs text-slate-200 cursor-pointer flex justify-between items-center hover:border-slate-500 transition-colors shadow-sm"
+                className={`bg-slate-900 border rounded-xl px-3 py-1.5 h-9 text-xs cursor-pointer flex justify-between items-center transition-all shadow-sm select-none ${
+                    isOpen 
+                        ? 'border-indigo-500 ring-2 ring-indigo-500/20 text-white bg-slate-850' 
+                        : selected.length > 0 
+                            ? 'border-indigo-500/70 text-slate-100 hover:border-indigo-400 bg-indigo-950/20' 
+                            : 'border-slate-700/90 text-slate-300 hover:border-slate-500 hover:text-white'
+                }`}
             >
-                <span className="truncate max-w-[140px]">
-                    {selected.length === 0 ? placeholder : selected.length === options.length ? `Todos (${options.length})` : `${selected.length} selecionados`}
-                </span>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-            {isOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-dark-900 border border-slate-700/90 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto custom-scrollbar p-2">
-                    <div 
-                        onClick={toggleAll}
-                        className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-800/80 rounded-lg cursor-pointer border-b border-slate-800 mb-1 pb-2"
-                    >
-                         <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.length === options.length ? 'bg-indigo-600 border-indigo-600' : 'border-slate-600'}`}>
-                             {selected.length === options.length && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                         </div>
-                         <span className="text-xs font-bold text-slate-200">Selecionar Todos</span>
-                    </div>
-                    {options.map(opt => (
-                        <div 
-                            key={opt} 
-                            onClick={() => toggleOption(opt)}
-                            className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-800/70 rounded-lg cursor-pointer"
+                <div className="flex items-center gap-1.5 overflow-hidden pr-1">
+                    <span className="truncate max-w-[130px] font-medium" title={displayTitle}>
+                        {displayTitle}
+                    </span>
+                    {badgeText && (
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-bold shrink-0 ${
+                            selected.length > 0 && selected.length < options.length
+                                ? 'bg-indigo-600 text-white' 
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}>
+                            {badgeText}
+                        </span>
+                    )}
+                </div>
+                
+                <div className="flex items-center gap-1 shrink-0 ml-1">
+                    {selected.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={clearAll}
+                            className="p-0.5 hover:bg-slate-700 text-slate-400 hover:text-white rounded transition-colors"
+                            title="Limpar seleção"
                         >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${selected.includes(opt) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-600'}`}>
-                                {selected.includes(opt) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                            ✕
+                        </button>
+                    )}
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180 text-indigo-400' : ''}`}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                    </svg>
+                </div>
+            </div>
+
+            {isOpen && (
+                <div className={`absolute top-full ${alignRight ? 'right-0' : 'left-0'} mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl shadow-black/80 z-[100] min-w-[220px] max-w-xs p-2 ring-1 ring-white/10 animate-fade-in-subtle`}>
+                    {/* Header Controls */}
+                    <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-slate-800 mb-1 pb-2">
+                        <button
+                            type="button"
+                            onClick={toggleAll}
+                            className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer"
+                        >
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selected.length === options.length ? 'bg-indigo-600 border-indigo-500' : 'border-slate-500 bg-slate-800'}`}>
+                                {selected.length === options.length && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                             </div>
-                            <span className="text-sm text-slate-300">{opt}</span>
-                        </div>
-                    ))}
+                            <span>{selected.length === options.length ? 'Desmarcar Todos' : 'Selecionar Todos'}</span>
+                        </button>
+
+                        {selected.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => onChange([])}
+                                className="text-[11px] text-slate-400 hover:text-rose-300 px-1.5 py-0.5 rounded hover:bg-slate-800 transition-colors"
+                            >
+                                Limpar
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Options List */}
+                    <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+                        {options.map(opt => {
+                            const isChecked = selected.includes(opt);
+                            return (
+                                <div 
+                                    key={opt} 
+                                    onClick={() => toggleOption(opt)}
+                                    className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                        isChecked 
+                                            ? 'bg-indigo-950/50 text-white font-medium' 
+                                            : 'hover:bg-slate-800/80 text-slate-300 hover:text-white'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                            isChecked 
+                                                ? 'bg-indigo-600 border-indigo-500 shadow-sm' 
+                                                : 'border-slate-500 bg-slate-800/80 hover:border-slate-400'
+                                        }`}>
+                                            {isChecked && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                        </div>
+                                        <span className="text-xs truncate">{opt}</span>
+                                    </div>
+                                    {isChecked && (
+                                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"></span>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>
-    )
+    );
 };
 
 const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: { filters: any, setFilters: any, devs?: Developer[], extraActions?: React.ReactNode, className?: string }) => {
@@ -508,7 +604,7 @@ const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: 
   };
 
   return (
-    <div className={`flex flex-col xl:flex-row gap-3 bg-dark-850/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/90 shadow-lg shadow-black/15 mb-4 items-start xl:items-center justify-between ${className}`}>
+    <div className={`relative z-30 flex flex-col xl:flex-row gap-3 bg-dark-850/90 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800 shadow-lg shadow-black/20 mb-4 items-start xl:items-center justify-between ${className}`}>
        <div className="flex-1 w-full xl:w-auto relative">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -516,7 +612,7 @@ const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: 
           <input 
             type="text" 
             placeholder="Buscar (ID, Resumo, Solicitante)..." 
-            className="w-full bg-dark-950/70 border border-slate-700/70 hover:border-slate-600 rounded-xl pl-9 pr-3 py-1.5 h-9 text-xs text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all"
+            className="w-full bg-dark-950/80 border border-slate-700/80 hover:border-slate-600 rounded-xl pl-9 pr-3 py-1.5 h-9 text-xs text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all shadow-inner"
             value={filters.search}
             onChange={(e) => handleChange('search', e.target.value)}
           />
@@ -1381,18 +1477,17 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                                 <h4 className="font-bold text-white">Tarefas da Sprint</h4>
                                 <div className="flex items-center gap-4 w-full md:w-auto">
-                                    <div className="flex items-center gap-2 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-1.5">
-                                        <IconUsers className="w-4 h-4 text-slate-500" />
+                                    <div className="flex items-center gap-2">
                                         <select 
-                                            className="bg-slate-900 text-xs text-white outline-none border-none cursor-pointer"
+                                            className="bg-slate-900/90 border border-slate-700 hover:border-indigo-500 text-xs font-medium text-white rounded-xl px-3 py-2 outline-none cursor-pointer transition-colors shadow-sm"
                                             value={taskDevFilter}
                                             onChange={(e) => setTaskDevFilter(e.target.value)}
                                         >
-                                            <option value="Todos" className="bg-slate-800 text-slate-100">Todos os Devs</option>
+                                            <option value="Todos" className="bg-slate-900 text-white">Todos os Devs</option>
                                             {devs.map((d: any) => (
-                                                <option key={d.id} value={d.name} className="bg-slate-800 text-slate-100">{d.name}</option>
+                                                <option key={d.id} value={d.name} className="bg-slate-900 text-white">{d.name}</option>
                                             ))}
-                                            <option value="Sem Dev" className="bg-slate-800 text-slate-100">Sem Dev</option>
+                                            <option value="Sem Dev" className="bg-slate-900 text-white">Sem Dev</option>
                                         </select>
                                     </div>
                                     <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-2">
@@ -1943,7 +2038,23 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 };
 
 const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
-  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ search: '', type: [], priority: [], status: [], assignee: [] });
+  const [searchParams] = useSearchParams();
+  const initialType = searchParams.get('type');
+  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>(() => ({
+    search: '',
+    type: initialType ? [initialType] : [],
+    priority: [],
+    status: [],
+    assignee: []
+  }));
+
+  useEffect(() => {
+    const qType = searchParams.get('type');
+    if (qType) {
+      setFilters(prev => ({ ...prev, type: [qType] }));
+    }
+  }, [searchParams]);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const filtered = tasks.filter(t => {
       const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase()) || (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
@@ -2003,6 +2114,19 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       StorageService.saveTasks(updated);
   };
 
+  const handleDirectAssigneeChange = (taskId: string, newAssignee: string) => {
+      const updated = tasks.map(t => {
+          if (t.id === taskId) {
+              const val = newAssignee || null;
+              const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: `Alterou Desenvolvedor para ${val || 'Sem Atribuição'}` };
+              return { ...t, assignee: val, history: [...(t.history || []), entry] };
+          }
+          return t;
+      });
+      setTasks(updated);
+      StorageService.saveTasks(updated);
+  };
+
   const exportToExcel = () => { const ws = XLSX.utils.json_to_sheet(filtered); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Demandas"); XLSX.writeFile(wb, "Nexus_Demandas.xlsx"); };
 
   const completedCount = filtered.filter(t => isCompletedStatus(t.status)).length;
@@ -2028,18 +2152,26 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       </div>
 
       <div className="flex flex-wrap justify-between items-center gap-4 bg-dark-850/80 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-slate-800/90 shadow-md shadow-black/15">
-        <div className="flex flex-wrap gap-2 items-center w-full">
+        <div className="flex flex-wrap gap-2.5 items-center w-full">
              {selected.size > 0 ? (
                  <>
-                    <span className="text-xs font-semibold text-indigo-300 mr-2 bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-500/40 font-mono">{selected.size} selecionados</span>
-                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}>
-                        <option value="">Mudar Tipo</option>
+                    <span className="text-xs font-semibold text-indigo-300 mr-1 bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-500/40 font-mono">{selected.size} selecionados</span>
+                    <select 
+                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                      onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}
+                      defaultValue=""
+                    >
+                        <option value="" disabled>Mudar Tipo...</option>
                         <option value="Nova Automação">Nova Automação</option>
                         <option value="Melhoria">Melhoria</option>
                         <option value="Incidente">Incidente</option>
                     </select>
-                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}>
-                        <option value="">Mudar Status</option>
+                    <select 
+                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                      onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}
+                      defaultValue=""
+                    >
+                        <option value="" disabled>Mudar Status...</option>
                         <option value="Novo">Novo</option>
                         <option value="Backlog">Backlog</option>
                         <option value="Pendente">Pendente</option>
@@ -2051,13 +2183,17 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         <option value="Fechado">Fechado</option>
                         <option value="Cancelado">Cancelado</option>
                     </select>
-                    <select className="bg-dark-900/90 text-xs rounded-xl px-3 py-1.5 outline-none text-slate-200 border border-slate-700/80 hover:border-slate-600 transition-colors" onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}>
-                        <option value="">Atribuir Dev</option>
+                    <select 
+                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                      onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}
+                      defaultValue=""
+                    >
+                        <option value="" disabled>Atribuir Dev...</option>
                         {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
                     </select>
                     <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-1.5 px-3">Excluir</Button>
                  </>
-             ) : <div className="text-xs text-slate-400">Selecione itens para ações em massa (Mudar Tipo, Status ou Desenvolvedor)</div>}
+             ) : <div className="text-xs text-slate-400">Selecione checkboxes na tabela para ações em massa (Mudar Tipo, Status ou Desenvolvedor)</div>}
              <div className="flex-1"></div>
              <Button onClick={exportToExcel} variant="success" className="text-xs py-1.5 px-3"><IconDownload className="w-3.5 h-3.5" /> Exportar Excel</Button>
         </div>
@@ -2067,52 +2203,66 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
             <table className="w-full text-left text-sm">
             <thead className="bg-dark-950/90 backdrop-blur-md text-slate-400 font-semibold text-xs uppercase tracking-wider sticky top-0 z-10 border-b border-slate-800/80">
               <tr>
-                <th className="p-3.5 w-10 bg-dark-950/90"><input type="checkbox" className="rounded accent-indigo-600" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
+                <th className="p-3.5 w-10 bg-dark-950/90"><input type="checkbox" className="rounded accent-indigo-600 cursor-pointer" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
                 <th className="p-3.5 bg-dark-950/90">ID</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[150px]">Tipo</th>
                 <th className="p-3.5 w-1/3 bg-dark-950/90">Título</th>
                 <th className="p-3.5 bg-dark-950/90">Prioridade</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Status</th>
-                <th className="p-3.5 bg-dark-950/90">Atribuído</th>
+                <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Atribuído</th>
                 <th className="p-3.5 text-right bg-dark-950/90">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/70">
                 {filtered.map(task => (
                 <tr key={task.id} className="hover:bg-dark-800/60 transition-colors group">
-                    <td className="p-3.5"><input type="checkbox" className="rounded accent-indigo-600" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
+                    <td className="p-3.5"><input type="checkbox" className="rounded accent-indigo-600 cursor-pointer" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
                     <td className="p-3.5 font-mono text-slate-400 group-hover:text-indigo-300 font-medium text-xs">{task.id}</td>
                     <td className="p-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <Badge type={task.type} />
-                        <select 
-                          className="bg-transparent text-[11px] text-slate-500 hover:text-slate-300 opacity-40 hover:opacity-100 cursor-pointer border border-transparent hover:border-slate-700 rounded px-1 py-0.5 transition-all outline-none"
-                          value={task.type}
-                          title="Alterar tipo da demanda"
-                          onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
-                        >
-                          <option value="Nova Automação" className="bg-dark-900 text-white">Nova Automação</option>
-                          <option value="Melhoria" className="bg-dark-900 text-white">Melhoria</option>
-                          <option value="Incidente" className="bg-dark-900 text-white">Incidente</option>
-                        </select>
-                      </div>
+                      <select 
+                        className={`text-xs font-bold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border font-mono ${
+                          task.type === 'Incidente' ? 'bg-rose-950/70 text-rose-200 border-rose-700/70 hover:border-rose-400' :
+                          task.type === 'Melhoria' ? 'bg-emerald-950/70 text-emerald-200 border-emerald-700/70 hover:border-emerald-400' :
+                          'bg-indigo-950/70 text-indigo-200 border-indigo-700/70 hover:border-indigo-400'
+                        }`}
+                        value={task.type}
+                        title="Clique para alterar a classificação diretamente"
+                        onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
+                      >
+                        <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
+                        <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
+                        <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                      </select>
                     </td>
                     <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">{task.summary}</td>
                     <td className="p-3.5"><Badge type={task.priority} /></td>
                     <td className="p-3.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-xs ${isCompletedStatus(task.status) ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{task.status}</span>
-                        <select 
-                          className="bg-transparent text-[11px] text-slate-500 hover:text-slate-300 opacity-40 hover:opacity-100 cursor-pointer border border-transparent hover:border-slate-700 rounded px-1 py-0.5 transition-all outline-none"
-                          value={task.status}
-                          title="Alterar status da demanda"
-                          onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
-                        >
-                          {STATUSES.map(s => <option key={s} value={s} className="bg-dark-900 text-white">{s}</option>)}
-                        </select>
-                      </div>
+                      <select 
+                        className={`text-xs font-semibold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border ${
+                          isCompletedStatus(task.status) 
+                            ? 'bg-emerald-950/80 text-emerald-200 border-emerald-600/70 hover:border-emerald-400' 
+                            : task.status === 'Aguardando' || task.status === 'Pendente'
+                              ? 'bg-amber-950/80 text-amber-200 border-amber-600/70 hover:border-amber-400'
+                              : 'bg-slate-900/90 text-slate-200 border-slate-700/90 hover:border-indigo-400'
+                        }`}
+                        value={task.status}
+                        title="Clique para alterar o status diretamente"
+                        onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
+                      >
+                        {STATUSES.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
+                      </select>
                     </td>
-                    <td className="p-3.5 text-slate-400 text-xs font-medium">{task.assignee || '-'}</td>
+                    <td className="p-3.5">
+                      <select 
+                        className="bg-slate-900/90 text-xs text-slate-200 hover:text-white border border-slate-700/90 hover:border-indigo-400 rounded-lg px-2 py-1 transition-all outline-none cursor-pointer shadow-sm max-w-[140px] truncate"
+                        value={task.assignee || ''}
+                        title="Alterar desenvolvedor responsável diretamente"
+                        onChange={(e) => handleDirectAssigneeChange(task.id, e.target.value)}
+                      >
+                        <option value="" className="bg-slate-900 text-slate-400">Não Atribuído</option>
+                        {devs.map(d => <option key={d.id} value={d.name} className="bg-slate-900 text-white">{d.name}</option>)}
+                      </select>
+                    </td>
                     <td className="p-3.5 text-right"><button onClick={() => onEditTask(task)} className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2.5 py-1 rounded-lg border border-indigo-500/30 hover:bg-indigo-950/40 transition-colors cursor-pointer">Editar</button></td>
                 </tr>
                 ))}
@@ -2900,14 +3050,14 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     </button>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
                     {/* SEARCH INPUT */}
-                    <div className="col-span-1 sm:col-span-2 md:col-span-2 lg:col-span-1">
+                    <div className="col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-1">
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Pesquisar ID / Nome</label>
                         <input 
                             type="text" 
                             placeholder="Buscar..."
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
                             value={filters.search}
                             onChange={e => setFilters(prev => ({ ...prev, search: e.target.value }))}
                         />
@@ -2917,12 +3067,12 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Desenvolvedor</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.dev}
                             onChange={e => setFilters(prev => ({ ...prev, dev: e.target.value }))}
                         >
-                            <option value="Todos">Todos</option>
-                            {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                            <option value="Todos" className="bg-slate-900 text-white">Todos</option>
+                            {devs.map(d => <option key={d.id} value={d.name} className="bg-slate-900 text-white">{d.name}</option>)}
                         </select>
                     </div>
 
@@ -2930,14 +3080,14 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Tipo</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.type}
                             onChange={e => setFilters(prev => ({ ...prev, type: e.target.value }))}
                         >
-                            <option value="Todos">Todos</option>
-                            <option value="Incidente">Incidente</option>
-                            <option value="Melhoria">Melhoria</option>
-                            <option value="Nova Automação">Nova Automação</option>
+                            <option value="Todos" className="bg-slate-900 text-white">Todos</option>
+                            <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                            <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
+                            <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
                         </select>
                     </div>
 
@@ -2945,12 +3095,12 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Status de Fluxo</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.status}
                             onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
                         >
-                            <option value="Todos">Todos</option>
-                            {uniqueStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                            <option value="Todos" className="bg-slate-900 text-white">Todos</option>
+                            {uniqueStatuses.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
                         </select>
                     </div>
 
@@ -2958,12 +3108,12 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Sprint Ativa</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.sprint}
                             onChange={e => setFilters(prev => ({ ...prev, sprint: e.target.value }))}
                         >
-                            <option value="Todos">Todas</option>
-                            {safeSprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            <option value="Todos" className="bg-slate-900 text-white">Todas</option>
+                            {safeSprints.map(s => <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name}</option>)}
                         </select>
                     </div>
 
@@ -2971,12 +3121,12 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Cliente</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.client}
                             onChange={e => setFilters(prev => ({ ...prev, client: e.target.value }))}
                         >
-                            <option value="Todos">Todos</option>
-                            {uniqueClients.map(c => <option key={c} value={c}>{c}</option>)}
+                            <option value="Todos" className="bg-slate-900 text-white">Todos</option>
+                            {uniqueClients.map(c => <option key={c} value={c} className="bg-slate-900 text-white">{c}</option>)}
                         </select>
                     </div>
 
@@ -2984,12 +3134,12 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
                     <div>
                         <label className="block text-[10px] text-slate-400 mb-1 uppercase font-semibold">Área de Negócio</label>
                         <select 
-                            className="w-full bg-[#111A4E] border border-indigo-900 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-slate-900/90 border border-slate-700 hover:border-indigo-500 rounded-xl px-3 py-2 text-xs font-medium text-white shadow-sm transition-all cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
                             value={filters.area}
                             onChange={e => setFilters(prev => ({ ...prev, area: e.target.value }))}
                         >
-                            <option value="Todos">Todas</option>
-                            {uniqueAreas.map(a => <option key={a} value={a}>{a}</option>)}
+                            <option value="Todos" className="bg-slate-900 text-white">Todas</option>
+                            {uniqueAreas.map(a => <option key={a} value={a} className="bg-slate-900 text-white">{a}</option>)}
                         </select>
                     </div>
                 </div>
@@ -4180,6 +4330,7 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
 };
 
 const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, onCreateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void, onOpenUpload?: () => void, onCreateTask?: () => void }) => {
+  const navigate = useNavigate();
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       try {
           const saved = localStorage.getItem('nexus_dashboard_widgets');
@@ -4228,7 +4379,15 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   const activeFilteredTasks = useMemo(() => { 
     return tasks.filter(t => { 
       if (isCompletedStatus(t.status)) return false; 
-      const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); 
+      let matchesDev = true;
+      if (filterDev.length > 0) {
+        const hasUnassigned = filterDev.includes('Não Atribuído');
+        if (hasUnassigned) {
+          matchesDev = !t.assignee || filterDev.includes(t.assignee);
+        } else {
+          matchesDev = !!t.assignee && filterDev.includes(t.assignee);
+        }
+      }
       const matchesType = filterType.length === 0 || filterType.includes(t.type); 
       return matchesDev && matchesType; 
     }); 
@@ -4237,7 +4396,15 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   const completedMetrics = useMemo(() => { 
     const completed = tasks.filter(t => isCompletedStatus(t.status)); 
     const filteredCompleted = completed.filter(t => { 
-      const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); 
+      let matchesDev = true;
+      if (filterDev.length > 0) {
+        const hasUnassigned = filterDev.includes('Não Atribuído');
+        if (hasUnassigned) {
+          matchesDev = !t.assignee || filterDev.includes(t.assignee);
+        } else {
+          matchesDev = !!t.assignee && filterDev.includes(t.assignee);
+        }
+      }
       const matchesType = filterType.length === 0 || filterType.includes(t.type); 
       return matchesDev && matchesType; 
     }); 
@@ -4267,18 +4434,37 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     
     if (!kpiSearch.trim()) return base;
     const q = kpiSearch.toLowerCase().trim();
-    return base.filter(t => 
-      t.id.toLowerCase().includes(q) || 
-      t.summary.toLowerCase().includes(q) || 
-      (t.assignee && t.assignee.toLowerCase().includes(q)) || 
-      (t.requester && t.requester.toLowerCase().includes(q))
-    );
+    return base.filter(t => {
+      const idStr = String(t.id || '').toLowerCase();
+      const sumStr = String(t.summary || '').toLowerCase();
+      const assStr = String(t.assignee || '').toLowerCase();
+      const reqStr = String(t.requester || '').toLowerCase();
+      const statStr = String(t.status || '').toLowerCase();
+      return idStr.includes(q) || sumStr.includes(q) || assStr.includes(q) || reqStr.includes(q) || statStr.includes(q);
+    });
   }, [selectedKpiModal, activeFilteredTasks, kpiSearch]);
 
   const modalTitle = selectedKpiModal === 'automations' ? 'Demandas em Automações (Ativas)' :
                      selectedKpiModal === 'features' ? 'Demandas em Melhorias (Ativas)' :
                      selectedKpiModal === 'incidents' ? 'Demandas em Incidentes (Ativas)' :
                      'Todas as Demandas Ativas em Aberto';
+
+  const modalBorderColor = selectedKpiModal === 'automations' ? 'border-indigo-500/70' :
+                          selectedKpiModal === 'features' ? 'border-emerald-500/70' :
+                          selectedKpiModal === 'incidents' ? 'border-rose-500/70' :
+                          'border-indigo-500/50';
+
+  const handleOpenListFiltered = () => {
+    const targetType = selectedKpiModal === 'incidents' ? 'Incidente' :
+                       selectedKpiModal === 'features' ? 'Melhoria' :
+                       selectedKpiModal === 'automations' ? 'Nova Automação' : null;
+    setSelectedKpiModal(null);
+    if (targetType) {
+      navigate(`/list?type=${encodeURIComponent(targetType)}`);
+    } else {
+      navigate('/list');
+    }
+  };
 
   const handleQuickSwitchType = (task: Task, newType: TaskType) => {
     if (onUpdateTask) {
@@ -4548,12 +4734,14 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
                       <div 
                         onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }} 
-                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-slate-400/80 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-indigo-400 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver a lista de todas as demandas ativas"
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Total (Ativos)</span>
-                          <span className="text-[10px] text-slate-500 group-hover:text-slate-200 transition-colors font-semibold">Ver detalhes →</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 border border-white/10 group-hover:bg-indigo-600/30 group-hover:border-indigo-500/50 text-slate-300 group-hover:text-indigo-200 transition-all font-semibold flex items-center gap-1">
+                            Ver detalhes →
+                          </span>
                         </div>
                         <div className="flex items-baseline justify-between mt-2">
                           <span className="text-3xl font-bold text-white group-hover:text-slate-100 transition-colors">{metrics.total}</span>
@@ -4569,7 +4757,9 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-rose-400 text-xs uppercase font-bold tracking-wider">Incidentes</span>
-                          <span className="text-[10px] text-rose-400/60 group-hover:text-rose-200 transition-colors font-semibold">Ver detalhes →</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 group-hover:bg-rose-600/30 group-hover:border-rose-400 text-rose-300 group-hover:text-rose-100 transition-all font-semibold flex items-center gap-1">
+                            Ver detalhes →
+                          </span>
                         </div>
                         <div className="flex items-baseline justify-between mt-2">
                           <span className="text-3xl font-bold text-white group-hover:text-rose-100 transition-colors">{metrics.incidents}</span>
@@ -4585,7 +4775,9 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-emerald-400 text-xs uppercase font-bold tracking-wider">Melhorias</span>
-                          <span className="text-[10px] text-emerald-400/60 group-hover:text-emerald-200 transition-colors font-semibold">Ver detalhes →</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 group-hover:bg-emerald-600/30 group-hover:border-emerald-400 text-emerald-300 group-hover:text-emerald-100 transition-all font-semibold flex items-center gap-1">
+                            Ver detalhes →
+                          </span>
                         </div>
                         <div className="flex items-baseline justify-between mt-2">
                           <span className="text-3xl font-bold text-white group-hover:text-emerald-100 transition-colors">{metrics.features}</span>
@@ -4601,7 +4793,9 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-indigo-400 text-xs uppercase font-bold tracking-wider">Automações</span>
-                          <span className="text-[10px] text-indigo-400/60 group-hover:text-indigo-200 transition-colors font-semibold">Ver detalhes →</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20 group-hover:bg-indigo-600/30 group-hover:border-indigo-400 text-indigo-300 group-hover:text-indigo-100 transition-all font-semibold flex items-center gap-1">
+                            Ver detalhes →
+                          </span>
                         </div>
                         <div className="flex items-baseline justify-between mt-2">
                           <span className="text-3xl font-bold text-white group-hover:text-indigo-100 transition-colors">{metrics.automations}</span>
@@ -4785,7 +4979,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   }
   return (
     <div className="space-y-6 animate-fade-in pb-20">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="relative z-30 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">One Page Report</h2>
           <p className="text-slate-400 text-sm">Visão executiva e operacional do projeto</p>
@@ -4793,7 +4987,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
         <div className="flex flex-wrap gap-2.5 w-full md:w-auto items-center">
           <div className="flex gap-2 w-full md:w-auto">
             <MultiSelect options={TASK_TYPES} selected={filterType} onChange={setFilterType} placeholder="Tipos: Todos" />
-            <MultiSelect options={devs.map(d => d.name)} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" />
+            <MultiSelect options={['Não Atribuído', ...devs.map(d => d.name)]} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" />
           </div>
           {onOpenUpload && (
             <Button onClick={onOpenUpload} variant="success" className="h-9 px-3.5 text-xs font-bold shadow-sm shadow-emerald-950/40">
@@ -4895,97 +5089,139 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       {selectedKpiModal && typeof document !== 'undefined' && createPortal(
         <div 
           onClick={() => setSelectedKpiModal(null)} 
-          className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-fade-in"
+          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-[9999] p-3 sm:p-5 overflow-y-auto animate-fade-in-overlay"
           style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
         >
           <div 
             onClick={(e) => e.stopPropagation()} 
-            className="bg-dark-850/95 backdrop-blur-2xl rounded-2xl border border-slate-700/80 w-full max-w-4xl shadow-2xl shadow-black/80 flex flex-col max-h-[90vh] my-auto animate-fade-in"
+            className="bg-slate-900 rounded-2xl border-2 border-slate-700/90 w-full max-w-4xl shadow-2xl shadow-black/80 flex flex-col max-h-[88vh] my-auto overflow-hidden animate-fade-in-dialog ring-1 ring-white/10"
           >
+            {/* Top Category Accent Line */}
+            <div className={`h-1.5 w-full ${
+              selectedKpiModal === 'incidents' ? 'bg-gradient-to-r from-rose-500 via-rose-400 to-amber-500' :
+              selectedKpiModal === 'features' ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500' :
+              selectedKpiModal === 'automations' ? 'bg-gradient-to-r from-indigo-500 via-blue-400 to-cyan-500' :
+              'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500'
+            }`} />
+
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-dark-900/95 rounded-t-2xl">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/95">
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <h3 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                    <span>📊</span>
+                    <span className="text-xl">
+                      {selectedKpiModal === 'incidents' ? '🚨' :
+                       selectedKpiModal === 'features' ? '✨' :
+                       selectedKpiModal === 'automations' ? '🤖' : '📊'}
+                    </span>
                     <span>{modalTitle}</span>
                   </h3>
-                  <span className="bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-xs px-2.5 py-0.5 rounded-full font-bold">
-                    {modalTasks.length} {modalTasks.length === 1 ? 'demanda' : 'demandas'}
+                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                    selectedKpiModal === 'incidents' ? 'bg-rose-950/80 text-rose-300 border-rose-500/50' :
+                    selectedKpiModal === 'features' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50' :
+                    selectedKpiModal === 'automations' ? 'bg-indigo-950/80 text-indigo-300 border-indigo-500/50' :
+                    'bg-slate-800 text-slate-200 border-slate-700'
+                  }`}>
+                    {modalTasks.length} {modalTasks.length === 1 ? 'demanda ativa' : 'demandas ativas'}
                   </span>
                 </div>
+
                 {/* Category Navigation Tabs */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                <div className="flex flex-wrap items-center gap-1.5 mt-3">
                   <button
                     type="button"
                     onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       selectedKpiModal === 'total'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'bg-dark-800/80 text-slate-400 hover:text-white hover:bg-dark-750'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50 scale-105'
+                        : 'bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-750 border border-slate-700/80'
                     }`}
                   >
-                    Todas ({activeFilteredTasks.length})
+                    <span>Todas</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{activeFilteredTasks.length}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => { setSelectedKpiModal('incidents'); setKpiSearch(''); }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       selectedKpiModal === 'incidents'
-                        ? 'bg-rose-600 text-white shadow-md'
-                        : 'bg-dark-800/80 text-rose-300/70 hover:text-rose-200 hover:bg-rose-950/40'
+                        ? 'bg-rose-600 text-white shadow-md shadow-rose-900/50 scale-105'
+                        : 'bg-slate-800/90 text-rose-300 hover:text-rose-100 hover:bg-rose-950/50 border border-slate-700/80'
                     }`}
                   >
-                    Incidentes ({metrics.incidents})
+                    <span>Incidentes</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{metrics.incidents}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => { setSelectedKpiModal('features'); setKpiSearch(''); }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       selectedKpiModal === 'features'
-                        ? 'bg-emerald-600 text-white shadow-md'
-                        : 'bg-dark-800/80 text-emerald-300/70 hover:text-emerald-200 hover:bg-emerald-950/40'
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/50 scale-105'
+                        : 'bg-slate-800/90 text-emerald-300 hover:text-emerald-100 hover:bg-emerald-950/50 border border-slate-700/80'
                     }`}
                   >
-                    Melhorias ({metrics.features})
+                    <span>Melhorias</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{metrics.features}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => { setSelectedKpiModal('automations'); setKpiSearch(''); }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       selectedKpiModal === 'automations'
-                        ? 'bg-indigo-600 text-white shadow-md'
-                        : 'bg-dark-800/80 text-indigo-300/70 hover:text-indigo-200 hover:bg-indigo-950/40'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50 scale-105'
+                        : 'bg-slate-800/90 text-indigo-300 hover:text-indigo-100 hover:bg-indigo-950/50 border border-slate-700/80'
                     }`}
                   >
-                    Automações ({metrics.automations})
+                    <span>Automações</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{metrics.automations}</span>
                   </button>
                 </div>
               </div>
-              <button 
-                type="button"
-                onClick={() => setSelectedKpiModal(null)} 
-                className="self-end sm:self-auto text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 text-base transition-colors cursor-pointer"
-                title="Fechar modal (Esc)"
-              >
-                ✕
-              </button>
+
+              {/* Header Action Buttons */}
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={handleOpenListFiltered}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-950/50 flex items-center gap-1.5 transition-all cursor-pointer hover:scale-105 active:scale-95"
+                  title="Abrir esta lista completa na tabela de demandas com o filtro aplicado"
+                >
+                  <span>Ver na Tabela</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+                  </svg>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setSelectedKpiModal(null)} 
+                  className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 text-sm transition-colors cursor-pointer border border-slate-700/60"
+                  title="Fechar (Esc)"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Search Filter Bar */}
-            <div className="p-3 sm:p-4 bg-dark-900/80 border-b border-slate-800/90 flex items-center gap-3">
-              <input 
-                type="text" 
-                value={kpiSearch}
-                onChange={(e) => setKpiSearch(e.target.value)}
-                placeholder="Buscar por ID, título, responsável ou solicitante..."
-                className="flex-1 bg-dark-950/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
-              />
+            <div className="p-3 sm:p-4 bg-slate-950/70 border-b border-slate-800 flex items-center gap-3">
+              <div className="relative flex-1">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                </svg>
+                <input 
+                  type="text" 
+                  value={kpiSearch}
+                  onChange={(e) => setKpiSearch(e.target.value)}
+                  placeholder="Filtrar por ID, título, responsável ou solicitante..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500"
+                />
+              </div>
               {kpiSearch && (
                 <button 
                   type="button"
                   onClick={() => setKpiSearch('')} 
-                  className="text-xs text-slate-400 hover:text-white px-2 py-1 bg-dark-800 rounded-lg cursor-pointer"
+                  className="text-xs text-slate-300 hover:text-white px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg cursor-pointer transition-colors"
                 >
                   Limpar
                 </button>
@@ -4993,27 +5229,51 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
             </div>
 
             {/* Tasks List */}
-            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar bg-slate-900/50">
               {modalTasks.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-sm space-y-2">
-                  <div className="text-2xl">📋</div>
-                  <p className="font-semibold text-slate-300">Nenhuma demanda encontrada neste indicador.</p>
-                  <p className="text-xs text-slate-500">Tente ajustar o termo de busca ou selecione outra categoria.</p>
+                <div className="text-center py-12 text-slate-400 text-sm space-y-3">
+                  <div className="text-3xl">📋</div>
+                  <p className="font-bold text-slate-200">Nenhuma demanda ativa encontrada nesta categoria.</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    {kpiSearch ? 'Nenhum resultado corresponde à sua pesquisa. Tente limpar o filtro de busca.' : 'Você pode cadastrar novas demandas ou importar sua planilha Excel de backup.'}
+                  </p>
+                  <div className="pt-2 flex justify-center gap-2">
+                    {kpiSearch ? (
+                      <button 
+                        type="button"
+                        onClick={() => setKpiSearch('')}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                      >
+                        Limpar Busca
+                      </button>
+                    ) : (
+                      <button 
+                        type="button"
+                        onClick={handleOpenListFiltered}
+                        className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold"
+                      >
+                        Ir para Tabela de Demandas
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 modalTasks.map(t => (
-                  <div key={t.id} className="bg-dark-900/80 border border-slate-800/90 hover:border-slate-700 rounded-xl p-3 sm:p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors shadow-sm">
+                  <div key={t.id} className="bg-slate-850 border border-slate-750 hover:border-indigo-500/50 rounded-xl p-3 sm:p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-all shadow-sm">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="font-mono text-xs font-bold text-indigo-300">{t.id}</span>
+                        <span className="font-mono text-xs font-bold text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-500/30">{t.id}</span>
                         <Badge type={t.type} />
                         <Badge type={t.priority} />
-                        <span className="text-[10px] text-slate-400 bg-dark-800 px-2 py-0.5 rounded border border-slate-700/80">{t.status}</span>
+                        <span className="text-[10px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">{t.status}</span>
                         {t.assignee && (
-                          <span className="text-[11px] text-indigo-300 font-medium">👤 {t.assignee}</span>
+                          <span className="text-[11px] text-slate-300 font-medium flex items-center gap-1 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60">
+                            <span>👤</span>
+                            <span>{t.assignee}</span>
+                          </span>
                         )}
                       </div>
-                      <p className="text-xs sm:text-sm font-semibold text-slate-200 truncate" title={t.summary}>{t.summary}</p>
+                      <p className="text-xs sm:text-sm font-semibold text-slate-100 truncate" title={t.summary}>{t.summary}</p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 self-end md:self-center shrink-0">
@@ -5021,7 +5281,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                         <button 
                           type="button"
                           onClick={() => handleQuickSwitchType(t, 'Melhoria')}
-                          className="text-[11px] bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                          className="text-[11px] bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                           title="Mudar classificação para Melhoria"
                         >
                           🔄 p/ Melhoria
@@ -5031,7 +5291,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                         <button 
                           type="button"
                           onClick={() => handleQuickSwitchType(t, 'Nova Automação')}
-                          className="text-[11px] bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                          className="text-[11px] bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/50 text-indigo-200 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                           title="Mudar classificação para Automação"
                         >
                           🔄 p/ Automação
@@ -5041,7 +5301,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                         <button 
                           type="button"
                           onClick={() => handleQuickSwitchType(t, 'Incidente')}
-                          className="text-[11px] bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                          className="text-[11px] bg-rose-950/70 hover:bg-rose-900 border border-rose-500/50 text-rose-200 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                           title="Mudar classificação para Incidente"
                         >
                           🔄 p/ Incidente
@@ -5051,7 +5311,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <button 
                         type="button"
                         onClick={() => handleQuickComplete(t)}
-                        className="text-[11px] bg-dark-800 hover:bg-emerald-950/80 border border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                        className="text-[11px] bg-slate-800 hover:bg-emerald-950 border border-slate-700 hover:border-emerald-500/60 text-slate-200 hover:text-emerald-200 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
                         title="Marcar como Concluído"
                       >
                         ✓ Concluir
@@ -5061,7 +5321,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                         <button 
                           type="button"
                           onClick={() => { setSelectedKpiModal(null); onEditTask(t); }}
-                          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg transition-colors font-medium cursor-pointer"
+                          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-lg transition-colors font-semibold cursor-pointer shadow-sm"
                         >
                           Editar
                         </button>
@@ -5073,15 +5333,24 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
             </div>
 
             {/* Footer */}
-            <div className="p-3 sm:p-4 border-t border-slate-800/90 bg-dark-900/90 rounded-b-2xl flex justify-between items-center text-xs text-slate-400">
-              <span className="hidden sm:inline">Pressione <kbd className="px-1.5 py-0.5 rounded bg-dark-800 border border-slate-700 text-slate-300 font-mono text-[10px]">Esc</kbd> ou clique fora para fechar.</span>
-              <button 
-                type="button"
-                onClick={() => setSelectedKpiModal(null)} 
-                className="px-4 py-2 bg-dark-800 hover:bg-dark-750 text-white rounded-xl font-medium transition-colors border border-slate-700 cursor-pointer ml-auto"
-              >
-                Fechar
-              </button>
+            <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900/95 flex justify-between items-center text-xs text-slate-400">
+              <span className="hidden sm:inline">Pressione <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">Esc</kbd> ou clique fora para fechar.</span>
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={handleOpenListFiltered}
+                  className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 rounded-xl font-medium transition-colors cursor-pointer"
+                >
+                  Abrir Tabela Completa
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setSelectedKpiModal(null)} 
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold transition-colors cursor-pointer shadow-sm"
+                >
+                  Fechar
+                </button>
+              </div>
             </div>
           </div>
         </div>,
@@ -5274,12 +5543,12 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
         {isResetModalOpen && typeof document !== 'undefined' && createPortal(
           <div 
             onClick={() => !isResetting && setIsResetModalOpen(false)}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[9999] p-4 animate-fade-in"
+            className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-fade-in-overlay"
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
           >
             <div 
               onClick={(e) => e.stopPropagation()}
-              className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left"
+              className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left animate-fade-in-dialog"
             >
               <div className="w-14 h-14 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-500 mb-4 mx-auto">
                 <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6211,7 +6480,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         });
     };
 
-    return (<div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-dark-850/95 backdrop-blur-2xl rounded-2xl border border-slate-800 w-full max-w-2xl shadow-2xl shadow-black/50 flex flex-col max-h-[92vh] animate-fade-in"><div className="p-4 sm:p-5 border-b border-slate-800/90 flex justify-between items-center bg-dark-900/90 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-dark-800/80 cursor-pointer">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Conclído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-950/40 border border-rose-500/30 p-3 sm:p-4 rounded-xl animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-dark-900/90 border border-rose-500/50 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-dark-900/40 p-3.5 rounded-xl border border-slate-800/80"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
+    return (<div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl shadow-black/60 flex flex-col max-h-[92vh] animate-fade-in"><div className="p-4 sm:p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-950/40 border border-rose-500/30 p-3 sm:p-4 rounded-xl animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-950 border border-rose-500/50 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
 
         {/* Azure DevOps Integration Card */}
         <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/60 space-y-4">
@@ -7101,8 +7370,8 @@ export default function App() {
     </div>
   );
   return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)}>{isUploadModalOpen && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-4">
-    <div className="bg-dark-850/95 backdrop-blur-2xl p-5 sm:p-7 rounded-2xl border border-slate-800 max-w-2xl w-full shadow-2xl shadow-black/50 max-h-[92vh] overflow-y-auto custom-scrollbar">
+  <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+    <div className="bg-slate-900 p-5 sm:p-7 rounded-2xl border border-slate-700 max-w-2xl w-full shadow-2xl shadow-black/60 max-h-[92vh] overflow-y-auto custom-scrollbar">
       <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-3">
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-emerald-600/20 rounded-xl border border-emerald-500/30 text-emerald-400">

@@ -52,10 +52,39 @@
       ::-webkit-scrollbar-thumb { background: #21304e; border-radius: 9999px; }
       ::-webkit-scrollbar-thumb:hover { background: #334a75; }
       
-      /* Fix para legibilidade de dropdowns em modo escuro */
+      /* Fix e estilização moderna de dropdowns em modo escuro */
+      select {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        background-color: #0f172a;
+        color: #f8fafc;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23818cf8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.75rem center !important;
+        background-size: 0.85rem 0.85rem !important;
+        padding-right: 2.25rem !important;
+        cursor: pointer;
+        border: 1px solid #334155;
+        border-radius: 0.5rem;
+      }
+      select:hover {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a5b4fc'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E") !important;
+        border-color: #6366f1;
+      }
+      select:focus {
+        border-color: #818cf8 !important;
+        outline: none !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25) !important;
+      }
       select option {
-        background-color: #131c31; /* bg-dark-800 */
-        color: #f1f5f9; /* text-slate-100 */
+        background-color: #0f172a !important;
+        color: #f8fafc !important;
+        padding: 8px 12px;
+      }
+      select option:hover, select option:checked {
+        background-color: #312e81 !important;
+        color: #ffffff !important;
       }
 
       /* Transição suave fade-in */
@@ -72,6 +101,36 @@
 
       .animate-fade-in {
         animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      /* Animação exclusiva para Overlays e Backdrops fixos (sem transform para evitar descolamento ou tela preta) */
+      @keyframes fadeInOverlay {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .animate-fade-in-overlay {
+        animation: fadeInOverlay 0.2s ease-out both;
+      }
+
+      /* Animação para Caixas de Diálogo / Modais com zoom sutil e sem shift brusco */
+      @keyframes fadeInDialog {
+        from {
+          opacity: 0;
+          transform: scale(0.97);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .animate-fade-in-dialog {
+        animation: fadeInDialog 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
 
       @keyframes fadeInSubtle {
