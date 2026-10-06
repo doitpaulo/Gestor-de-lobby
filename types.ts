@@ -1,7 +1,20 @@
 
 export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
-export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog';
+export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog' | 'Cancelado';
+
+export const ALL_STATUSES: Status[] = [
+  'Novo',
+  'Backlog',
+  'Pendente',
+  'Em Atendimento',
+  'Em Progresso',
+  'Resolvido',
+  'Fechado',
+  'Aguardando',
+  'Concluído',
+  'Cancelado'
+];
 
 export interface HistoryEntry {
   id: string;

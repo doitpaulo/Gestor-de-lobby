@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Task, Developer, Robot, Sprint, WorkflowPhase, DocumentConfig, DevOpsConfig, User } from '../types';
+import { StorageService } from './storageService';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -39,6 +40,12 @@ googleProvider.setCustomParameters({
 export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
+
+// Helper to check if current target user is a guest / local demo user
+const isGuestUserId = (userId?: string): boolean => {
+  if (!userId) return !auth.currentUser;
+  return userId.startsWith('guest-') || !auth.currentUser;
+};
 
 // Helper to sanitize payload for Firestore (removes undefined values which cause Firestore errors)
 const cleanForFirestore = (obj: any): any => {
@@ -235,6 +242,17 @@ export const FirebaseService = {
 
   // Subscribe to real-time Tasks directly from Firestore
   subscribeTasks: (onTasks: (tasks: Task[]) => void, userId?: string) => {
+    if (isGuestUserId(userId)) {
+      // Local guest mode operates purely in local storage; emit local tasks immediately
+      setTimeout(() => {
+        try {
+          onTasks(StorageService.getTasks());
+        } catch (e) {
+          console.warn('Guest tasks emission notice:', e);
+        }
+      }, 0);
+      return () => {};
+    }
     const colRef = FirebaseService.getTargetCol('tasks', userId);
     return onSnapshot(colRef, (snapshot) => {
       const tasks: Task[] = [];
@@ -243,12 +261,13 @@ export const FirebaseService = {
       });
       onTasks(tasks);
     }, (error) => {
-      console.warn('Firestore tasks subscription error:', error);
+      console.warn('Firestore tasks subscription notice:', error);
     });
   },
 
   // Save/Update a single task directly in Firestore
   saveTask: async (task: Task, userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const docRef = FirebaseService.getTargetDoc('tasks', task.id, userId);
       const data = cleanForFirestore({
@@ -257,13 +276,13 @@ export const FirebaseService = {
       });
       await setDoc(docRef, data, { merge: true });
     } catch (error) {
-      console.error('Error saving task to Firestore:', error);
-      throw error;
+      console.warn('Error saving task to Firestore:', error);
     }
   },
 
   // Batch save multiple tasks directly in Firestore
   saveTasksBatch: async (tasks: Task[], userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const batchSize = 400;
       for (let i = 0; i < tasks.length; i += batchSize) {
@@ -280,23 +299,24 @@ export const FirebaseService = {
         await batch.commit();
       }
     } catch (error) {
-      console.error('Error saving tasks batch to Firestore:', error);
+      console.warn('Error saving tasks batch to Firestore:', error);
     }
   },
 
   // Delete a task directly from Firestore
   deleteTask: async (taskId: string, userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const docRef = FirebaseService.getTargetDoc('tasks', taskId, userId);
       await deleteDoc(docRef);
     } catch (error) {
-      console.error('Error deleting task from Firestore:', error);
-      throw error;
+      console.warn('Error deleting task from Firestore:', error);
     }
   },
 
   // Delete all tasks for user
   deleteAllTasks: async (userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const colRef = FirebaseService.getTargetCol('tasks', userId);
       const snap = await getDocs(colRef);
@@ -304,12 +324,13 @@ export const FirebaseService = {
       snap.forEach(d => batch.delete(d.ref));
       await batch.commit();
     } catch (error) {
-      console.error('Error deleting all tasks:', error);
+      console.warn('Error deleting all tasks:', error);
     }
   },
 
   // Fetch all tasks once directly from Firestore
   fetchTasks: async (userId?: string): Promise<Task[]> => {
+    if (isGuestUserId(userId)) return [];
     try {
       const snap = await getDocs(FirebaseService.getTargetCol('tasks', userId));
       const tasks: Task[] = [];
@@ -323,20 +344,31 @@ export const FirebaseService = {
 
   // Devs sync directly with Firestore
   subscribeDevs: (onDevs: (devs: Developer[]) => void, userId?: string) => {
+    if (isGuestUserId(userId)) {
+      setTimeout(() => {
+        try {
+          onDevs(StorageService.getDevs());
+        } catch (e) {
+          console.warn('Guest devs emission notice:', e);
+        }
+      }, 0);
+      return () => {};
+    }
     const colRef = FirebaseService.getTargetCol('devs', userId);
     return onSnapshot(colRef, snap => {
       const devs: Developer[] = [];
       snap.forEach(d => devs.push(d.data() as Developer));
       onDevs(devs);
-    }, (err) => console.warn('Devs snapshot error:', err));
+    }, (err) => console.warn('Devs snapshot notice:', err));
   },
 
   saveDevs: async (devs: Developer[], userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const batch = writeBatch(db);
       devs.forEach(d => {
         const ref = FirebaseService.getTargetDoc('devs', d.id, userId);
-        batch.set(ref, d, { merge: true });
+        batch.set(ref, cleanForFirestore(d), { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -346,20 +378,31 @@ export const FirebaseService = {
 
   // Robots sync directly with Firestore
   subscribeRobots: (onRobots: (robots: Robot[]) => void, userId?: string) => {
+    if (isGuestUserId(userId)) {
+      setTimeout(() => {
+        try {
+          onRobots(StorageService.getRobots());
+        } catch (e) {
+          console.warn('Guest robots emission notice:', e);
+        }
+      }, 0);
+      return () => {};
+    }
     const colRef = FirebaseService.getTargetCol('robots', userId);
     return onSnapshot(colRef, snap => {
       const robots: Robot[] = [];
       snap.forEach(d => robots.push(d.data() as Robot));
       onRobots(robots);
-    }, (err) => console.warn('Robots snapshot error:', err));
+    }, (err) => console.warn('Robots snapshot notice:', err));
   },
 
   saveRobots: async (robots: Robot[], userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const batch = writeBatch(db);
       robots.forEach(r => {
         const ref = FirebaseService.getTargetDoc('robots', r.id, userId);
-        batch.set(ref, r, { merge: true });
+        batch.set(ref, cleanForFirestore(r), { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -369,20 +412,31 @@ export const FirebaseService = {
 
   // Sprints sync directly with Firestore
   subscribeSprints: (onSprints: (sprints: Sprint[]) => void, userId?: string) => {
+    if (isGuestUserId(userId)) {
+      setTimeout(() => {
+        try {
+          onSprints(StorageService.getSprints());
+        } catch (e) {
+          console.warn('Guest sprints emission notice:', e);
+        }
+      }, 0);
+      return () => {};
+    }
     const colRef = FirebaseService.getTargetCol('sprints', userId);
     return onSnapshot(colRef, snap => {
       const sprints: Sprint[] = [];
       snap.forEach(d => sprints.push(d.data() as Sprint));
       onSprints(sprints);
-    }, (err) => console.warn('Sprints snapshot error:', err));
+    }, (err) => console.warn('Sprints snapshot notice:', err));
   },
 
   saveSprints: async (sprints: Sprint[], userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const batch = writeBatch(db);
       sprints.forEach(s => {
         const ref = FirebaseService.getTargetDoc('sprints', s.id, userId);
-        batch.set(ref, s, { merge: true });
+        batch.set(ref, cleanForFirestore(s), { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -392,15 +446,17 @@ export const FirebaseService = {
 
   // Workflow & Pipeline Settings directly in Firestore
   saveSetting: async (key: string, value: any, userId?: string) => {
+    if (isGuestUserId(userId)) return;
     try {
       const docRef = FirebaseService.getTargetDoc('settings', key, userId);
-      await setDoc(docRef, { value, updatedAt: new Date().toISOString() });
+      await setDoc(docRef, cleanForFirestore({ value, updatedAt: new Date().toISOString() }));
     } catch (e) {
       console.warn(`Error saving setting ${key}:`, e);
     }
   },
 
   getSetting: async <T>(key: string, fallback: T, userId?: string): Promise<T> => {
+    if (isGuestUserId(userId)) return fallback;
     try {
       const docRef = FirebaseService.getTargetDoc('settings', key, userId);
       const snap = await getDoc(docRef);
@@ -415,15 +471,17 @@ export const FirebaseService = {
 
   // Cloud Backups stored directly in Firestore
   saveCloudBackup: async (backupData: any, reason: string, userId?: string) => {
+    if (isGuestUserId(userId)) return null;
     try {
       const backupId = `bkp_${Date.now()}`;
       const docRef = FirebaseService.getTargetDoc('backups', backupId, userId);
-      await setDoc(docRef, {
+      const payload = cleanForFirestore({
         id: backupId,
         timestamp: new Date().toISOString(),
         reason,
-        data: backupData
+        data: cleanForFirestore(backupData)
       });
+      await setDoc(docRef, payload);
       return backupId;
     } catch (e) {
       console.warn('Could not save cloud backup to Firestore:', e);

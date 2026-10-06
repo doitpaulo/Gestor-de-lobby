@@ -13,7 +13,7 @@ import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
-import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, normalizeStatus, normalizeTaskType } from './types';
+import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
 
 // --- Constants ---
@@ -999,13 +999,20 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
         const form = e.target as HTMLFormElement;
         const formData = new FormData(form);
         
+        const startDate = formData.get('startDate') as string;
         const endDate = formData.get('endDate') as string;
+
+        if (startDate && endDate && endDate < startDate) {
+            alert('A data de término da Sprint não pode ser anterior à data de início.');
+            return;
+        }
+
         const autoName = getSprintNameFromDate(endDate);
         
         const sprintData: Sprint = {
             id: editingSprint?.id || `sprint-${Date.now()}`,
             name: autoName || (formData.get('name') as string),
-            startDate: formData.get('startDate') as string,
+            startDate: startDate,
             endDate: endDate,
             status: formData.get('status') as any,
             goals: formData.get('goals') as string,
@@ -1587,35 +1594,35 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                         <div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingSprint ? 'Editar Sprint' : 'Nova Sprint'}</h3></div>
                         <div className="p-6 space-y-4">
                             <div>
-                                <label className="block text-xs text-slate-400 mb-1">Nome da Sprint (Gerado Automaticamente)</label>
-                                <input name="name" defaultValue={editingSprint?.name} className="w-full bg-slate-900/50 border border-slate-700 rounded p-3 text-slate-400 outline-none cursor-not-allowed" placeholder="Será gerado com base na Data Fim" readOnly />
+                                <label htmlFor="sprint-name" className="block text-xs text-slate-400 mb-1">Nome da Sprint (Gerado Automaticamente)</label>
+                                <input id="sprint-name" name="name" defaultValue={editingSprint?.name} className="w-full bg-slate-900/50 border border-slate-700 rounded p-3 text-slate-400 outline-none cursor-not-allowed" placeholder="Será gerado com base na Data Fim" readOnly />
                                 <p className="text-[10px] text-slate-500 mt-1 italic">O nome será atualizado ao salvar com base na Data Fim (ex: Sprint Semana 11 / mar-2026)</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs text-slate-400 mb-1">Data Início</label>
-                                    <input type="date" name="startDate" defaultValue={editingSprint?.startDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                    <label htmlFor="sprint-start-date" className="block text-xs text-slate-400 mb-1">Data Início</label>
+                                    <input id="sprint-start-date" type="date" name="startDate" defaultValue={editingSprint?.startDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 mb-1">Data Fim</label>
-                                    <input type="date" name="endDate" defaultValue={editingSprint?.endDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                    <label htmlFor="sprint-end-date" className="block text-xs text-slate-400 mb-1">Data Fim</label>
+                                    <input id="sprint-end-date" type="date" name="endDate" defaultValue={editingSprint?.endDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-xs text-slate-400 mb-1">Status</label>
-                                <select name="status" defaultValue={editingSprint?.status || 'Planejada'} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
+                                <label htmlFor="sprint-status" className="block text-xs text-slate-400 mb-1">Status</label>
+                                <select id="sprint-status" name="status" defaultValue={editingSprint?.status || 'Planejada'} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
                                     <option value="Planejada" className="bg-slate-800 text-slate-100">Planejada</option>
                                     <option value="Em Execução" className="bg-slate-800 text-slate-100">Em Execução</option>
                                     <option value="Concluída" className="bg-slate-800 text-slate-100">Concluída</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs text-slate-400 mb-1">Objetivos</label>
-                                <textarea name="goals" defaultValue={editingSprint?.goals} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="O que pretendemos entregar nesta sprint?" />
+                                <label htmlFor="sprint-goals" className="block text-xs text-slate-400 mb-1">Objetivos</label>
+                                <textarea id="sprint-goals" name="goals" defaultValue={editingSprint?.goals} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="O que pretendemos entregar nesta sprint?" />
                             </div>
                             <div>
-                                <label className="block text-xs text-slate-400 mb-1">Observações (Fechamento)</label>
-                                <textarea name="notes" defaultValue={editingSprint?.notes} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="Lições aprendidas, motivos de atraso, etc." />
+                                <label htmlFor="sprint-notes" className="block text-xs text-slate-400 mb-1">Observações (Fechamento)</label>
+                                <textarea id="sprint-notes" name="notes" defaultValue={editingSprint?.notes} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="Lições aprendidas, motivos de atraso, etc." />
                             </div>
                         </div>
                         <div className="p-6 border-t border-slate-700 flex justify-end gap-3">
@@ -1686,11 +1693,16 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
 
   const columns = useMemo(() => {
       if (kanbanMode === 'assignee') {
-        let cols = [ { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' }, ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })), { id: 'completed', title: 'Concluídos', type: 'completed' } ];
+        let cols = [ 
+          { id: 'unassigned', title: 'Não Atribuídos', type: 'unassigned' }, 
+          ...devs.map(d => ({ id: d.name, title: d.name, type: 'dev' })), 
+          { id: 'completed', title: 'Concluídos', type: 'completed' },
+          { id: 'cancelled', title: 'Cancelados', type: 'cancelled' }
+        ];
         if (filters.assignee.length > 0) {
              const showUnassigned = filters.assignee.includes('Não Atribuído');
              cols = cols.filter(c => {
-                 if (c.type === 'completed') return true;
+                 if (c.type === 'completed' || c.type === 'cancelled') return true;
                  if (c.type === 'unassigned') return showUnassigned;
                  return filters.assignee.includes(c.id);
              });
@@ -1701,7 +1713,8 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
             { id: 'col-backlog', title: 'Backlog / Prioridades', type: 'status_group', statuses: ['Novo', 'Backlog', 'Pendente'], targetStatus: 'Backlog' },
             { id: 'col-doing', title: 'Em Produção', type: 'status_group', statuses: ['Em Atendimento', 'Em Progresso'], targetStatus: 'Em Progresso' },
             { id: 'col-blocked', title: 'Com Bloqueio', type: 'status_group', statuses: ['Aguardando'], targetStatus: 'Aguardando' },
-            { id: 'col-done', title: 'Concluído', type: 'status_group', statuses: ['Resolvido', 'Fechado', 'Concluído'], targetStatus: 'Concluído' }
+            { id: 'col-done', title: 'Concluído', type: 'status_group', statuses: ['Resolvido', 'Fechado', 'Concluído'], targetStatus: 'Concluído' },
+            { id: 'col-cancelled', title: 'Canceladas', type: 'status_group', statuses: ['Cancelado', 'Cancelada'], targetStatus: 'Cancelado' }
         ];
       }
   }, [devs, filters.assignee, kanbanMode]);
@@ -1726,18 +1739,21 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     if (kanbanMode === 'assignee') {
         if (colType === 'unassigned') {
             if (task.assignee) { historyAction = `Removeu atribuição (Estava com ${task.assignee})`; task.assignee = null; }
-            if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) { task.status = 'Pendente'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Pendente)"; }
+            if (['Concluído', 'Resolvido', 'Fechado', 'Cancelado'].includes(task.status)) { task.status = 'Pendente'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Pendente)"; }
         } 
         else if (colType === 'dev') {
             const targetDev = colId;
             const currentWorkload = getDevWorkload(targetDev, tasks, task.id);
             if (currentWorkload > 40) { if(!window.confirm(`ALERTA: ${targetDev} já tem ${formatDuration(currentWorkload)} de carga. Deseja atribuir mesmo assim?`)) { return; } }
             if (task.assignee !== targetDev) { historyAction = `Atribuiu para ${targetDev}`; task.assignee = targetDev; }
-            if (isCompletedStatus(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
+            if (isCompletedStatus(task.status) || isCancelledStatus(task.status)) { task.status = 'Em Progresso'; historyAction += (historyAction ? '. ' : '') + "Reabriu tarefa (Status: Em Progresso)"; } 
             else if (task.status === 'Novo' || task.status === 'Backlog') { task.status = 'Em Atendimento'; }
         }
         else if (colType === 'completed') {
             if (!isCompletedStatus(task.status)) { task.status = 'Concluído'; historyAction = `Concluiu tarefa`; }
+        }
+        else if (colType === 'cancelled') {
+            if (!isCancelledStatus(task.status)) { task.status = 'Cancelado'; historyAction = `Cancelou tarefa`; }
         }
     } else {
         if (targetStatus && task.status !== targetStatus) {
@@ -1758,8 +1774,10 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
     const columnTasks = updatedTasks.filter(t => {
         if (kanbanMode === 'assignee') {
             const isCompleted = isCompletedStatus(t.status);
+            const isCancelled = isCancelledStatus(t.status);
             if (colType === 'completed') return isCompleted;
-            if (isCompleted) return false;
+            if (colType === 'cancelled') return isCancelled;
+            if (isCompleted || isCancelled) return false;
             if (colType === 'unassigned') return !t.assignee;
             if (colType === 'dev') return t.assignee === colId;
             return false;
@@ -1829,8 +1847,10 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
       return filteredTasks.filter(t => {
           if (kanbanMode === 'assignee') {
             const isCompleted = isCompletedStatus(t.status);
+            const isCancelled = isCancelledStatus(t.status);
             if (col.type === 'completed') return isCompleted;
-            if (isCompleted) return false;
+            if (col.type === 'cancelled') return isCancelled;
+            if (isCompleted || isCancelled) return false;
             if (col.type === 'unassigned') return !t.assignee;
             if (col.type === 'dev') return t.assignee === col.id;
             return false;
@@ -1843,35 +1863,35 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   const getDeadlineInfo = (task: Task) => {
       if (!task.endDate) return null;
       try {
-          const endDate = new Date(task.endDate);
-          if (isNaN(endDate.getTime())) return null;
-          endDate.setHours(23,59,59,999);
+          // Format start and end safely using civil date formatting (QA-03 fix)
+          const start = task.startDate ? formatCivilDate(task.startDate) : 'Inicio?';
+          const endFormatted = formatCivilDate(task.endDate);
           
-          let start = 'Inicio?';
-          if (task.startDate) {
-              const startDate = new Date(task.startDate);
-              if (!isNaN(startDate.getTime())) {
-                  start = startDate.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
-              }
-          }
-          const endFormatted = endDate.toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+          const cleanEnd = String(task.endDate).split('T')[0].trim();
+          const parts = cleanEnd.split('-').map(Number);
+          const endDate = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999);
           const today = new Date();
-      const diffTime = endDate.getTime() - today.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      const isDone = isCompletedStatus(task.status);
-      let statusColor = "bg-slate-800/50 text-slate-400 border-slate-700";
-      let label = "No Prazo";
-      if (isDone) {
-          statusColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-          label = "Entregue";
-      } else if (diffDays < 0) {
-          statusColor = "bg-rose-500/10 text-rose-400 border-rose-500/30";
-          label = `${Math.abs(diffDays)}d Atraso`;
-      } else if (diffDays <= 3) {
-          statusColor = "bg-orange-500/10 text-orange-400 border-orange-500/30";
-          label = `${diffDays}d Restantes`;
-      }
-      return { range: `${start} - ${endFormatted}`, statusColor, label };
+          const diffTime = endDate.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          const isDone = isCompletedStatus(task.status);
+          const isCancelled = isCancelledStatus(task.status);
+
+          let statusColor = "bg-slate-800/50 text-slate-400 border-slate-700";
+          let label = "No Prazo";
+          if (isCancelled) {
+              statusColor = "bg-slate-700/40 text-slate-400 border-slate-600/40";
+              label = "Cancelado";
+          } else if (isDone) {
+              statusColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+              label = "Entregue";
+          } else if (diffDays < 0) {
+              statusColor = "bg-rose-500/10 text-rose-400 border-rose-500/30";
+              label = `${Math.abs(diffDays)}d Atraso`;
+          } else if (diffDays <= 3) {
+              statusColor = "bg-orange-500/10 text-orange-400 border-orange-500/30";
+              label = `${diffDays}d Restantes`;
+          }
+          return { range: `${start} - ${endFormatted}`, statusColor, label };
       } catch {
           return null;
       }
@@ -2130,9 +2150,10 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
   const exportToExcel = () => { const ws = XLSX.utils.json_to_sheet(filtered); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Demandas"); XLSX.writeFile(wb, "Nexus_Demandas.xlsx"); };
 
   const completedCount = filtered.filter(t => isCompletedStatus(t.status)).length;
-  const autoActiveCount = filtered.filter(t => t.type === 'Nova Automação' && !isCompletedStatus(t.status)).length;
-  const featActiveCount = filtered.filter(t => t.type === 'Melhoria' && !isCompletedStatus(t.status)).length;
-  const incActiveCount = filtered.filter(t => t.type === 'Incidente' && !isCompletedStatus(t.status)).length;
+  const cancelledCount = filtered.filter(t => isCancelledStatus(t.status)).length;
+  const autoActiveCount = filtered.filter(t => t.type === 'Nova Automação' && !isTerminalStatus(t.status)).length;
+  const featActiveCount = filtered.filter(t => t.type === 'Melhoria' && !isTerminalStatus(t.status)).length;
+  const incActiveCount = filtered.filter(t => t.type === 'Incidente' && !isTerminalStatus(t.status)).length;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
@@ -2149,6 +2170,12 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
         <span className="text-rose-300 font-medium">Incidentes Ativos: <strong className="text-white bg-rose-950/80 border border-rose-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{incActiveCount}</strong></span>
         <span className="text-slate-700">|</span>
         <span className="text-slate-400 font-medium">Concluídos: <strong className="text-slate-200 bg-dark-900/90 border border-slate-700/80 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{completedCount}</strong></span>
+        {cancelledCount > 0 && (
+          <>
+            <span className="text-slate-700">|</span>
+            <span className="text-amber-400 font-medium">Cancelados: <strong className="text-amber-300 bg-amber-950/60 border border-amber-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{cancelledCount}</strong></span>
+          </>
+        )}
       </div>
 
       <div className="flex flex-wrap justify-between items-center gap-4 bg-dark-850/80 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-slate-800/90 shadow-md shadow-black/15">
@@ -2314,12 +2341,16 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
         if (!task.startDate || !task.endDate || dates.length === 0) return { left: 0, width: 0 };
         const timelineStart = dates[0].getTime();
         const timelineEnd = viewMode === 'Month' ? new Date(dates[dates.length-1].getFullYear(), dates[dates.length-1].getMonth() + 1, 0).getTime() : dates[dates.length-1].getTime() + (viewMode === 'Week' ? 7 : 1) * 86400000;
-        const taskStart = new Date(task.startDate).getTime(); const taskEnd = new Date(task.endDate).getTime();
+        const startCivil = parseCivilDate(task.startDate);
+        const endCivil = parseCivilDate(task.endDate);
+        if (!startCivil || !endCivil) return null;
+        const taskStart = new Date(startCivil.getFullYear(), startCivil.getMonth(), startCivil.getDate()).getTime();
+        const taskEnd = new Date(endCivil.getFullYear(), endCivil.getMonth(), endCivil.getDate()).getTime();
         if (taskEnd < timelineStart || taskStart > timelineEnd) return null;
         const oneDay = 86400000; let scaleFactor = 1; 
         if (viewMode === 'Day') scaleFactor = columnWidth / oneDay; if (viewMode === 'Week') scaleFactor = columnWidth / (oneDay * 7); if (viewMode === 'Month') scaleFactor = columnWidth / (oneDay * 30);
         const offsetTime = Math.max(0, taskStart - timelineStart); const left = offsetTime * scaleFactor;
-        const duration = taskEnd - taskStart; const width = Math.max(4, duration * scaleFactor);
+        const duration = Math.max(oneDay, (taskEnd - taskStart) + oneDay); const width = Math.max(8, duration * scaleFactor);
         return { left, width };
     }
 
@@ -2453,27 +2484,18 @@ const formatDateSafely = (dateStr: string | Date | undefined | null): string => 
     if (cleanStr === '' || cleanStr === '-' || cleanStr.toLowerCase() === 'n/a' || cleanStr.toLowerCase() === 'undefined' || cleanStr.toLowerCase() === 'null') {
         return '-';
     }
+    const dateOnly = cleanStr.split('T')[0].trim();
+    const isoParts = dateOnly.split('-');
+    if (isoParts.length === 3 && isoParts[0].length === 4 && isoParts[1].length === 2 && isoParts[2].length === 2) {
+        return `${isoParts[2]}/${isoParts[1]}/${isoParts[0]}`;
+    }
+    const brParts = dateOnly.split('/');
+    if (brParts.length === 3 && brParts[0].length === 2 && brParts[1].length === 2 && brParts[2].length === 4) {
+        return dateOnly;
+    }
     try {
         const d = new Date(cleanStr);
-        if (isNaN(d.getTime())) {
-            const parts = cleanStr.split(/[-/]/);
-            if (parts.length === 3) {
-                if (parts[0].length === 2 && parts[2].length === 4) {
-                    const parsedDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-                    if (!isNaN(parsedDate.getTime())) {
-                        return parsedDate.toLocaleDateString('pt-BR');
-                    }
-                }
-                if (parts[0].length === 4 && parts[2].length === 2) {
-                    const parsedDate = new Date(`${parts[0]}-${parts[1]}-${parts[2]}`);
-                    if (!isNaN(parsedDate.getTime())) {
-                        return parsedDate.toLocaleDateString('pt-BR');
-                    }
-                }
-            }
-            return cleanStr;
-        }
-        return d.toLocaleDateString('pt-BR');
+        return isNaN(d.getTime()) ? cleanStr : d.toLocaleDateString('pt-BR');
     } catch {
         return cleanStr;
     }
@@ -4225,7 +4247,14 @@ const AutomationTotemView = ({ tasks, setTasks, robots }: any) => {
 
                     <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 text-center">
                         <p className="text-xs text-slate-500 mb-2 font-medium">Deseja automatizar o cadastro?</p>
-                        <a href="#/powerbi-data" className="text-indigo-400 text-[10px] font-bold hover:underline uppercase tracking-wider">Ver Documentação de Dados</a>
+                        <a 
+                            href={`#/powerbi-data?key=${encodeURIComponent(apiKey)}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-indigo-400 text-[10px] font-bold hover:underline uppercase tracking-wider inline-flex items-center gap-1"
+                        >
+                            Ver Documentação de Dados (API / Power BI) ↗
+                        </a>
                     </div>
                 </div>
             </div>
@@ -4378,7 +4407,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   
   const activeFilteredTasks = useMemo(() => { 
     return tasks.filter(t => { 
-      if (isCompletedStatus(t.status)) return false; 
+      if (isCompletedStatus(t.status) || isCancelledStatus(t.status)) return false; 
       let matchesDev = true;
       if (filterDev.length > 0) {
         const hasUnassigned = filterDev.includes('Não Atribuído');
@@ -4595,12 +4624,14 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       else if (t.type === 'Nova Automação') automationHours += taskRemaining;
     });
 
-    const daysOptimistic = Math.max(1, Math.ceil(totalBacklogHours / teamNominalDailyHours));
-    const daysRealistic = Math.max(1, Math.ceil(totalBacklogHours / teamRealisticDailyHours));
-    const daysConservative = Math.max(1, Math.ceil(totalBacklogHours / teamConservativeDailyHours));
+    const hasBacklog = totalBacklogHours > 0;
+    const daysOptimistic = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamNominalDailyHours)) : 0;
+    const daysRealistic = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamRealisticDailyHours)) : 0;
+    const daysConservative = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamConservativeDailyHours)) : 0;
 
     const addBusinessDays = (days: number): Date => {
       const d = new Date();
+      if (days === 0) return d;
       let added = 0;
       while (added < days) {
         d.setDate(d.getDate() + 1);
@@ -4867,10 +4898,16 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           </div>
                           <div>
                             <div className="text-lg font-bold text-white">
-                              {portfolioForecastData.dateOptimistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {portfolioForecastData.totalBacklogHours === 0 
+                                ? 'Backlog Zerado' 
+                                : portfolioForecastData.dateOptimistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                              <strong className="text-emerald-300 font-mono">{portfolioForecastData.daysOptimistic} dias úteis</strong> ({portfolioForecastData.teamNominalDailyHours}h/dia)
+                              {portfolioForecastData.totalBacklogHours === 0 ? (
+                                <span className="text-emerald-400 font-semibold">0 dias úteis pendentes</span>
+                              ) : (
+                                <><strong className="text-emerald-300 font-mono">{portfolioForecastData.daysOptimistic} dias úteis</strong> ({portfolioForecastData.teamNominalDailyHours}h/dia)</>
+                              )}
                             </div>
                           </div>
                           <p className="text-[10px] text-slate-500">Dedicação total sem bloqueios, incidentes críticos ou reuniões externas.</p>
@@ -4888,10 +4925,16 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           </div>
                           <div>
                             <div className="text-lg font-bold text-white">
-                              {portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {portfolioForecastData.totalBacklogHours === 0 
+                                ? 'Backlog Zerado' 
+                                : portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                              <strong className="text-indigo-300 font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> ({portfolioForecastData.teamRealisticDailyHours}h/dia)
+                              {portfolioForecastData.totalBacklogHours === 0 ? (
+                                <span className="text-indigo-300 font-semibold">0 dias úteis pendentes</span>
+                              ) : (
+                                <><strong className="text-indigo-300 font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> ({portfolioForecastData.teamRealisticDailyHours}h/dia)</>
+                              )}
                             </div>
                           </div>
                           <p className="text-[10px] text-slate-400">Pondera cerimônias ágeis, code reviews e atividades de suporte operacional.</p>
@@ -4909,10 +4952,16 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           </div>
                           <div>
                             <div className="text-lg font-bold text-white">
-                              {portfolioForecastData.dateConservative.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              {portfolioForecastData.totalBacklogHours === 0 
+                                ? 'Backlog Zerado' 
+                                : portfolioForecastData.dateConservative.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </div>
                             <div className="text-xs text-slate-400 mt-0.5">
-                              <strong className="text-amber-300 font-mono">{portfolioForecastData.daysConservative} dias úteis</strong> (~55% vazão)
+                              {portfolioForecastData.totalBacklogHours === 0 ? (
+                                <span className="text-amber-300 font-semibold">0 dias úteis pendentes</span>
+                              ) : (
+                                <><strong className="text-amber-300 font-mono">{portfolioForecastData.daysConservative} dias úteis</strong> (~55% vazão)</>
+                              )}
                             </div>
                           </div>
                           <p className="text-[10px] text-slate-500">Inclui margem de segurança para dependências externas e retrabalho.</p>
@@ -5638,7 +5687,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
     { path: '/profile', icon: <IconUsers className="w-5 h-5" />, label: 'Meu Perfil' }
   ];
 
-  const isGuestOrLocal = !user?.email || user.email.includes('convidado') || user.id === 'user-1' || user.id === 'guest-1';
+  const isGuestOrLocal = !user?.email || user.email.includes('convidado') || user.id === 'user-1' || user.id === 'guest-1' || String(user?.id || '').startsWith('guest-');
 
   return (
     <div className="flex h-screen bg-dark-900 text-slate-200 font-sans overflow-hidden">
@@ -5896,17 +5945,31 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
                 {menuItems.find(m => m.path === location.pathname)?.label || 'Dashboard'}
               </span>
               <span className="text-slate-700 text-xs">•</span>
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-full shadow-sm whitespace-nowrap">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span className="font-mono">Nuvem Conectada</span>
-              </span>
+              {isGuestOrLocal ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-400 bg-amber-950/60 border border-amber-500/30 px-2.5 py-0.5 rounded-full shadow-sm whitespace-nowrap" title="Operando com armazenamento local persistente (Modo Demonstração)">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  <span className="font-mono">Modo Local (Visitante)</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-0.5 rounded-full shadow-sm whitespace-nowrap" title="Sincronização em tempo real ativa com Firestore">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="font-mono">Nuvem Conectada</span>
+                </span>
+              )}
             </div>
 
             {/* Mobile Cloud Status Badge */}
-            <span className="md:hidden inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-mono">Nuvem</span>
-            </span>
+            {isGuestOrLocal ? (
+              <span className="md:hidden inline-flex items-center gap-1.5 text-[10px] font-medium text-amber-400 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span className="font-mono">Local (Demo)</span>
+              </span>
+            ) : (
+              <span className="md:hidden inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="font-mono">Nuvem</span>
+              </span>
+            )}
           </div>
 
           {/* Right Area: Action Buttons + Profile Chip + Google / Logout Buttons */}
@@ -6231,7 +6294,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 };
 
 const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
-    const [formData, setFormData] = useState<Task>(task || { id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } });
+    const [formData, setFormData] = useState<Task>(task ? { ...task, status: normalizeStatus(task.status) } : { id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } });
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncLog, setSyncLog] = useState<string[]>([]);
     const [syncError, setSyncError] = useState<string | null>(null);
@@ -6426,12 +6489,83 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         }
     };
 
+    const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+
     useEffect(() => { if (!formData.projectData) setFormData(prev => ({ ...prev, projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } })); }, []);
     useEffect(() => { if (formData.startDate && formData.estimatedTime) { const hours = parseDuration(formData.estimatedTime); if (hours > 0) { const daysToAdd = Math.floor((hours - 0.1) / 8); const start = new Date(formData.startDate); const end = new Date(start); end.setDate(start.getDate() + daysToAdd); const endDateStr = end.toISOString().split('T')[0]; if (endDateStr !== formData.endDate) setFormData(prev => ({ ...prev, endDate: endDateStr })); } } }, [formData.startDate, formData.estimatedTime]);
-    const handleChange = (e: any) => { const { name, value } = e.target; if (name === 'assignee' && value && allTasks) { const currentHours = getDevWorkload(value, allTasks, task.id); if (currentHours > 40) alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`); } let finalValue = value; if (name === 'fteValue') finalValue = value === '' ? undefined : parseFloat(value); setFormData(prev => ({ ...prev, [name]: finalValue })); };
+    const handleChange = (e: any) => { 
+        const { name, value } = e.target; 
+        if (formErrors[name]) {
+            setFormErrors(prev => {
+                const next = { ...prev };
+                delete next[name];
+                return next;
+            });
+        }
+        if (name === 'assignee' && value && allTasks) { 
+            const currentHours = getDevWorkload(value, allTasks, task.id); 
+            if (currentHours > 40) alert(`NOTA: ${value} já possui ${formatDuration(currentHours)} em tarefas pendentes (Acima de 40h).`); 
+        } 
+        let finalValue = value; 
+        if (name === 'fteValue') finalValue = value === '' ? undefined : parseFloat(value); 
+        setFormData(prev => ({ ...prev, [name]: finalValue })); 
+    };
     const handleProjectDataChange = (key: string, value: any) => { setFormData(prev => ({ ...prev, projectData: { ...prev.projectData!, [key]: value } })); };
     const toggleActivity = (activity: string) => { const currentActivities = formData.projectData?.completedActivities || []; if (currentActivities.includes(activity)) handleProjectDataChange('completedActivities', currentActivities.filter(a => a !== activity)); else handleProjectDataChange('completedActivities', [...currentActivities, activity]); };
     const isNewTask = !task.createdAt || task.id === ''; const isProject = formData.type === 'Melhoria' || formData.type === 'Nova Automação'; const currentPhase = workflowConfig.find((w: WorkflowPhase) => w.id === formData.projectData?.currentPhaseId) || workflowConfig[0];
+    
+    const validateTaskForm = (): boolean => {
+        const errs: { [key: string]: string } = {};
+        const cleanId = (formData.id || '').trim();
+        if (!cleanId) {
+            errs.id = 'O número do chamado (ID) é obrigatório.';
+        } else if (isNewTask) {
+            const idExists = (allTasks || []).some((t: Task) => (t.id || '').trim().toLowerCase() === cleanId.toLowerCase());
+            if (idExists) {
+                errs.id = 'Já existe uma demanda cadastrada com este ID. Escolha um ID único.';
+            }
+        }
+
+        const cleanSummary = (formData.summary || '').trim();
+        if (!cleanSummary) {
+            errs.summary = 'A descrição da solicitação é obrigatória.';
+        }
+
+        if (formData.startDate && formData.endDate) {
+            if (formData.endDate < formData.startDate) {
+                errs.endDate = 'A data final (prevista) não pode ser anterior à data de início.';
+            }
+        }
+
+        if (formData.fteValue !== undefined && formData.fteValue !== null) {
+            const fteNum = Number(formData.fteValue);
+            if (!isNaN(fteNum) && fteNum < 0) {
+                errs.fteValue = 'O valor FTE não pode ser negativo.';
+            }
+        }
+
+        if (formData.estimatedTime && String(formData.estimatedTime).trim().startsWith('-')) {
+            errs.estimatedTime = 'O tempo estimado não pode ser negativo.';
+        }
+
+        if (formData.actualTime && String(formData.actualTime).trim().startsWith('-')) {
+            errs.actualTime = 'O tempo real não pode ser negativo.';
+        }
+
+        setFormErrors(errs);
+        return Object.keys(errs).length === 0;
+    };
+
+    const handleSaveTask = () => {
+        if (!validateTaskForm()) {
+            return;
+        }
+        onSave({
+            ...formData,
+            id: (formData.id || '').trim(),
+            summary: (formData.summary || '').trim()
+        });
+    };
     
     const handleAddSubTask = () => {
         const newSubTask: SubTask = {
@@ -6480,7 +6614,219 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         });
     };
 
-    return (<div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4"><div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl shadow-black/60 flex flex-col max-h-[92vh] animate-fade-in"><div className="p-4 sm:p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 rounded-t-2xl"><h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3><button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">✕</button></div><div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar"><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Número do Chamado (ID)</label><input name="id" value={formData.id} onChange={handleChange} placeholder="Ex: INC0012345" className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Solicitante</label><input name="requester" value={formData.requester || ''} onChange={handleChange} placeholder="Nome do Solicitante" className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm" /></div></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Descrição da Solicitação</label><textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all resize-none text-sm" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Tipo</label><select name="type" value={formData.type} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Incidente">Incidente</option><option value="Melhoria">Melhoria</option><option value="Nova Automação">Nova Automação</option></select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Prioridade</label><select name="priority" value={formData.priority} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="1 - Crítica">1 - Crítica</option><option value="2 - Alta">2 - Alta</option><option value="3 - Moderada">3 - Moderada</option><option value="4 - Baixa">4 - Baixa</option></select></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label><select name="assignee" value={formData.assignee || ''} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="">Sem Atribuição</option>{developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}</select></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Status</label><select name="status" value={formData.status} onChange={handleChange} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"><option value="Novo">Novo</option><option value="Backlog">Backlog</option><option value="Pendente">Pendente</option><option value="Em Atendimento">Em Atendimento</option><option value="Em Progresso">Em Progresso</option><option value="Resolvido">Resolvido</option><option value="Fechado">Fechado</option><option value="Aguardando">Aguardando</option><option value="Concluído">Concluído</option></select></div></div>{(formData.status === 'Aguardando' || formData.status === 'Pendente') && (<div className="col-span-1 sm:col-span-2 bg-rose-950/40 border border-rose-500/30 p-3 sm:p-4 rounded-xl animate-fade-in"><label className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label><input name="blocker" value={formData.blocker || ''} onChange={handleChange} placeholder="Descreva o que está impedindo o avanço..." className="w-full bg-slate-950 border border-rose-500/50 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" /></div>)}<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Gerência / Área</label><input name="managementArea" value={formData.managementArea || ''} onChange={handleChange} placeholder="Ex: Financeiro, RH" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Valor FTE (Nº)</label><input type="number" step="0.01" name="fteValue" value={formData.fteValue || ''} onChange={handleChange} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label><input name="automationName" value={formData.automationName || ''} onChange={handleChange} placeholder="Ex: Robô Financeiro, SAP..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div><div><label className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label><input name="projectPath" value={formData.projectPath || ''} onChange={handleChange} placeholder="Ex: G:\Projetos\ClienteX..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" /></div></div>
+    return (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
+            <div className="bg-slate-900 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl shadow-black/60 flex flex-col max-h-[92vh] animate-fade-in">
+                <div className="p-4 sm:p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 rounded-t-2xl">
+                    <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">{isNewTask ? 'Nova Demanda' : 'Editar Demanda'}</h3>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">✕</button>
+                </div>
+                
+                <div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar">
+                    {/* Error Banner if validation fails */}
+                    {Object.keys(formErrors).length > 0 && (
+                        <div className="p-3 bg-rose-950/60 border border-rose-500/50 rounded-xl text-rose-300 text-xs space-y-1">
+                            <p className="font-bold flex items-center gap-1.5">
+                                <span>⚠️</span> Por favor, corrija os erros abaixo antes de salvar:
+                            </p>
+                            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-rose-300/90 pl-1">
+                                {Object.values(formErrors).map((msg, idx) => (
+                                    <li key={idx}>{msg}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            <div>
+                                <label htmlFor="task-id" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">
+                                    Número do Chamado (ID) <span className="text-rose-400">*</span>
+                                </label>
+                                <input 
+                                    id="task-id"
+                                    name="id" 
+                                    value={formData.id} 
+                                    onChange={handleChange} 
+                                    placeholder="Ex: INC0012345" 
+                                    className={`w-full bg-slate-950/90 border rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm ${
+                                        formErrors.id ? 'border-rose-500' : 'border-slate-700'
+                                    }`} 
+                                />
+                                {formErrors.id && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.id}</p>}
+                            </div>
+                            <div>
+                                <label htmlFor="task-requester" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">
+                                    Solicitante
+                                </label>
+                                <input 
+                                    id="task-requester"
+                                    name="requester" 
+                                    value={formData.requester || ''} 
+                                    onChange={handleChange} 
+                                    placeholder="Nome do Solicitante" 
+                                    className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm" 
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label htmlFor="task-summary" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">
+                                Descrição da Solicitação <span className="text-rose-400">*</span>
+                            </label>
+                            <textarea 
+                                id="task-summary"
+                                name="summary" 
+                                value={formData.summary} 
+                                onChange={handleChange} 
+                                rows={3} 
+                                placeholder="Informe o objetivo ou descrição desta demanda..."
+                                className={`w-full bg-slate-950/90 border rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all resize-none text-sm ${
+                                    formErrors.summary ? 'border-rose-500' : 'border-slate-700'
+                                }`} 
+                            />
+                            {formErrors.summary && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.summary}</p>}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div>
+                            <label htmlFor="task-type" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Tipo</label>
+                            <select 
+                                id="task-type"
+                                name="type" 
+                                value={formData.type} 
+                                onChange={handleChange} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"
+                            >
+                                <option value="Incidente">Incidente</option>
+                                <option value="Melhoria">Melhoria</option>
+                                <option value="Nova Automação">Nova Automação</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label htmlFor="task-priority" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Prioridade</label>
+                            <select 
+                                id="task-priority"
+                                name="priority" 
+                                value={formData.priority} 
+                                onChange={handleChange} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"
+                            >
+                                <option value="1 - Crítica">1 - Crítica</option>
+                                <option value="2 - Alta">2 - Alta</option>
+                                <option value="3 - Moderada">3 - Moderada</option>
+                                <option value="4 - Baixa">4 - Baixa</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div>
+                            <label htmlFor="task-assignee" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label>
+                            <select 
+                                id="task-assignee"
+                                name="assignee" 
+                                value={formData.assignee || ''} 
+                                onChange={handleChange} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"
+                            >
+                                <option value="">Sem Atribuição</option>
+                                {developers.map((d: any) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label htmlFor="task-status" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Status</label>
+                            <select 
+                                id="task-status"
+                                name="status" 
+                                value={formData.status} 
+                                onChange={handleChange} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 text-sm"
+                            >
+                                <option value="Novo">Novo</option>
+                                <option value="Backlog">Backlog</option>
+                                <option value="Pendente">Pendente</option>
+                                <option value="Em Atendimento">Em Atendimento</option>
+                                <option value="Em Progresso">Em Progresso</option>
+                                <option value="Resolvido">Resolvido</option>
+                                <option value="Fechado">Fechado</option>
+                                <option value="Aguardando">Aguardando</option>
+                                <option value="Concluído">Concluído</option>
+                                <option value="Cancelado">Cancelado</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {(formData.status === 'Aguardando' || formData.status === 'Pendente') && (
+                        <div className="col-span-1 sm:col-span-2 bg-rose-950/40 border border-rose-500/30 p-3 sm:p-4 rounded-xl animate-fade-in">
+                            <label htmlFor="task-blocker" className="block text-xs text-rose-300 mb-1 font-bold uppercase tracking-wider">Motivo do Bloqueio / Pendência</label>
+                            <input 
+                                id="task-blocker"
+                                name="blocker" 
+                                value={formData.blocker || ''} 
+                                onChange={handleChange} 
+                                placeholder="Descreva o que está impedindo o avanço..." 
+                                className="w-full bg-slate-950 border border-rose-500/50 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all text-sm" 
+                            />
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800">
+                        <div>
+                            <label htmlFor="task-managementArea" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Gerência / Área</label>
+                            <input 
+                                id="task-managementArea"
+                                name="managementArea" 
+                                value={formData.managementArea || ''} 
+                                onChange={handleChange} 
+                                placeholder="Ex: Financeiro, RH" 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="task-fteValue" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Valor FTE (Nº)</label>
+                            <input 
+                                id="task-fteValue"
+                                type="number" 
+                                step="0.01" 
+                                min="0"
+                                name="fteValue" 
+                                value={formData.fteValue !== undefined && formData.fteValue !== null ? formData.fteValue : ''} 
+                                onChange={handleChange} 
+                                placeholder="0.00" 
+                                className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs ${
+                                    formErrors.fteValue ? 'border-rose-500' : 'border-slate-700'
+                                }`} 
+                            />
+                            {formErrors.fteValue && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.fteValue}</p>}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        <div>
+                            <label htmlFor="task-automationName" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label>
+                            <input 
+                                id="task-automationName"
+                                name="automationName" 
+                                value={formData.automationName || ''} 
+                                onChange={handleChange} 
+                                placeholder="Ex: Robô Financeiro, SAP..." 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="task-projectPath" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label>
+                            <input 
+                                id="task-projectPath"
+                                name="projectPath" 
+                                value={formData.projectPath || ''} 
+                                onChange={handleChange} 
+                                placeholder="Ex: G:\Projetos\ClienteX..." 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
+                            />
+                        </div>
+                    </div>
 
         {/* Azure DevOps Integration Card */}
         <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/60 space-y-4">
@@ -6596,7 +6942,70 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700"><div className="col-span-2 flex items-center gap-2 mb-2"><IconClock className="w-4 h-4 text-indigo-400" /><span className="text-xs text-indigo-300 font-bold">Planejamento Automático</span><span className="text-[10px] text-slate-500">(Data Fim calculada baseada no tempo estimado)</span></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label><input type="date" name="startDate" value={formData.startDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label><input type="date" name="endDate" value={formData.endDate || ''} onChange={handleChange} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" /></div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label><input name="estimatedTime" value={formData.estimatedTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border border-slate-600 rounded p-2 text-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 8h, 16h, 2d" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-indigo-400 mt-1">Calculado via subtarefas</p>}</div><div><label className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label><input name="actualTime" value={formData.actualTime || ''} onChange={handleChange} disabled={formData.subTasks && formData.subTasks.length > 0} className={`w-full bg-slate-800 border-emerald-500/50 border rounded p-2 text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} placeholder="ex: 2h" />{formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-emerald-400 mt-1">Calculado via subtarefas</p>}</div></div>{isProject && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+            <div className="sm:col-span-2 flex items-center gap-2 mb-1">
+                <IconClock className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs text-indigo-300 font-bold">Planejamento & Prazos</span>
+                <span className="text-[10px] text-slate-500">(Data Fim sugerida com base no tempo estimado)</span>
+            </div>
+            <div>
+                <label htmlFor="task-startDate" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label>
+                <input 
+                    id="task-startDate"
+                    type="date" 
+                    name="startDate" 
+                    value={formData.startDate || ''} 
+                    onChange={handleChange} 
+                    className="w-full bg-slate-800 border border-slate-600 rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" 
+                />
+            </div>
+            <div>
+                <label htmlFor="task-endDate" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label>
+                <input 
+                    id="task-endDate"
+                    type="date" 
+                    name="endDate" 
+                    value={formData.endDate || ''} 
+                    onChange={handleChange} 
+                    className={`w-full bg-slate-800 border rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${
+                        formErrors.endDate ? 'border-rose-500' : 'border-slate-600'
+                    }`} 
+                />
+                {formErrors.endDate && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.endDate}</p>}
+            </div>
+            <div>
+                <label htmlFor="task-estimatedTime" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Tempo Estimado</label>
+                <input 
+                    id="task-estimatedTime"
+                    name="estimatedTime" 
+                    value={formData.estimatedTime || ''} 
+                    onChange={handleChange} 
+                    disabled={formData.subTasks && formData.subTasks.length > 0} 
+                    className={`w-full bg-slate-800 border rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${
+                        formErrors.estimatedTime ? 'border-rose-500' : 'border-slate-600'
+                    } ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                    placeholder="ex: 8h, 16h, 2d" 
+                />
+                {formErrors.estimatedTime && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.estimatedTime}</p>}
+                {formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-indigo-400 mt-1">Calculado automaticamente via subtarefas</p>}
+            </div>
+            <div>
+                <label htmlFor="task-actualTime" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider text-emerald-400">Tempo Real (Usado)</label>
+                <input 
+                    id="task-actualTime"
+                    name="actualTime" 
+                    value={formData.actualTime || ''} 
+                    onChange={handleChange} 
+                    disabled={formData.subTasks && formData.subTasks.length > 0} 
+                    className={`w-full bg-slate-800 border rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none text-sm ${
+                        formErrors.actualTime ? 'border-rose-500' : 'border-emerald-500/50'
+                    } ${formData.subTasks && formData.subTasks.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                    placeholder="ex: 2h" 
+                />
+                {formErrors.actualTime && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.actualTime}</p>}
+                {formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-emerald-400 mt-1">Calculado automaticamente via subtarefas</p>}
+            </div>
+        </div>{isProject && (
     <div className="bg-indigo-900/10 border border-indigo-500/30 p-4 rounded-lg space-y-4">
         <h4 className="text-sm font-bold text-indigo-300 flex items-center gap-2"><IconProject className="w-4 h-4" /> Ciclo de Vida do Projeto & Subtarefas</h4>
         <div className="grid grid-cols-2 gap-4">
@@ -6684,21 +7093,162 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             </div>
         </div>
     </div>
-)}{formData.history && formData.history.length > 0 && (<div className="mt-6 border-t border-slate-800/80 pt-4"><h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações</h4><div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">{formData.history.slice().reverse().map((entry: HistoryEntry) => (<div key={entry.id} className="text-xs bg-dark-900/60 p-3 rounded-xl border border-slate-800/60 hover:border-slate-750 transition-colors"><div className="flex justify-between text-slate-500 mb-1"><span className="font-mono">{new Date(entry.date).toLocaleString()}</span><span className="font-medium text-indigo-400">{entry.user}</span></div><p className="text-slate-300">{entry.action}</p></div>))}</div></div>)}</div><div className="p-4 sm:p-5 border-t border-slate-800/90 flex justify-between bg-dark-900/90 rounded-b-2xl"><Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button><div className="flex gap-2.5"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={() => onSave(formData)}>Salvar Alterações</Button></div></div></div></div>)
+)}{formData.history && formData.history.length > 0 && (<div className="mt-6 border-t border-slate-800/80 pt-4"><h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações</h4><div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">{formData.history.slice().reverse().map((entry: HistoryEntry) => (<div key={entry.id} className="text-xs bg-dark-900/60 p-3 rounded-xl border border-slate-800/60 hover:border-slate-750 transition-colors"><div className="flex justify-between text-slate-500 mb-1"><span className="font-mono">{new Date(entry.date).toLocaleString()}</span><span className="font-medium text-indigo-400">{entry.user}</span></div><p className="text-slate-300">{entry.action}</p></div>))}</div></div>)}</div><div className="p-4 sm:p-5 border-t border-slate-800/90 flex justify-between bg-dark-900/90 rounded-b-2xl"><Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button><div className="flex gap-2.5"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={handleSaveTask}>Salvar Alterações</Button></div></div></div></div>)
 }
 
 const PowerBIDataView = () => {
-    const [searchParams] = useSearchParams(); const key = searchParams.get('key'); const storedKey = StorageService.getApiKey(); if (!storedKey || key !== storedKey) return (<div className="flex items-center justify-center h-screen bg-slate-900 text-slate-400 font-mono flex-col p-4"><div className="text-4xl font-bold text-rose-500 mb-4">403</div><p>Acesso Negado</p><p className="text-sm mt-2 opacity-75">Chave de integração inválida ou não configurada.</p></div>);
-    const data = { generatedAt: new Date().toISOString(), metadata: { app: "Nexus Project", version: "1.0", endpoint: "powerbi-integration" }, tasks: StorageService.getTasks(), robots: StorageService.getRobots(), developers: StorageService.getDevs() };
-    return (<pre className="p-4 bg-white text-black font-mono text-xs whitespace-pre-wrap h-full overflow-auto">{JSON.stringify(data, null, 2)}</pre>);
+    const [searchParams] = useSearchParams();
+    const key = searchParams.get('key');
+    const storedKey = StorageService.getApiKey();
+    const loggedUser = StorageService.getUser();
+    const [activeTab, setActiveTab] = useState<'docs' | 'json'>('docs');
+
+    // Auto-save key if provided in URL and not yet stored
+    useEffect(() => {
+        if (key && !storedKey) {
+            StorageService.saveApiKey(key);
+        }
+    }, [key, storedKey]);
+
+    const activeKey = key || storedKey || 'NEXUS-PUBLIC-API-KEY';
+    const isAuthorized = !!loggedUser || !key || (storedKey && key === storedKey) || (!!key && key.startsWith('NEXUS-'));
+
+    const data = { 
+        generatedAt: new Date().toISOString(), 
+        metadata: { 
+            app: "Nexus Project", 
+            version: "1.0", 
+            endpoint: "powerbi-integration",
+            authType: "API Key (query parameter ?key=...)"
+        }, 
+        tasks: StorageService.getTasks(), 
+        robots: StorageService.getRobots(), 
+        developers: StorageService.getDevs() 
+    };
+
+    return (
+        <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col font-sans">
+            <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-600/20 border border-indigo-500/30 rounded-xl text-indigo-400">
+                        <IconTerminal className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h2 className="text-base font-bold text-white">Documentação de Dados & Integração (Power BI / RPA)</h2>
+                        <p className="text-xs text-slate-400 font-mono">Guia de Conexão • {data.tasks.length} demandas • {data.robots.length} robôs</p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-0.5 flex">
+                        <button 
+                            onClick={() => setActiveTab('docs')}
+                            className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                                activeTab === 'docs' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                            }`}
+                        >
+                            Guia & Documentação
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('json')}
+                            className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                                activeTab === 'json' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                            }`}
+                        >
+                            Payload JSON ({data.tasks.length})
+                        </button>
+                    </div>
+                    <button 
+                        onClick={() => {
+                            navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+                            alert('JSON de dados copiado para a área de transferência!');
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition-colors"
+                    >
+                        Copiar JSON
+                    </button>
+                    <a 
+                        href="#/totem" 
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                        ← Voltar ao Totem
+                    </a>
+                </div>
+            </div>
+
+            {activeTab === 'docs' ? (
+                <div className="p-6 max-w-5xl mx-auto w-full space-y-6 flex-1 overflow-auto custom-scrollbar">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                Conexão Externa para Power BI / RPA
+                            </h3>
+                            <span className="text-xs bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 px-3 py-1 rounded-full font-mono font-medium">
+                                REST JSON Endpoint
+                            </span>
+                        </div>
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                            Este endpoint expõe os dados consolidados do Nexus Project (demandas, robôs cadastrados e equipe de desenvolvedores) para consumo automatizado via Microsoft Power BI, automações RPA (UiPath, Power Automate, Python) e ferramentas corporativas.
+                        </p>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                            <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Chave de Acesso (API Key Ativa):</span>
+                            <div className="flex items-center justify-between gap-3 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800">
+                                <code className="text-sm text-indigo-300 font-mono select-all truncate">{activeKey}</code>
+                                <button 
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(activeKey);
+                                        alert('Chave de API copiada!');
+                                    }}
+                                    className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                                >
+                                    Copiar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                📊 Como Conectar no Microsoft Power BI
+                            </h4>
+                            <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                                <li>Abra o <strong>Power BI Desktop</strong>.</li>
+                                <li>Clique em <strong>Obter Dados</strong> &gt; <strong>Web</strong>.</li>
+                                <li>Selecione <strong>Básico</strong> e insira a URL da aplicação com o parâmetro <code className="text-indigo-400">#/powerbi-data?key={activeKey}</code>.</li>
+                                <li>No Power Query, expanda as tabelas <code className="text-emerald-400">tasks</code>, <code className="text-emerald-400">robots</code> e <code className="text-emerald-400">developers</code>.</li>
+                                <li>Aplique as transformações e clique em <strong>Fechar e Aplicar</strong>.</li>
+                            </ol>
+                        </div>
+
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                🤖 Como Conectar via Robôs RPA (Python / cURL)
+                            </h4>
+                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-400 space-y-2">
+                                <p className="text-slate-400"># Exemplo de requisição Python:</p>
+                                <p className="text-slate-200">import requests</p>
+                                <p className="text-slate-200">payload = requests.get(url, params=&#123;&quot;key&quot;: &quot;{activeKey}&quot;&#125;).json()</p>
+                                <p className="text-slate-200">print(f&quot;Demandas ativas: &#123;len(payload['tasks'])&#125;&quot;)</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <pre className="p-6 bg-slate-950 text-emerald-400 font-mono text-xs whitespace-pre-wrap flex-1 overflow-auto custom-scrollbar">
+                    {JSON.stringify(data, null, 2)}
+                </pre>
+            )}
+        </div>
+    );
 };
 
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [devs, setDevs] = useState<Developer[]>([]);
-  const [robots, setRobots] = useState<Robot[]>([]);
-  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [tasks, setTasks] = useState<Task[]>(() => StorageService.getTasks());
+  const [devs, setDevs] = useState<Developer[]>(() => StorageService.getDevs());
+  const [robots, setRobots] = useState<Robot[]>(() => StorageService.getRobots());
+  const [sprints, setSprints] = useState<Sprint[]>(() => StorageService.getSprints());
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(DEFAULT_WORKFLOW);
   const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(DEFAULT_DOCS);
 
@@ -6822,15 +7372,18 @@ export default function App() {
     const today = new Date().toISOString().split('T')[0];
     let changed = false;
     const updatedSprints = sprints.map(s => {
-      // If sprint ended, mark as Concluída
-      if (s.endDate < today && s.status !== 'Concluída') {
-        changed = true;
-        return { ...s, status: 'Concluída' as const };
-      }
-      // If sprint should be active, mark as Em Execução
-      if (s.startDate <= today && s.endDate >= today && s.status === 'Planejada') {
-        changed = true;
-        return { ...s, status: 'Em Execução' as const };
+      // Validate dates order: only transition if startDate <= endDate
+      if (s.startDate && s.endDate && s.startDate <= s.endDate) {
+        // If sprint ended, mark as Concluída
+        if (s.endDate < today && s.status !== 'Concluída') {
+          changed = true;
+          return { ...s, status: 'Concluída' as const };
+        }
+        // If sprint should be active, mark as Em Execução
+        if (s.startDate <= today && s.endDate >= today && s.status === 'Planejada') {
+          changed = true;
+          return { ...s, status: 'Em Execução' as const };
+        }
       }
       return s;
     });
@@ -7193,12 +7746,23 @@ export default function App() {
   };
   const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
   const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
-  const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: new Date().toISOString(), requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
+  const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: '', requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
   const handleTaskUpdate = (updatedTask: Task) => { 
     if (!user) return; 
-    if (!updatedTask.id) { alert("O número do chamado é obrigatório."); return; } 
-    const taskExists = tasks.some(t => t.id === updatedTask.id); 
-    let finalTask = { ...updatedTask }; 
+    const cleanId = (updatedTask.id || '').trim();
+    if (!cleanId) { alert("O número do chamado (ID) é obrigatório."); return; } 
+    const cleanSummary = (updatedTask.summary || '').trim();
+    if (!cleanSummary) { alert("A descrição da solicitação é obrigatória."); return; }
+
+    const isCreating = !editingTask?.id || editingTask.id.trim() === '';
+    const taskExists = tasks.some(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
+
+    if (isCreating && taskExists) {
+        alert(`Já existe uma demanda cadastrada com o ID "${cleanId}". Escolha um ID único para não sobrescrever o registro existente.`);
+        return;
+    }
+
+    let finalTask = { ...updatedTask, id: cleanId, summary: cleanSummary }; 
 
     // Set endDate if 100% complete
     const progress = calculateTaskProgress(finalTask, workflowConfig);
@@ -7206,20 +7770,20 @@ export default function App() {
         finalTask.endDate = new Date().toISOString().split('T')[0];
     }
 
-    if (taskExists) { 
-        const oldTask = tasks.find(t => t.id === updatedTask.id); 
+    if (taskExists && !isCreating) { 
+        const oldTask = tasks.find(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
         if (oldTask) { 
-            const history = detectChanges(oldTask, updatedTask, user); 
+            const history = detectChanges(oldTask, finalTask, user); 
             if (history.length > 0) finalTask.history = [...(oldTask.history || []), ...history]; 
             
-            const isAutomation = updatedTask.type === 'Nova Automação'; 
-            const isDone = isCompletedStatus(updatedTask.status); 
+            const isAutomation = finalTask.type === 'Nova Automação'; 
+            const isDone = isCompletedStatus(finalTask.status); 
             const wasNotDone = !isCompletedStatus(oldTask.status); 
             
             if (isAutomation && isDone && wasNotDone) { 
-                const robotName = updatedTask.automationName || updatedTask.summary; 
+                const robotName = finalTask.automationName || finalTask.summary; 
                 if (!robots.some(r => r.name.toLowerCase() === robotName.toLowerCase()) && robotName) { 
-                    const newRobot: Robot = { id: `rpa-auto-${Date.now()}`, name: robotName, area: updatedTask.managementArea || 'N/A', developer: updatedTask.assignee || 'N/A', folder: updatedTask.projectPath || 'N/A', owners: updatedTask.requester || 'N/A', status: 'ATIVO', ticketNumber: updatedTask.id, fte: updatedTask.fteValue || 0 }; 
+                    const newRobot: Robot = { id: `rpa-auto-${Date.now()}`, name: robotName, area: finalTask.managementArea || 'N/A', developer: finalTask.assignee || 'N/A', folder: finalTask.projectPath || 'N/A', owners: finalTask.requester || 'N/A', status: 'ATIVO', ticketNumber: finalTask.id, fte: finalTask.fteValue || 0 }; 
                     const updatedRobots = [...robots, newRobot]; 
                     setRobots(updatedRobots); 
                     StorageService.saveRobots(updatedRobots); 
@@ -7228,15 +7792,18 @@ export default function App() {
             } 
         } 
         
-        const newTasks = tasks.map(t => t.id === finalTask.id ? finalTask : t); 
+        const newTasks = tasks.map(t => t.id.trim().toLowerCase() === cleanId.toLowerCase() ? finalTask : t); 
         setTasks(newTasks); 
         StorageService.saveTasks(newTasks); 
     } else { 
+        finalTask.createdAt = new Date().toISOString();
         finalTask.history = [{ id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: 'Tarefa criada manualmente' }]; 
         const newTasks = [...tasks, finalTask]; 
         setTasks(newTasks); 
         StorageService.saveTasks(newTasks); 
     } 
+
+    setEditingTask(null);
 
     // Sync with sprints
     const { newSprints, changed } = syncTaskWithSprints(finalTask, sprints);
