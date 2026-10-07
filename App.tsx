@@ -13,7 +13,7 @@ import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
-import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate } from './types';
+import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
 
 // --- Constants ---
@@ -149,25 +149,6 @@ const DEFAULT_WIDGETS: Widget[] = [
     { id: 'w12', type: 'estVsAct', title: 'Estimado vs Realizado (Total)', size: 'half', visible: true, visualStyle: 'bar' },
     { id: 'w13', type: 'portfolioForecast', title: 'Previsão de Conclusão do Portfólio', size: 'full', visible: true },
 ];
-
-// --- Helper: Time Parser ---
-const parseDuration = (durationStr: string | undefined): number => {
-    if (!durationStr) return 0;
-    const str = durationStr.toLowerCase().replace(/\s/g, '');
-    
-    if (str.includes('h') && str.includes('m')) {
-        const parts = str.split('h');
-        const h = parseFloat(parts[0]) || 0;
-        const m = parseFloat(parts[1].replace('m', '')) || 0;
-        return h + (m / 60);
-    }
-
-    if (str.includes('h')) return parseFloat(str.replace('h', '')) || 0;
-    if (str.includes('m')) return (parseFloat(str.replace('m', '')) || 0) / 60;
-    
-    const val = parseFloat(str);
-    return isNaN(val) ? 0 : val;
-};
 
 const calculateTaskProgress = (task: Task, workflowConfig: WorkflowPhase[]): number => {
     if (['Concluído', 'Resolvido', 'Fechado'].includes(task.status)) return 100;
@@ -606,11 +587,15 @@ const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: 
   return (
     <div className={`relative z-30 flex flex-col xl:flex-row gap-3 bg-dark-850/90 backdrop-blur-md p-3.5 rounded-2xl border border-slate-800 shadow-lg shadow-black/20 mb-4 items-start xl:items-center justify-between ${className}`}>
        <div className="flex-1 w-full xl:w-auto relative">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+          <label htmlFor="filter-search-input" className="sr-only">Buscar demandas por ID, resumo ou solicitante</label>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
           <input 
+            id="filter-search-input"
+            name="filter-search"
             type="text" 
+            aria-label="Buscar demandas por ID, resumo ou solicitante"
             placeholder="Buscar (ID, Resumo, Solicitante)..." 
             className="w-full bg-dark-950/80 border border-slate-700/80 hover:border-slate-600 rounded-xl pl-9 pr-3 py-1.5 h-9 text-xs text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all shadow-inner"
             value={filters.search}
@@ -1432,8 +1417,8 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                                 <div className="flex justify-between items-center">
                                                     <span className="text-xs text-slate-500">{s.tasks.length} tarefas</span>
                                                     <div className="flex gap-2">
-                                                        <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} className="text-slate-400 hover:text-white p-1">✏️</button>
-                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} aria-label={`Editar sprint ${s.name}`} title={`Editar sprint ${s.name}`} className="text-slate-400 hover:text-white p-1">✏️</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} aria-label={`Excluir sprint ${s.name}`} title={`Excluir sprint ${s.name}`} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -2230,7 +2215,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
             <table className="w-full text-left text-sm">
             <thead className="bg-dark-950/90 backdrop-blur-md text-slate-400 font-semibold text-xs uppercase tracking-wider sticky top-0 z-10 border-b border-slate-800/80">
               <tr>
-                <th className="p-3.5 w-10 bg-dark-950/90"><input type="checkbox" className="rounded accent-indigo-600 cursor-pointer" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
+                <th className="p-3.5 w-10 bg-dark-950/90"><input id="select-all-tasks" type="checkbox" aria-label="Selecionar todas as demandas filtradas" title="Selecionar todas as demandas filtradas" className="rounded accent-indigo-600 cursor-pointer" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
                 <th className="p-3.5 bg-dark-950/90">ID</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[150px]">Tipo</th>
                 <th className="p-3.5 w-1/3 bg-dark-950/90">Título</th>
@@ -2243,7 +2228,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
             <tbody className="divide-y divide-slate-800/70">
                 {filtered.map(task => (
                 <tr key={task.id} className="hover:bg-dark-800/60 transition-colors group">
-                    <td className="p-3.5"><input type="checkbox" className="rounded accent-indigo-600 cursor-pointer" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
+                    <td className="p-3.5"><input id={`select-task-${task.id}`} type="checkbox" aria-label={`Selecionar demanda ${task.id} - ${task.summary}`} title={`Selecionar demanda ${task.id}`} className="rounded accent-indigo-600 cursor-pointer" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
                     <td className="p-3.5 font-mono text-slate-400 group-hover:text-indigo-300 font-medium text-xs">{task.id}</td>
                     <td className="p-3.5">
                       <select 
@@ -2440,7 +2425,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                   <Button onClick={handleExportExcel} variant="success" className="px-3 py-1 text-xs"><IconDownload className="w-3 h-3" /> Excel</Button>
                   <Button onClick={handleExportPPT} variant="primary" className="px-3 py-1 text-xs"><IconDownload className="w-3 h-3" /> PPT</Button>
                   <div className="w-px h-6 bg-slate-600 mx-2"></div>
-                  <button onClick={() => handleShiftDate(-1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5" /></button><span className="text-sm font-mono text-slate-300 min-w-[100px] text-center">{startDate.toLocaleDateString()}</span><button onClick={() => handleShiftDate(1)} className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5 rotate-180" /></button>
+                  <button onClick={() => handleShiftDate(-1)} aria-label="Voltar período no cronograma" title="Voltar período no cronograma" className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5" /></button><span className="text-sm font-mono text-slate-300 min-w-[100px] text-center">{startDate.toLocaleDateString()}</span><button onClick={() => handleShiftDate(1)} aria-label="Avançar período no cronograma" title="Avançar período no cronograma" className="p-2 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"><IconChevronLeft className="w-5 h-5 rotate-180" /></button>
               </div>
           </div>
           <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
@@ -4578,15 +4563,16 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   }, [tasks, filterDev, filterType]);
 
   const portfolioForecastData = useMemo(() => {
-    const effectiveDevs = devs && devs.length > 0 ? devs : [{ id: 'default', name: 'Equipe', role: 'Dev' }];
-    const teamSize = effectiveDevs.length;
+    const registeredDevCount = (devs || []).length;
+    const hasRegisteredDevs = registeredDevCount > 0;
+    const teamSize = registeredDevCount;
     const hoursPerDayPerDev = 8;
-    const teamNominalDailyHours = teamSize * hoursPerDayPerDev; // e.g. 5 devs * 8h = 40h/dia
-    const teamWeeklyHours = teamNominalDailyHours * 5; // e.g. 200h/semana
+    const teamNominalDailyHours = hasRegisteredDevs ? teamSize * hoursPerDayPerDev : 0;
+    const teamWeeklyHours = teamNominalDailyHours * 5;
     
     // Focus factor: 75% for realistic development throughput (taking meetings, reviews, blockers into account)
-    const teamRealisticDailyHours = Math.max(1, Math.round(teamNominalDailyHours * 0.75));
-    const teamConservativeDailyHours = Math.max(1, Math.round(teamNominalDailyHours * 0.55));
+    const teamRealisticDailyHours = hasRegisteredDevs ? Math.max(1, Math.round(teamNominalDailyHours * 0.75)) : 0;
+    const teamConservativeDailyHours = hasRegisteredDevs ? Math.max(1, Math.round(teamNominalDailyHours * 0.55)) : 0;
 
     let totalBacklogHours = 0;
     let incidentHours = 0;
@@ -4625,9 +4611,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     });
 
     const hasBacklog = totalBacklogHours > 0;
-    const daysOptimistic = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamNominalDailyHours)) : 0;
-    const daysRealistic = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamRealisticDailyHours)) : 0;
-    const daysConservative = hasBacklog ? Math.max(1, Math.ceil(totalBacklogHours / teamConservativeDailyHours)) : 0;
+    const daysOptimistic = hasBacklog && teamNominalDailyHours > 0 ? Math.max(1, Math.ceil(totalBacklogHours / teamNominalDailyHours)) : 0;
+    const daysRealistic = hasBacklog && teamRealisticDailyHours > 0 ? Math.max(1, Math.ceil(totalBacklogHours / teamRealisticDailyHours)) : 0;
+    const daysConservative = hasBacklog && teamConservativeDailyHours > 0 ? Math.max(1, Math.ceil(totalBacklogHours / teamConservativeDailyHours)) : 0;
+    const weeksRealistic = hasBacklog && daysRealistic > 0 ? Math.max(1, Math.ceil(daysRealistic / 5)) : 0;
 
     const addBusinessDays = (days: number): Date => {
       const d = new Date();
@@ -4652,7 +4639,11 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     const autoPct = totalBacklogHours > 0 ? Math.max(0, 100 - incPct - featPct) : 0;
 
     let healthStatus = { label: 'Excelente', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-500/40', dot: 'bg-emerald-400' };
-    if (daysRealistic > 90) {
+    if (!hasBacklog) {
+      healthStatus = { label: 'Backlog Zerado', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-500/40', dot: 'bg-emerald-400' };
+    } else if (!hasRegisteredDevs) {
+      healthStatus = { label: 'Capacidade Não Cadastrada', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-500/40', dot: 'bg-amber-400' };
+    } else if (daysRealistic > 90) {
       healthStatus = { label: 'Sobrecarga Alta', color: 'text-rose-400', bg: 'bg-rose-950/60 border-rose-500/40', dot: 'bg-rose-400' };
     } else if (daysRealistic > 45) {
       healthStatus = { label: 'Atenção ao Prazo', color: 'text-amber-400', bg: 'bg-amber-950/60 border-amber-500/40', dot: 'bg-amber-400' };
@@ -4661,6 +4652,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     }
 
     return {
+      hasRegisteredDevs,
+      registeredDevCount,
       teamSize,
       teamNominalDailyHours,
       teamWeeklyHours,
@@ -4676,11 +4669,12 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       daysOptimistic,
       daysRealistic,
       daysConservative,
+      weeksRealistic,
       dateOptimistic,
       dateRealistic,
       dateConservative,
       healthStatus,
-      avgHoursPerDev: Math.round(totalBacklogHours / teamSize)
+      avgHoursPerDev: teamSize > 0 ? Math.round(totalBacklogHours / teamSize) : 0
     };
   }, [activeFilteredTasks, devs]);
 
@@ -4853,17 +4847,39 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                                 {portfolioForecastData.healthStatus.label}
                               </span>
                             </div>
-                            <div className="flex items-baseline gap-3 flex-wrap">
-                              <h4 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                                {portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                              </h4>
-                              <span className="text-xs text-indigo-300 font-medium capitalize">
-                                ({portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { weekday: 'long' })})
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-400">
-                              Estimado em <strong className="text-white font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> (~{Math.max(1, Math.ceil(portfolioForecastData.daysRealistic / 5))} semanas) considerando <span className="text-indigo-300 font-semibold">75% de foco efetivo</span> da equipe em desenvolvimento.
-                            </p>
+                            {portfolioForecastData.totalBacklogHours === 0 ? (
+                              <div>
+                                <h4 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                                  Backlog Zerado
+                                </h4>
+                                <p className="text-xs text-slate-400 mt-1">
+                                  Estimado em <strong className="text-white font-mono">0 dias úteis</strong> (0 semanas). Não há demandas pendentes para o filtro atual.
+                                </p>
+                              </div>
+                            ) : !portfolioForecastData.hasRegisteredDevs ? (
+                              <div>
+                                <h4 className="text-2xl sm:text-3xl font-extrabold text-amber-300 tracking-tight">
+                                  Capacidade Não Cadastrada
+                                </h4>
+                                <p className="text-xs text-slate-400 mt-1">
+                                  Cadastre desenvolvedores em <strong className="text-white font-mono">Devs</strong> no cabeçalho para calcular a estimativa da equipe.
+                                </p>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="flex items-baseline gap-3 flex-wrap">
+                                  <h4 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                                    {portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                  </h4>
+                                  <span className="text-xs text-indigo-300 font-medium capitalize">
+                                    ({portfolioForecastData.dateRealistic.toLocaleDateString('pt-BR', { weekday: 'long' })})
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">
+                                  Estimado em <strong className="text-white font-mono">{portfolioForecastData.daysRealistic} dias úteis</strong> (~{portfolioForecastData.weeksRealistic} semanas) considerando <span className="text-indigo-300 font-semibold">75% de foco efetivo</span> da equipe em desenvolvimento.
+                                </p>
+                              </div>
+                            )}
                           </div>
 
                           {/* Quick Capacity & Backlog Tag */}
@@ -4872,12 +4888,18 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                               <IconClock className="w-5 h-5" />
                             </div>
                             <div>
-                              <div className="text-[10px] text-slate-400 uppercase font-semibold">Ritmo de Queima</div>
+                              <div className="text-[10px] text-slate-400 uppercase font-semibold">
+                                {portfolioForecastData.hasRegisteredDevs ? 'Ritmo de Queima' : 'Capacidade da Equipe'}
+                              </div>
                               <div className="text-sm font-bold text-white font-mono">
-                                {portfolioForecastData.teamRealisticDailyHours}h / dia útil
+                                {portfolioForecastData.hasRegisteredDevs 
+                                  ? `${portfolioForecastData.teamRealisticDailyHours}h / dia útil` 
+                                  : 'Não Cadastrada'}
                               </div>
                               <div className="text-[10px] text-slate-500">
-                                {portfolioForecastData.teamSize} {portfolioForecastData.teamSize === 1 ? 'dev' : 'devs'} disponíveis
+                                {portfolioForecastData.hasRegisteredDevs
+                                  ? `${portfolioForecastData.teamSize} ${portfolioForecastData.teamSize === 1 ? 'dev disponível' : 'devs disponíveis'}`
+                                  : '0 desenvolvedores cadastrados'}
                               </div>
                             </div>
                           </div>
@@ -6544,12 +6566,22 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             }
         }
 
-        if (formData.estimatedTime && String(formData.estimatedTime).trim().startsWith('-')) {
-            errs.estimatedTime = 'O tempo estimado não pode ser negativo.';
+        if (formData.estimatedTime && String(formData.estimatedTime).trim() !== '') {
+            const rawEst = String(formData.estimatedTime).trim();
+            if (rawEst.startsWith('-')) {
+                errs.estimatedTime = 'O tempo estimado não pode ser negativo.';
+            } else if (!isValidDurationString(rawEst)) {
+                errs.estimatedTime = 'Formato de tempo estimado inválido. Use horas ou dias (ex: 8h, 2d, 1.5h ou 02:30).';
+            }
         }
 
-        if (formData.actualTime && String(formData.actualTime).trim().startsWith('-')) {
-            errs.actualTime = 'O tempo real não pode ser negativo.';
+        if (formData.actualTime && String(formData.actualTime).trim() !== '') {
+            const rawAct = String(formData.actualTime).trim();
+            if (rawAct.startsWith('-')) {
+                errs.actualTime = 'O tempo real não pode ser negativo.';
+            } else if (!isValidDurationString(rawAct)) {
+                errs.actualTime = 'Formato de tempo real inválido. Use horas ou dias (ex: 2h, 4.5h ou 01:30).';
+            }
         }
 
         setFormErrors(errs);
@@ -6879,10 +6911,12 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             ) : formData.type === 'Nova Automação' ? (
                 <div className="space-y-3">
                     <div>
-                        <label className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da Epic (Azure DevOps)</label>
+                        <label htmlFor="task-devopsEpicId" className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da Epic (Azure DevOps)</label>
                         <div className="flex gap-2">
                             <input 
+                                id="task-devopsEpicId"
                                 name="devopsEpicId" 
+                                aria-label="ID da Epic (Azure DevOps)"
                                 value={formData.devopsEpicId || ''} 
                                 onChange={handleChange} 
                                 placeholder="Insira o ID da Epic (ex: 2841)" 
@@ -6903,10 +6937,12 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             ) : (
                 <div className="space-y-3">
                     <div>
-                        <label className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da User Story Parent (Azure DevOps)</label>
+                        <label htmlFor="task-devopsUserStoryId" className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">ID da User Story Parent (Azure DevOps)</label>
                         <div className="flex gap-2">
                             <input 
+                                id="task-devopsUserStoryId"
                                 name="devopsUserStoryId" 
+                                aria-label="ID da User Story Parent (Azure DevOps)"
                                 value={formData.devopsUserStoryId || ''} 
                                 onChange={handleChange} 
                                 placeholder="Insira o ID da User Story (ex: 2950)" 
@@ -7753,6 +7789,16 @@ export default function App() {
     if (!cleanId) { alert("O número do chamado (ID) é obrigatório."); return; } 
     const cleanSummary = (updatedTask.summary || '').trim();
     if (!cleanSummary) { alert("A descrição da solicitação é obrigatória."); return; }
+
+    if (updatedTask.estimatedTime && !isValidDurationString(updatedTask.estimatedTime)) {
+        alert("Formato de tempo estimado inválido. Use horas ou dias (ex: 8h, 2d, 1.5h ou 02:30).");
+        return;
+    }
+
+    if (updatedTask.actualTime && !isValidDurationString(updatedTask.actualTime)) {
+        alert("Formato de tempo real inválido. Use horas ou dias (ex: 2h, 4.5h ou 01:30).");
+        return;
+    }
 
     const isCreating = !editingTask?.id || editingTask.id.trim() === '';
     const taskExists = tasks.some(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 

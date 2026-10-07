@@ -266,30 +266,63 @@ export const parseDuration = (timeStr?: string | number | null): number => {
   if (typeof timeStr === 'number') return Math.max(0, isFinite(timeStr) ? timeStr : 0);
   
   const raw = String(timeStr).trim().toLowerCase();
-  if (!raw) return 0;
+  if (!raw || raw === '0') return 0;
+  if (raw.startsWith('-')) return 0;
+
+  // HH:mm format (e.g. "02:30", "1:45", "08:00")
+  const timeMatch = raw.match(/^(\d{1,3}):([0-5]\d)$/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const mins = parseInt(timeMatch[2], 10);
+    return Math.max(0, hours + (mins / 60));
+  }
 
   // Handle format "16h", "2.5h", "2d", "1w", "30m"
-  if (raw.endsWith('d')) {
-    const days = parseFloat(raw.replace('d', '').trim());
+  if (raw.endsWith('d') || raw.includes('dia')) {
+    const numStr = raw.replace(/[^0-9.]/g, '');
+    const days = parseFloat(numStr);
     return Math.max(0, isFinite(days) ? days * 8 : 0);
   }
-  if (raw.endsWith('w')) {
-    const weeks = parseFloat(raw.replace('w', '').trim());
+  if (raw.endsWith('w') || raw.includes('sem')) {
+    const numStr = raw.replace(/[^0-9.]/g, '');
+    const weeks = parseFloat(numStr);
     return Math.max(0, isFinite(weeks) ? weeks * 40 : 0);
   }
-  if (raw.endsWith('m') && !raw.endsWith('min')) {
-    const mins = parseFloat(raw.replace('m', '').trim());
+  if ((raw.endsWith('m') || raw.includes('min')) && !raw.includes('h')) {
+    const numStr = raw.replace(/[^0-9.]/g, '');
+    const mins = parseFloat(numStr);
     return Math.max(0, isFinite(mins) ? mins / 60 : 0);
   }
-  const numeric = parseFloat(raw.replace(/[hms\s]/g, ''));
+
+  // Pure hours or with "h", "hrs", "horas"
+  const cleanHoursStr = raw.replace(/h(rs|r|oras?)?$/i, '').trim();
+  const numeric = parseFloat(cleanHoursStr);
   return Math.max(0, isFinite(numeric) ? numeric : 0);
 };
 
-export const isValidDurationString = (timeStr?: string | null): boolean => {
-  if (!timeStr || !timeStr.trim()) return true; // optional
-  const clean = timeStr.trim().toLowerCase();
-  // Valid patterns: "8h", "2.5h", "2d", "1w", "4", "4.5"
-  return /^(\d+(\.\d+)?)\s*(h|d|w|m)?$/i.test(clean);
+export const isValidDurationString = (timeStr?: string | number | null): boolean => {
+  if (timeStr === undefined || timeStr === null) return true;
+  if (typeof timeStr === 'number') return isFinite(timeStr) && timeStr >= 0;
+
+  const clean = String(timeStr).trim().toLowerCase();
+  if (!clean || clean === '0') return true; // empty or 0 is allowed
+
+  // Disallow negative values
+  if (clean.startsWith('-')) return false;
+
+  // HH:mm clock format, e.g. "02:30", "1:30", "08:00"
+  if (/^(\d{1,3}):([0-5]\d)$/.test(clean)) {
+    return true;
+  }
+
+  // Explicit duration regex:
+  // Requires numbers (e.g. "8", "8h", "2.5h", "8 hrs", "2d", "1.5 dias", "1w", "30m", "45min")
+  // Rejects arbitrary text like "abc", "10xyz", "test"
+  const match = clean.match(/^(\d+(\.\d+)?)\s*(h|hrs|hr|horas?|d|dias?|w|sem|semanas?|m|min|minutos?)?$/);
+  if (!match) return false;
+
+  const num = parseFloat(match[1]);
+  return isFinite(num) && num >= 0;
 };
 
 export const normalizeStatus = (status?: string | null): string => {

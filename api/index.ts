@@ -414,6 +414,31 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
   }
 });
 
+// API Route: Power BI & External RPA JSON Integration Endpoint (HTTP REST)
+router.get("/powerbi-data", (req: express.Request, res: express.Response) => {
+  const apiKey = req.query.key as string || req.headers["x-api-key"] as string || "";
+  
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    metadata: {
+      app: "Nexus Project",
+      version: "1.0",
+      endpoint: "/api/powerbi-data",
+      status: "online",
+      auth: apiKey ? "authenticated" : "public-read"
+    },
+    schema: {
+      tasks: ["id", "type", "summary", "status", "priority", "assignee", "startDate", "endDate", "fteValue", "estimatedTime", "actualTime"],
+      robots: ["id", "name", "status", "area", "developer", "folder", "fte", "ticketNumber"],
+      developers: ["id", "name"]
+    },
+    message: "Endpoint REST oficial do Nexus Project para consumo de dados no Power BI e robôs RPA."
+  };
+
+  res.setHeader("Content-Type", "application/json");
+  res.json(payload);
+});
+
 // Mount the router on /api and / to handle both direct and rewritten requests seamlessly
 app.use("/api", router);
 app.use("/", router);

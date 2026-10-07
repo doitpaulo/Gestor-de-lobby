@@ -221,7 +221,7 @@ export const FirebaseService = {
   // Migrate legacy top-level tasks to user collection if existing admin
   migrateLegacyDataIfNeeded: async (user: User) => {
     try {
-      if (!user || !user.id) return;
+      if (!user || !user.id || isGuestUserId(user.id) || user.email !== 'pauloo201113@gmail.com') return;
       const userTasksCol = collection(db, 'users', user.id, 'tasks');
       const userSnap = await getDocs(userTasksCol);
       if (userSnap.empty && user.email === 'pauloo201113@gmail.com') {
