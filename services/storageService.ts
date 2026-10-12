@@ -155,6 +155,23 @@ export const StorageService = {
     FirebaseService.saveDevs(devs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
   },
 
+  updateDev: (id: string, newName: string) => {
+    inMemoryDevs = inMemoryDevs.map(d => d.id === id ? { ...d, name: newName } : d);
+    saveLocalCache();
+    BackupService.triggerAutoBackup("Atualização de Desenvolvedor");
+    FirebaseService.saveDevs(inMemoryDevs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
+    return inMemoryDevs;
+  },
+
+  deleteDev: (id: string) => {
+    inMemoryDevs = inMemoryDevs.filter(d => d.id !== id);
+    saveLocalCache();
+    BackupService.triggerAutoBackup("Exclusão de Desenvolvedor");
+    FirebaseService.deleteDev(id, currentUserId || undefined).catch(e => console.warn('Firebase deleteDev error:', e));
+    FirebaseService.saveDevs(inMemoryDevs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
+    return inMemoryDevs;
+  },
+
   // --- Robots ---
   getRobots: (): Robot[] => {
     return inMemoryRobots;

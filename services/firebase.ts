@@ -362,10 +362,30 @@ export const FirebaseService = {
     }, (err) => console.warn('Devs snapshot notice:', err));
   },
 
+  deleteDev: async (devId: string, userId?: string) => {
+    if (isGuestUserId(userId)) return;
+    try {
+      const docRef = FirebaseService.getTargetDoc('devs', devId, userId);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.warn('Error deleting dev from Firestore:', error);
+    }
+  },
+
   saveDevs: async (devs: Developer[], userId?: string) => {
     if (isGuestUserId(userId)) return;
     try {
+      const colRef = FirebaseService.getTargetCol('devs', userId);
+      const existingSnap = await getDocs(colRef);
+      const newDevIds = new Set(devs.map(d => d.id));
+
       const batch = writeBatch(db);
+      // Reconcile: delete documents removed from the devs list
+      existingSnap.forEach(docSnap => {
+        if (!newDevIds.has(docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      });
       devs.forEach(d => {
         const ref = FirebaseService.getTargetDoc('devs', d.id, userId);
         batch.set(ref, cleanForFirestore(d), { merge: true });
@@ -396,10 +416,29 @@ export const FirebaseService = {
     }, (err) => console.warn('Robots snapshot notice:', err));
   },
 
+  deleteRobot: async (robotId: string, userId?: string) => {
+    if (isGuestUserId(userId)) return;
+    try {
+      const docRef = FirebaseService.getTargetDoc('robots', robotId, userId);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.warn('Error deleting robot from Firestore:', error);
+    }
+  },
+
   saveRobots: async (robots: Robot[], userId?: string) => {
     if (isGuestUserId(userId)) return;
     try {
+      const colRef = FirebaseService.getTargetCol('robots', userId);
+      const existingSnap = await getDocs(colRef);
+      const newRobotIds = new Set(robots.map(r => r.id));
+
       const batch = writeBatch(db);
+      existingSnap.forEach(docSnap => {
+        if (!newRobotIds.has(docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      });
       robots.forEach(r => {
         const ref = FirebaseService.getTargetDoc('robots', r.id, userId);
         batch.set(ref, cleanForFirestore(r), { merge: true });
@@ -430,10 +469,29 @@ export const FirebaseService = {
     }, (err) => console.warn('Sprints snapshot notice:', err));
   },
 
+  deleteSprint: async (sprintId: string, userId?: string) => {
+    if (isGuestUserId(userId)) return;
+    try {
+      const docRef = FirebaseService.getTargetDoc('sprints', sprintId, userId);
+      await deleteDoc(docRef);
+    } catch (error) {
+      console.warn('Error deleting sprint from Firestore:', error);
+    }
+  },
+
   saveSprints: async (sprints: Sprint[], userId?: string) => {
     if (isGuestUserId(userId)) return;
     try {
+      const colRef = FirebaseService.getTargetCol('sprints', userId);
+      const existingSnap = await getDocs(colRef);
+      const newSprintIds = new Set(sprints.map(s => s.id));
+
       const batch = writeBatch(db);
+      existingSnap.forEach(docSnap => {
+        if (!newSprintIds.has(docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      });
       sprints.forEach(s => {
         const ref = FirebaseService.getTargetDoc('sprints', s.id, userId);
         batch.set(ref, cleanForFirestore(s), { merge: true });

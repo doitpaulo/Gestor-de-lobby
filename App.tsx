@@ -13,6 +13,7 @@ import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
+import { DeveloperManagementModal } from './components/DeveloperManagementModal';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
 
@@ -5686,7 +5687,7 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
     );
 };
 
-const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCreateTask, onOpenUpload }: any) => {
+const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCreateTask, onOpenUpload, onOpenManageDevs }: any) => {
   const navigate = useNavigate(); 
   const location = useLocation(); 
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -5698,7 +5699,7 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
     { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
     { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
     { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental' }, 
-    { path: '/sprints', icon: <IconSprint className="w-5 h-5" />, label: 'Sprints (CoE)' },
+    { path: '/sprints', icon: <IconSprint className="w-5 h-5" />, label: 'Sprints (CoE)' }, 
     { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, 
     { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, 
     { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
@@ -5747,18 +5748,30 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
           </button>
         </div>
 
-        {/* Mobile Quick Upload Action Button in Drawer */}
-        <div className="p-3 border-b border-slate-800 bg-slate-950/60">
+        {/* Mobile Quick Action Buttons in Drawer */}
+        <div className="p-3 border-b border-slate-800 bg-slate-950/60 space-y-2">
           <button
             onClick={() => {
               if (onOpenUpload) onOpenUpload();
               setIsMobileDrawerOpen(false);
             }}
-            className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95 transition-all"
+            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95 transition-all"
           >
             <IconUpload className="w-4 h-4" />
             <span>Importar Planilha / Backup</span>
           </button>
+          {onOpenManageDevs && (
+            <button
+              onClick={() => {
+                onOpenManageDevs();
+                setIsMobileDrawerOpen(false);
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-dark-800 hover:bg-dark-750 text-indigo-300 border border-indigo-800/60 text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+            >
+              <IconUsers className="w-4 h-4 text-indigo-400" />
+              <span>Gerenciar Desenvolvedores (Equipe)</span>
+            </button>
+          )}
         </div>
 
         {/* Mobile Navigation Links */}
@@ -6315,7 +6328,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     );
 };
 
-const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig }: any) => {
+const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig, onOpenManageDevs }: any) => {
     const [formData, setFormData] = useState<Task>(task ? { ...task, status: normalizeStatus(task.status) } : { id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } });
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncLog, setSyncLog] = useState<string[]>([]);
@@ -6755,7 +6768,19 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         <div>
-                            <label htmlFor="task-assignee" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Desenvolvedor</label>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label htmlFor="task-assignee" className="block text-xs text-slate-400 font-medium uppercase tracking-wider">Desenvolvedor</label>
+                                {onOpenManageDevs && (
+                                    <button
+                                        type="button"
+                                        onClick={onOpenManageDevs}
+                                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                                        title="Gerenciar equipe de desenvolvedores"
+                                    >
+                                        <IconUsers className="w-3 h-3" /> Gerenciar
+                                    </button>
+                                )}
+                            </div>
                             <select 
                                 id="task-assignee"
                                 name="assignee" 
@@ -7512,17 +7537,8 @@ export default function App() {
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
       const cleanDevs = remoteDevs || [];
-      if (cleanDevs.length > 0) {
-        setDevs(cleanDevs);
-        StorageService.setDevsInMemory(cleanDevs);
-      } else {
-        const localDevs = StorageService.getDevs();
-        if (localDevs.length > 0) {
-          FirebaseService.saveDevs(localDevs, user.id).catch(e => console.warn('Sync local devs notice:', e));
-        } else {
-          setDevs([]);
-        }
-      }
+      setDevs(cleanDevs);
+      StorageService.setDevsInMemory(cleanDevs);
     }, user.id);
 
     const unsubRobots = FirebaseService.subscribeRobots((remoteRobots) => {
@@ -7780,8 +7796,103 @@ export default function App() {
       setUploadFeedback({ type: 'error', message: `Erro ao processar ${type}.` }); 
     } 
   };
-  const handleAddDev = (name: string) => { if (name && !devs.find(d => d.name === name)) { const newDevs = [...devs, { id: `dev-${Date.now()}`, name }]; setDevs(newDevs); StorageService.saveDevs(newDevs); } };
-  const handleRemoveDev = (id: string) => { const newDevs = devs.filter(d => d.id !== id); setDevs(newDevs); StorageService.saveDevs(newDevs); };
+  const handleAddDev = (name: string): { success: boolean; message: string } => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) {
+      return { success: false, message: 'O nome do desenvolvedor é obrigatório.' };
+    }
+    const alreadyExists = devs.some(d => d.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (alreadyExists) {
+      return { success: false, message: `Já existe um desenvolvedor cadastrado com o nome "${trimmed}".` };
+    }
+
+    const newDev: Developer = {
+      id: `dev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      name: trimmed
+    };
+    const updatedDevs = [...devs, newDev];
+    setDevs(updatedDevs);
+    StorageService.saveDevs(updatedDevs);
+    if (user?.id) {
+      FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase saveDevs notice:', e));
+    }
+    return { success: true, message: `Desenvolvedor "${trimmed}" cadastrado com sucesso!` };
+  };
+
+  const handleEditDev = (id: string, newName: string): { success: boolean; message: string } => {
+    const trimmed = (newName || '').trim();
+    if (!trimmed) {
+      return { success: false, message: 'O nome do desenvolvedor não pode ficar vazio.' };
+    }
+    const targetDev = devs.find(d => d.id === id);
+    if (!targetDev) {
+      return { success: false, message: 'Desenvolvedor não encontrado.' };
+    }
+    if (targetDev.name.trim() === trimmed) {
+      return { success: true, message: 'Nome mantido sem alterações.' };
+    }
+    const nameConflict = devs.some(d => d.id !== id && d.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (nameConflict) {
+      return { success: false, message: `Já existe outro desenvolvedor com o nome "${trimmed}".` };
+    }
+
+    const oldName = targetDev.name;
+    const updatedDevs = devs.map(d => d.id === id ? { ...d, name: trimmed } : d);
+    setDevs(updatedDevs);
+    StorageService.updateDev(id, trimmed);
+    if (user?.id) {
+      FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase update dev notice:', e));
+    }
+
+    // Cascade update to tasks assigned to this developer
+    const assignedTasks = tasks.filter(t => t.assignee === oldName);
+    if (assignedTasks.length > 0) {
+      const updatedTasks = tasks.map(t => t.assignee === oldName ? { ...t, assignee: trimmed } : t);
+      setTasks(updatedTasks);
+      StorageService.saveTasks(updatedTasks);
+      if (user?.id) {
+        FirebaseService.saveTasksBatch(updatedTasks, user.id).catch(e => console.warn('Cascade dev rename tasks error:', e));
+      }
+      return { 
+        success: true, 
+        message: `Desenvolvedor atualizado para "${trimmed}" com sucesso! (${assignedTasks.length} demanda(s) vinculada(s) atualizada(s)).` 
+      };
+    }
+
+    return { success: true, message: `Nome do desenvolvedor alterado para "${trimmed}" com sucesso!` };
+  };
+
+  const handleDeleteDev = (id: string): { success: boolean; message: string } => {
+    const devToDelete = devs.find(d => d.id === id);
+    if (!devToDelete) {
+      return { success: false, message: 'Desenvolvedor não encontrado.' };
+    }
+
+    const devName = devToDelete.name;
+    const updatedDevs = devs.filter(d => d.id !== id);
+    setDevs(updatedDevs);
+    StorageService.deleteDev(id);
+    if (user?.id) {
+      FirebaseService.deleteDev(id, user.id).catch(e => console.warn('Firebase deleteDev notice:', e));
+      FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase saveDevs after delete notice:', e));
+    }
+
+    // Unassign tasks assigned to the removed developer
+    const affectedTasks = tasks.filter(t => t.assignee === devName);
+    if (affectedTasks.length > 0) {
+      const updatedTasks = tasks.map(t => t.assignee === devName ? { ...t, assignee: null } : t);
+      setTasks(updatedTasks);
+      StorageService.saveTasks(updatedTasks);
+      if (user?.id) {
+        FirebaseService.saveTasksBatch(updatedTasks, user.id).catch(e => console.warn('Unassign tasks on dev delete error:', e));
+      }
+    }
+
+    return { 
+      success: true, 
+      message: `Desenvolvedor "${devName}" excluído com sucesso da equipe.` 
+    };
+  };
   const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: '', requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
   const handleTaskUpdate = (updatedTask: Task) => { 
     if (!user) return; 
@@ -7975,14 +8086,14 @@ export default function App() {
       <Button 
         onClick={() => setIsManageDevsOpen(true)} 
         variant="ghost" 
-        className="hidden sm:inline-flex h-9 px-2.5 text-xs font-medium gap-1.5 text-slate-300 hover:text-white hover:bg-dark-800/80 border border-slate-800/80"
-        title="Gerenciar lista de desenvolvedores"
+        className="h-9 px-2.5 text-xs font-medium gap-1.5 text-slate-300 hover:text-white hover:bg-dark-800/80 border border-slate-800/80"
+        title="Gerenciar lista de desenvolvedores da equipe"
       >
-        <IconUsers className="w-3.5 h-3.5 text-slate-400" /> Devs
+        <IconUsers className="w-3.5 h-3.5 text-indigo-400" /> Devs
       </Button>
     </div>
   );
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)}>{isUploadModalOpen && (
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)} onOpenManageDevs={() => setIsManageDevsOpen(true)}>{isUploadModalOpen && (
   <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
     <div className="bg-slate-900 p-5 sm:p-7 rounded-2xl border border-slate-700 max-w-2xl w-full shadow-2xl shadow-black/60 max-h-[92vh] overflow-y-auto custom-scrollbar">
       <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-3">
@@ -8372,5 +8483,27 @@ export default function App() {
       </div>
     </div>
   </div>
-)}{isManageDevsOpen && (<div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"><div className="bg-dark-850/95 backdrop-blur-2xl p-6 rounded-2xl border border-slate-800 max-w-md w-full shadow-2xl shadow-black/50 animate-fade-in"><h3 className="text-lg font-bold mb-4 text-white">Gerenciar Desenvolvedores</h3><ul className="space-y-2 mb-4 max-h-60 overflow-y-auto custom-scrollbar pr-1">{devs.map(d => (<li key={d.id} className="flex justify-between items-center bg-dark-900/90 p-2.5 rounded-xl border border-slate-800"><span className="text-sm font-medium text-slate-200">{d.name}</span><button onClick={() => handleRemoveDev(d.id)} className="text-rose-400 hover:text-rose-300 p-1 hover:bg-rose-950/40 rounded transition-colors cursor-pointer">✕</button></li>))}</ul><div className="flex gap-2"><input id="newDevInput" type="text" placeholder="Nome do desenvolvedor..." className="flex-1 bg-dark-900/90 border border-slate-700/80 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 transition-all" /><Button onClick={() => { const input = document.getElementById('newDevInput') as HTMLInputElement; handleAddDev(input.value); input.value = ''; }} variant="success" className="px-4 py-2 font-bold">+</Button></div><div className="mt-5 flex justify-end"><Button variant="secondary" onClick={() => setIsManageDevsOpen(false)}>Fechar</Button></div></div></div>)}{editingTask && (<TaskModal task={editingTask} developers={devs} allTasks={tasks} workflowConfig={workflowConfig} onClose={() => setEditingTask(null)} onSave={handleTaskUpdate} onDelete={handleTaskDelete} />)}<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+)}
+<DeveloperManagementModal
+  isOpen={isManageDevsOpen}
+  onClose={() => setIsManageDevsOpen(false)}
+  developers={devs}
+  tasks={tasks}
+  onAddDev={handleAddDev}
+  onEditDev={handleEditDev}
+  onDeleteDev={handleDeleteDev}
+/>
+{editingTask && (
+  <TaskModal 
+    task={editingTask} 
+    developers={devs} 
+    allTasks={tasks} 
+    workflowConfig={workflowConfig} 
+    onClose={() => setEditingTask(null)} 
+    onSave={handleTaskUpdate} 
+    onDelete={handleTaskDelete}
+    onOpenManageDevs={() => setIsManageDevsOpen(true)}
+  />
+)}
+<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
