@@ -146,7 +146,8 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
       return;
     }
 
-    const res = onEditDev(dev.id, trimmed);
+    const targetId = dev.id || dev.name;
+    const res = onEditDev(targetId, trimmed);
     if (res.success) {
       setEditingId(null);
       setEditingName('');
@@ -158,7 +159,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
 
   const handleConfirmDelete = () => {
     if (!deletingDev) return;
-    const devId = deletingDev.id;
+    const devId = deletingDev.id || deletingDev.name;
     const res = onDeleteDev(devId);
     setDeletingDev(null);
     if (res.success) {
@@ -170,7 +171,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
 
   return (
     <div 
-      className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-3 sm:p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[70] p-3 sm:p-4 animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="manage-devs-title"
@@ -327,6 +328,10 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
                         onChange={(e) => setEditingName(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Escape') handleCancelEdit();
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSaveEditSubmit(dev, e);
+                          }
                         }}
                         placeholder="Nome do desenvolvedor"
                         className="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500/50"
@@ -335,6 +340,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
                     <div className="flex items-center justify-end gap-1.5 shrink-0 pt-1 sm:pt-0">
                       <button
                         type="submit"
+                        onClick={(e) => handleSaveEditSubmit(dev, e)}
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm cursor-pointer transition-colors"
                         title="Salvar alteração (Enter)"
                         aria-label={`Salvar alteração do nome de ${dev.name}`}

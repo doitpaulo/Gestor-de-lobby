@@ -357,7 +357,15 @@ export const FirebaseService = {
     const colRef = FirebaseService.getTargetCol('devs', userId);
     return onSnapshot(colRef, snap => {
       const devs: Developer[] = [];
-      snap.forEach(d => devs.push(d.data() as Developer));
+      snap.forEach(d => {
+        const data = d.data() as any;
+        if (data && (data.name || data.id)) {
+          devs.push({
+            id: String(data.id || d.id),
+            name: String(data.name || d.id).trim()
+          });
+        }
+      });
       onDevs(devs);
     }, (err) => console.warn('Devs snapshot notice:', err));
   },
@@ -365,8 +373,28 @@ export const FirebaseService = {
   deleteDev: async (devId: string, userId?: string) => {
     if (isGuestUserId(userId)) return;
     try {
-      const docRef = FirebaseService.getTargetDoc('devs', devId, userId);
-      await deleteDoc(docRef);
+      const colRef = FirebaseService.getTargetCol('devs', userId);
+      const snap = await getDocs(colRef);
+      const batch = writeBatch(db);
+      let foundMatches = 0;
+      const targetClean = String(devId || '').trim().toLowerCase();
+
+      snap.forEach(d => {
+        const data = d.data() as any;
+        const matchesId = d.id === devId || String(data.id || '').trim().toLowerCase() === targetClean;
+        const matchesName = data.name && String(data.name).trim().toLowerCase() === targetClean;
+        if (matchesId || matchesName) {
+          batch.delete(d.ref);
+          foundMatches++;
+        }
+      });
+
+      if (foundMatches > 0) {
+        await batch.commit();
+      } else {
+        const docRef = FirebaseService.getTargetDoc('devs', devId, userId);
+        await deleteDoc(docRef);
+      }
     } catch (error) {
       console.warn('Error deleting dev from Firestore:', error);
     }
@@ -377,18 +405,23 @@ export const FirebaseService = {
     try {
       const colRef = FirebaseService.getTargetCol('devs', userId);
       const existingSnap = await getDocs(colRef);
-      const newDevIds = new Set(devs.map(d => d.id));
+      const newDevIds = new Set(devs.map(d => String(d.id || '').trim().toLowerCase()));
+      const newDevNames = new Set(devs.map(d => String(d.name || '').trim().toLowerCase()));
 
       const batch = writeBatch(db);
       // Reconcile: delete documents removed from the devs list
       existingSnap.forEach(docSnap => {
-        if (!newDevIds.has(docSnap.id)) {
+        const data = docSnap.data() as any;
+        const matchesId = newDevIds.has(docSnap.id.toLowerCase()) || (data.id && newDevIds.has(String(data.id).trim().toLowerCase()));
+        const matchesName = data.name && newDevNames.has(String(data.name).trim().toLowerCase());
+        if (!matchesId && !matchesName) {
           batch.delete(docSnap.ref);
         }
       });
-      devs.forEach(d => {
-        const ref = FirebaseService.getTargetDoc('devs', d.id, userId);
-        batch.set(ref, cleanForFirestore(d), { merge: true });
+      devs.forEach((d, idx) => {
+        const safeId = String(d.id || `dev-${Date.now()}-${idx}`).replace(/\//g, '_').trim();
+        const ref = FirebaseService.getTargetDoc('devs', safeId, userId);
+        batch.set(ref, cleanForFirestore({ id: safeId, name: d.name.trim() }), { merge: true });
       });
       await batch.commit();
     } catch (e) {

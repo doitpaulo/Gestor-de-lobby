@@ -6549,15 +6549,27 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
     const toggleActivity = (activity: string) => { const currentActivities = formData.projectData?.completedActivities || []; if (currentActivities.includes(activity)) handleProjectDataChange('completedActivities', currentActivities.filter(a => a !== activity)); else handleProjectDataChange('completedActivities', [...currentActivities, activity]); };
     const isNewTask = !task.createdAt || task.id === ''; const isProject = formData.type === 'Melhoria' || formData.type === 'Nova Automação'; const currentPhase = workflowConfig.find((w: WorkflowPhase) => w.id === formData.projectData?.currentPhaseId) || workflowConfig[0];
     
+    const duplicateTask = useMemo(() => {
+        const clean = (formData.id || '').trim().toLowerCase();
+        if (!clean) return null;
+        return (allTasks || []).find((t: Task) => 
+            (t.id || '').trim().toLowerCase() === clean &&
+            (isNewTask || (t.id || '').trim().toLowerCase() !== (task.id || '').trim().toLowerCase())
+        );
+    }, [formData.id, allTasks, isNewTask, task?.id]);
+
     const validateTaskForm = (): boolean => {
         const errs: { [key: string]: string } = {};
         const cleanId = (formData.id || '').trim();
         if (!cleanId) {
             errs.id = 'O número do chamado (ID) é obrigatório.';
-        } else if (isNewTask) {
-            const idExists = (allTasks || []).some((t: Task) => (t.id || '').trim().toLowerCase() === cleanId.toLowerCase());
-            if (idExists) {
-                errs.id = 'Já existe uma demanda cadastrada com este ID. Escolha um ID único.';
+        } else {
+            const existing = (allTasks || []).find((t: Task) => 
+                (t.id || '').trim().toLowerCase() === cleanId.toLowerCase() &&
+                (isNewTask || (t.id || '').trim().toLowerCase() !== (task.id || '').trim().toLowerCase())
+            );
+            if (existing) {
+                errs.id = `Número de chamado duplicado: O ID "${cleanId}" já está cadastrado na demanda "${existing.summary}". Por favor, informe um número de chamado único.`;
             }
         }
 
@@ -6602,6 +6614,13 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
     };
 
     const handleSaveTask = () => {
+        if (duplicateTask) {
+            setFormErrors(prev => ({
+                ...prev,
+                id: `Número de chamado repetido: O ID "${(formData.id || '').trim()}" já está cadastrado na demanda "${duplicateTask.summary}". Escolha um ID único para salvar.`
+            }));
+            return;
+        }
         if (!validateTaskForm()) {
             return;
         }
@@ -6685,20 +6704,86 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     <div className="space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                             <div>
-                                <label htmlFor="task-id" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">
-                                    Número do Chamado (ID) <span className="text-rose-400">*</span>
-                                </label>
-                                <input 
-                                    id="task-id"
-                                    name="id" 
-                                    value={formData.id} 
-                                    onChange={handleChange} 
-                                    placeholder="Ex: INC0012345" 
-                                    className={`w-full bg-slate-950/90 border rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-sm ${
-                                        formErrors.id ? 'border-rose-500' : 'border-slate-700'
-                                    }`} 
-                                />
-                                {formErrors.id && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.id}</p>}
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label htmlFor="task-id" className="block text-xs text-slate-400 font-medium uppercase tracking-wider">
+                                        Número do Chamado (ID) <span className="text-rose-400">*</span>
+                                    </label>
+                                    {duplicateTask && (
+                                        <span className="text-[11px] text-rose-400 font-bold flex items-center gap-1 bg-rose-950/70 px-2 py-0.5 rounded-md border border-rose-800/80">
+                                            ⚠️ ID Já Cadastrado
+                                        </span>
+                                    )}
+                                    {!duplicateTask && (formData.id || '').trim().length > 0 && (
+                                        <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1 bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-800/80">
+                                            ✓ ID Disponível
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="relative">
+                                    <input 
+                                        id="task-id"
+                                        name="id" 
+                                        value={formData.id} 
+                                        onChange={handleChange} 
+                                        placeholder="Ex: INC0012345" 
+                                        className={`w-full bg-slate-950/90 border rounded-xl px-3.5 py-2.5 text-white focus:ring-2 outline-none transition-all font-mono text-sm ${
+                                            duplicateTask 
+                                                ? 'border-rose-500 ring-2 ring-rose-500/30 bg-rose-950/20' 
+                                                : formErrors.id 
+                                                ? 'border-rose-500' 
+                                                : (formData.id || '').trim() 
+                                                ? 'border-emerald-500/70 focus:border-emerald-500 focus:ring-emerald-500/30' 
+                                                : 'border-slate-700 focus:ring-indigo-500/40 focus:border-indigo-500'
+                                        }`} 
+                                    />
+                                    {duplicateTask && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-400 text-sm pointer-events-none font-bold">
+                                            ✕
+                                        </div>
+                                    )}
+                                    {!duplicateTask && (formData.id || '').trim().length > 0 && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 text-sm pointer-events-none font-bold">
+                                            ✓
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Persistent, animated notification alert when duplicate ID is detected */}
+                                {duplicateTask && (
+                                    <div className="mt-2 p-3 bg-rose-950/85 border border-rose-500/80 rounded-xl text-rose-200 text-xs shadow-lg shadow-rose-950/40 animate-fade-in flex items-start gap-2.5">
+                                        <span className="text-base text-rose-400 leading-none shrink-0 mt-0.5">⚠️</span>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-bold text-rose-300">
+                                                Número de chamado repetido não permitido!
+                                            </p>
+                                            <p className="text-[11px] text-rose-200/90 mt-1">
+                                                Já existe um chamado cadastrado com o ID <span className="font-mono font-bold text-white bg-rose-900/80 px-1.5 py-0.5 rounded border border-rose-700/60">{(formData.id || '').trim()}</span>:
+                                            </p>
+                                            <div className="mt-1.5 p-2 bg-dark-950/90 rounded-lg border border-rose-900/80 text-[11px] text-white">
+                                                <p className="font-semibold text-rose-200 truncate">"{duplicateTask.summary}"</p>
+                                                <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+                                                    <span>Tipo: <strong className="text-slate-200">{duplicateTask.type}</strong></span>
+                                                    <span>•</span>
+                                                    <span>Status: <strong className="text-slate-200">{duplicateTask.status}</strong></span>
+                                                    {duplicateTask.assignee && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span>Dev: <strong className="text-indigo-300">{duplicateTask.assignee}</strong></span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] text-rose-400 mt-1.5 font-medium">
+                                                Por favor, informe um número de chamado único para prosseguir.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                                {!duplicateTask && formErrors.id && (
+                                    <p className="text-rose-400 text-xs mt-1.5 font-semibold flex items-center gap-1">
+                                        <span>⚠️</span> {formErrors.id}
+                                    </p>
+                                )}
                             </div>
                             <div>
                                 <label htmlFor="task-requester" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">
@@ -7824,30 +7909,43 @@ export default function App() {
     if (!trimmed) {
       return { success: false, message: 'O nome do desenvolvedor não pode ficar vazio.' };
     }
-    const targetDev = devs.find(d => d.id === id);
+    const targetClean = String(id || '').trim().toLowerCase();
+    const targetDev = devs.find(d => 
+      String(d.id || '').trim() === String(id || '').trim() || 
+      d.name.trim().toLowerCase() === targetClean
+    );
     if (!targetDev) {
       return { success: false, message: 'Desenvolvedor não encontrado.' };
     }
     if (targetDev.name.trim() === trimmed) {
       return { success: true, message: 'Nome mantido sem alterações.' };
     }
-    const nameConflict = devs.some(d => d.id !== id && d.name.trim().toLowerCase() === trimmed.toLowerCase());
+    const nameConflict = devs.some(d => 
+      String(d.id || '').trim() !== String(targetDev.id || '').trim() && 
+      d.name.trim().toLowerCase() === trimmed.toLowerCase()
+    );
     if (nameConflict) {
       return { success: false, message: `Já existe outro desenvolvedor com o nome "${trimmed}".` };
     }
 
     const oldName = targetDev.name;
-    const updatedDevs = devs.map(d => d.id === id ? { ...d, name: trimmed } : d);
+    const updatedDevs = devs.map(d => 
+      (String(d.id || '').trim() === String(targetDev.id || '').trim() || d.name.trim().toLowerCase() === oldName.trim().toLowerCase())
+        ? { ...d, name: trimmed } 
+        : d
+    );
     setDevs(updatedDevs);
-    StorageService.updateDev(id, trimmed);
+    StorageService.updateDev(targetDev.id, trimmed);
     if (user?.id) {
       FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase update dev notice:', e));
     }
 
     // Cascade update to tasks assigned to this developer
-    const assignedTasks = tasks.filter(t => t.assignee === oldName);
+    const assignedTasks = tasks.filter(t => (t.assignee || '').trim().toLowerCase() === oldName.trim().toLowerCase());
     if (assignedTasks.length > 0) {
-      const updatedTasks = tasks.map(t => t.assignee === oldName ? { ...t, assignee: trimmed } : t);
+      const updatedTasks = tasks.map(t => 
+        (t.assignee || '').trim().toLowerCase() === oldName.trim().toLowerCase() ? { ...t, assignee: trimmed } : t
+      );
       setTasks(updatedTasks);
       StorageService.saveTasks(updatedTasks);
       if (user?.id) {
@@ -7863,24 +7961,33 @@ export default function App() {
   };
 
   const handleDeleteDev = (id: string): { success: boolean; message: string } => {
-    const devToDelete = devs.find(d => d.id === id);
+    const targetClean = String(id || '').trim().toLowerCase();
+    const devToDelete = devs.find(d => 
+      String(d.id || '').trim() === String(id || '').trim() || 
+      d.name.trim().toLowerCase() === targetClean
+    );
     if (!devToDelete) {
       return { success: false, message: 'Desenvolvedor não encontrado.' };
     }
 
     const devName = devToDelete.name;
-    const updatedDevs = devs.filter(d => d.id !== id);
+    const updatedDevs = devs.filter(d => 
+      String(d.id || '').trim() !== String(devToDelete.id || '').trim() && 
+      d.name.trim().toLowerCase() !== devName.trim().toLowerCase()
+    );
     setDevs(updatedDevs);
-    StorageService.deleteDev(id);
+    StorageService.deleteDev(devToDelete.id);
     if (user?.id) {
-      FirebaseService.deleteDev(id, user.id).catch(e => console.warn('Firebase deleteDev notice:', e));
+      FirebaseService.deleteDev(devToDelete.id, user.id).catch(e => console.warn('Firebase deleteDev notice:', e));
       FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase saveDevs after delete notice:', e));
     }
 
     // Unassign tasks assigned to the removed developer
-    const affectedTasks = tasks.filter(t => t.assignee === devName);
+    const affectedTasks = tasks.filter(t => (t.assignee || '').trim().toLowerCase() === devName.trim().toLowerCase());
     if (affectedTasks.length > 0) {
-      const updatedTasks = tasks.map(t => t.assignee === devName ? { ...t, assignee: null } : t);
+      const updatedTasks = tasks.map(t => 
+        (t.assignee || '').trim().toLowerCase() === devName.trim().toLowerCase() ? { ...t, assignee: null } : t
+      );
       setTasks(updatedTasks);
       StorageService.saveTasks(updatedTasks);
       if (user?.id) {
@@ -7897,26 +8004,30 @@ export default function App() {
   const handleTaskUpdate = (updatedTask: Task) => { 
     if (!user) return; 
     const cleanId = (updatedTask.id || '').trim();
-    if (!cleanId) { alert("O número do chamado (ID) é obrigatório."); return; } 
+    if (!cleanId) { return; } 
     const cleanSummary = (updatedTask.summary || '').trim();
-    if (!cleanSummary) { alert("A descrição da solicitação é obrigatória."); return; }
+    if (!cleanSummary) { return; }
 
     if (updatedTask.estimatedTime && !isValidDurationString(updatedTask.estimatedTime)) {
-        alert("Formato de tempo estimado inválido. Use horas ou dias (ex: 8h, 2d, 1.5h ou 02:30).");
         return;
     }
 
     if (updatedTask.actualTime && !isValidDurationString(updatedTask.actualTime)) {
-        alert("Formato de tempo real inválido. Use horas ou dias (ex: 2h, 4.5h ou 01:30).");
         return;
     }
 
     const isCreating = !editingTask?.id || editingTask.id.trim() === '';
-    const taskExists = tasks.some(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
+    const oldId = editingTask?.id ? editingTask.id.trim() : '';
 
-    if (isCreating && taskExists) {
-        alert(`Já existe uma demanda cadastrada com o ID "${cleanId}". Escolha um ID único para não sobrescrever o registro existente.`);
-        return;
+    // Verify duplicate ticket ID across all tasks
+    const duplicate = tasks.find(t => 
+      t.id.trim().toLowerCase() === cleanId.toLowerCase() &&
+      (isCreating || t.id.trim().toLowerCase() !== oldId.toLowerCase())
+    );
+
+    if (duplicate) {
+      console.warn(`Tentativa de cadastrar chamado com ID duplicado "${cleanId}". Operação bloqueada.`);
+      return;
     }
 
     let finalTask = { ...updatedTask, id: cleanId, summary: cleanSummary }; 
@@ -7927,8 +8038,8 @@ export default function App() {
         finalTask.endDate = new Date().toISOString().split('T')[0];
     }
 
-    if (taskExists && !isCreating) { 
-        const oldTask = tasks.find(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
+    if (!isCreating) { 
+        const oldTask = tasks.find(t => t.id.trim().toLowerCase() === oldId.toLowerCase()) || tasks.find(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
         if (oldTask) { 
             const history = detectChanges(oldTask, finalTask, user); 
             if (history.length > 0) finalTask.history = [...(oldTask.history || []), ...history]; 
@@ -7949,7 +8060,16 @@ export default function App() {
             } 
         } 
         
-        const newTasks = tasks.map(t => t.id.trim().toLowerCase() === cleanId.toLowerCase() ? finalTask : t); 
+        // If ID changed during edit, clean up the old doc in Firestore
+        if (oldId && oldId.toLowerCase() !== cleanId.toLowerCase()) {
+            if (user?.id) {
+                FirebaseService.deleteTask(oldId, user.id).catch(e => console.warn('Delete old taskId in rename:', e));
+            }
+        }
+
+        const newTasks = tasks.map(t => 
+            (t.id.trim().toLowerCase() === oldId.toLowerCase() || t.id.trim().toLowerCase() === cleanId.toLowerCase()) ? finalTask : t
+        ); 
         setTasks(newTasks); 
         StorageService.saveTasks(newTasks); 
     } else { 
@@ -8484,15 +8604,6 @@ export default function App() {
     </div>
   </div>
 )}
-<DeveloperManagementModal
-  isOpen={isManageDevsOpen}
-  onClose={() => setIsManageDevsOpen(false)}
-  developers={devs}
-  tasks={tasks}
-  onAddDev={handleAddDev}
-  onEditDev={handleEditDev}
-  onDeleteDev={handleDeleteDev}
-/>
 {editingTask && (
   <TaskModal 
     task={editingTask} 
@@ -8505,5 +8616,14 @@ export default function App() {
     onOpenManageDevs={() => setIsManageDevsOpen(true)}
   />
 )}
+<DeveloperManagementModal
+  isOpen={isManageDevsOpen}
+  onClose={() => setIsManageDevsOpen(false)}
+  developers={devs}
+  tasks={tasks}
+  onAddDev={handleAddDev}
+  onEditDev={handleEditDev}
+  onDeleteDev={handleDeleteDev}
+/>
 <Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

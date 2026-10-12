@@ -156,7 +156,12 @@ export const StorageService = {
   },
 
   updateDev: (id: string, newName: string) => {
-    inMemoryDevs = inMemoryDevs.map(d => d.id === id ? { ...d, name: newName } : d);
+    const targetClean = String(id || '').trim().toLowerCase();
+    inMemoryDevs = inMemoryDevs.map(d => 
+      (String(d.id || '').trim() === String(id || '').trim() || d.name.trim().toLowerCase() === targetClean) 
+        ? { ...d, name: newName.trim() } 
+        : d
+    );
     saveLocalCache();
     BackupService.triggerAutoBackup("Atualização de Desenvolvedor");
     FirebaseService.saveDevs(inMemoryDevs, currentUserId || undefined).catch(e => console.warn('Firebase saveDevs error:', e));
@@ -164,7 +169,11 @@ export const StorageService = {
   },
 
   deleteDev: (id: string) => {
-    inMemoryDevs = inMemoryDevs.filter(d => d.id !== id);
+    const targetClean = String(id || '').trim().toLowerCase();
+    inMemoryDevs = inMemoryDevs.filter(d => 
+      String(d.id || '').trim() !== String(id || '').trim() && 
+      d.name.trim().toLowerCase() !== targetClean
+    );
     saveLocalCache();
     BackupService.triggerAutoBackup("Exclusão de Desenvolvedor");
     FirebaseService.deleteDev(id, currentUserId || undefined).catch(e => console.warn('Firebase deleteDev error:', e));
