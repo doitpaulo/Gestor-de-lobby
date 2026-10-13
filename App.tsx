@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
@@ -18,7 +18,7 @@ import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, Workf
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
 
 // --- Constants ---
-const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação'];
+const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
 const PRIORITIES = ['1 - Crítica', '2 - Alta', '3 - Moderada', '4 - Baixa'];
 const STATUSES = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Resolvido', 'Fechado', 'Aguardando', 'Concluído', 'Backlog', 'Cancelado'];
 
@@ -217,6 +217,7 @@ const ConsolidatedReportService = {
       { Métrica: 'Incidentes Ativos', Valor: activeTasks.filter(t => t.type === 'Incidente').length },
       { Métrica: 'Melhorias Ativas', Valor: activeTasks.filter(t => t.type === 'Melhoria').length },
       { Métrica: 'Novas Automações Ativas', Valor: activeTasks.filter(t => t.type === 'Nova Automação').length },
+      { Métrica: 'Agendamentos de Execução Ativos', Valor: activeTasks.filter(t => t.type === 'Agendamento de Execução').length },
       { Métrica: 'Total de Robôs Cadastrados', Valor: robots.length },
       { Métrica: 'Robôs Ativos', Valor: robots.filter(r => r.status === 'ATIVO').length }
     ];
@@ -300,15 +301,16 @@ const ConsolidatedReportService = {
     slide.addText("Visão Executiva do Portfólio", { x: 0.5, y: 0.5, fontSize: 24, color: TEXT_COLOR, bold: true });
     
     const drawKPI = (x: number, y: number, label: string, val: string, color: string) => {
-      slide.addShape(pres.ShapeType.roundRect, { x, y, w: 2.8, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
-      slide.addText(label, { x, y: y + 0.2, w: 2.8, fontSize: 12, color: SUBTEXT_COLOR, align: 'center' });
-      slide.addText(val, { x, y: y + 0.6, w: 2.8, fontSize: 32, color: TEXT_COLOR, bold: true, align: 'center' });
+      slide.addShape(pres.ShapeType.roundRect, { x, y, w: 2.3, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
+      slide.addText(label, { x, y: y + 0.2, w: 2.3, fontSize: 11, color: SUBTEXT_COLOR, align: 'center' });
+      slide.addText(val, { x, y: y + 0.6, w: 2.3, fontSize: 30, color: TEXT_COLOR, bold: true, align: 'center' });
     };
 
-    drawKPI(0.5, 1.5, "Total Ativos", activeTasks.length.toString(), ACCENT_COLOR);
-    drawKPI(3.6, 1.5, "Incidentes", activeTasks.filter(t => t.type === 'Incidente').length.toString(), 'e11d48');
-    drawKPI(6.7, 1.5, "Melhorias", activeTasks.filter(t => t.type === 'Melhoria').length.toString(), '10b981');
-    drawKPI(9.8, 1.5, "Novas Auto.", activeTasks.filter(t => t.type === 'Nova Automação').length.toString(), '8b5cf6');
+    drawKPI(0.4, 1.5, "Total Ativos", activeTasks.length.toString(), ACCENT_COLOR);
+    drawKPI(2.9, 1.5, "Incidentes", activeTasks.filter(t => t.type === 'Incidente').length.toString(), 'e11d48');
+    drawKPI(5.4, 1.5, "Melhorias", activeTasks.filter(t => t.type === 'Melhoria').length.toString(), '10b981');
+    drawKPI(7.9, 1.5, "Novas Auto.", activeTasks.filter(t => t.type === 'Nova Automação').length.toString(), '8b5cf6');
+    drawKPI(10.4, 1.5, "Agendamentos", activeTasks.filter(t => t.type === 'Agendamento de Execução').length.toString(), 'f59e0b');
 
     // Slide 3: Status da Esteira Documental (Top 10 Projetos)
     slide = pres.addSlide();
@@ -403,6 +405,7 @@ const Badge = ({ type, className='' }: { type: string, className?: string }) => 
   if (type === 'Incidente') color = "bg-rose-950/60 text-rose-300 border-rose-800/60";
   if (type === 'Melhoria') color = "bg-emerald-950/60 text-emerald-300 border-emerald-800/60";
   if (type === 'Nova Automação') color = "bg-indigo-950/60 text-indigo-300 border-indigo-800/60";
+  if (type === 'Agendamento de Execução') color = "bg-amber-950/60 text-amber-300 border-amber-800/60 font-semibold";
   if (type === '1 - Crítica') color = "bg-red-950/90 text-red-200 border-red-700 font-bold";
   if (type === '2 - Alta') color = "bg-orange-950/90 text-orange-200 border-orange-700/80 font-medium";
   if (type === '3 - Moderada') color = "bg-amber-950/80 text-amber-200 border-amber-700/70";
@@ -2004,7 +2007,7 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
                                 ${isBeingDraggedOver ? 'border-t-4 border-t-indigo-500 border-indigo-500/50 bg-indigo-950/30' : ''}
                                 ${isCompletedCol ? 'bg-dark-850/40 border-slate-800/70 opacity-60 hover:opacity-100 hover:border-slate-700' : 'bg-dark-850/80 hover:bg-dark-800/95 border-slate-800/90 hover:border-indigo-500/50 shadow-md shadow-black/20'}`}
                             >
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
+                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.type === 'Incidente' ? 'bg-rose-500' : task.type === 'Melhoria' ? 'bg-emerald-500' : task.type === 'Agendamento de Execução' ? 'bg-amber-500' : 'bg-indigo-500'}`}></div>
                             <div className="flex justify-between items-start mb-2 pl-2">
                               <span className="text-[11px] text-slate-400 font-mono tracking-wider font-semibold group-hover:text-indigo-300 transition-colors">{task.id}</span>
                               <Badge type={task.priority} />
@@ -2140,6 +2143,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
   const autoActiveCount = filtered.filter(t => t.type === 'Nova Automação' && !isTerminalStatus(t.status)).length;
   const featActiveCount = filtered.filter(t => t.type === 'Melhoria' && !isTerminalStatus(t.status)).length;
   const incActiveCount = filtered.filter(t => t.type === 'Incidente' && !isTerminalStatus(t.status)).length;
+  const schedActiveCount = filtered.filter(t => t.type === 'Agendamento de Execução' && !isTerminalStatus(t.status)).length;
 
   return (
     <div className="space-y-4 h-full flex flex-col">
@@ -2154,6 +2158,8 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
         <span className="text-emerald-300 font-medium">Melhorias Ativas: <strong className="text-white bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{featActiveCount}</strong></span>
         <span className="text-slate-700">|</span>
         <span className="text-rose-300 font-medium">Incidentes Ativos: <strong className="text-white bg-rose-950/80 border border-rose-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{incActiveCount}</strong></span>
+        <span className="text-slate-700">|</span>
+        <span className="text-amber-300 font-medium">Agendamentos Ativos: <strong className="text-white bg-amber-950/80 border border-amber-500/40 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{schedActiveCount}</strong></span>
         <span className="text-slate-700">|</span>
         <span className="text-slate-400 font-medium">Concluídos: <strong className="text-slate-200 bg-dark-900/90 border border-slate-700/80 px-2 py-0.5 rounded-full ml-1 font-bold font-mono">{completedCount}</strong></span>
         {cancelledCount > 0 && (
@@ -2178,6 +2184,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         <option value="Nova Automação">Nova Automação</option>
                         <option value="Melhoria">Melhoria</option>
                         <option value="Incidente">Incidente</option>
+                        <option value="Agendamento de Execução">Agendamento de Execução</option>
                     </select>
                     <select 
                       className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
@@ -2236,6 +2243,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         className={`text-xs font-bold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border font-mono ${
                           task.type === 'Incidente' ? 'bg-rose-950/70 text-rose-200 border-rose-700/70 hover:border-rose-400' :
                           task.type === 'Melhoria' ? 'bg-emerald-950/70 text-emerald-200 border-emerald-700/70 hover:border-emerald-400' :
+                          task.type === 'Agendamento de Execução' ? 'bg-amber-950/70 text-amber-200 border-amber-700/70 hover:border-amber-400' :
                           'bg-indigo-950/70 text-indigo-200 border-indigo-700/70 hover:border-indigo-400'
                         }`}
                         value={task.type}
@@ -2245,6 +2253,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
                         <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
                         <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                        <option value="Agendamento de Execução" className="bg-slate-900 text-white">Agendamento de Execução</option>
                       </select>
                     </td>
                     <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">{task.summary}</td>
@@ -3854,17 +3863,19 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
                 active: activeTasks.length,
                 inc: activeTasks.filter(t => t.type === 'Incidente').length,
                 mel: activeTasks.filter(t => t.type === 'Melhoria').length,
-                aut: activeTasks.filter(t => t.type === 'Nova Automação').length
+                aut: activeTasks.filter(t => t.type === 'Nova Automação').length,
+                sch: activeTasks.filter(t => t.type === 'Agendamento de Execução').length
             };
             const drawCard = (x:number, title:string, val:number, color:string) => {
-                slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
-                slide.addText(title, { x, y: 1.7, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' });
-                slide.addText(val.toString(), { x, y: 2.2, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' });
+                slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.3, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2 } });
+                slide.addText(title, { x, y: 1.7, w: 2.3, fontSize: 13, color: '94a3b8', align: 'center' });
+                slide.addText(val.toString(), { x, y: 2.2, w: 2.3, fontSize: 30, color: 'FFFFFF', bold: true, align: 'center' });
             };
-            drawCard(0.5, "Total Ativos", metrics.active, '6366f1');
-            drawCard(3.5, "Incidentes", metrics.inc, 'e11d48');
-            drawCard(6.5, "Melhorias", metrics.mel, '10b981');
-            drawCard(9.5, "Automações", metrics.aut, '8b5cf6');
+            drawCard(0.4, "Total Ativos", metrics.active, '6366f1');
+            drawCard(2.9, "Incidentes", metrics.inc, 'e11d48');
+            drawCard(5.4, "Melhorias", metrics.mel, '10b981');
+            drawCard(7.9, "Automações", metrics.aut, '8b5cf6');
+            drawCard(10.4, "Agendamentos", metrics.sch, 'f59e0b');
         }
 
         if (selectedModules.has('chart_status')) {
@@ -4373,7 +4384,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   const [isEditMode, setIsEditMode] = useState(false);
   const [filterDev, setFilterDev] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<string[]>([]);
-  const [selectedKpiModal, setSelectedKpiModal] = useState<'total' | 'incidents' | 'features' | 'automations' | null>(null);
+  const [selectedKpiModal, setSelectedKpiModal] = useState<'total' | 'incidents' | 'features' | 'automations' | 'schedulings' | null>(null);
   const [kpiSearch, setKpiSearch] = useState('');
 
   const dashboardFilterKey = useMemo(() => {
@@ -4427,6 +4438,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       incidents: filteredCompleted.filter(t => t.type === 'Incidente').length, 
       features: filteredCompleted.filter(t => t.type === 'Melhoria').length, 
       automations: filteredCompleted.filter(t => t.type === 'Nova Automação').length, 
+      schedulings: filteredCompleted.filter(t => t.type === 'Agendamento de Execução').length, 
       total: filteredCompleted.length 
     }; 
   }, [tasks, filterDev, filterType]);
@@ -4436,6 +4448,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       incidents: activeFilteredTasks.filter(t => t.type === 'Incidente').length, 
       features: activeFilteredTasks.filter(t => t.type === 'Melhoria').length, 
       automations: activeFilteredTasks.filter(t => t.type === 'Nova Automação').length, 
+      schedulings: activeFilteredTasks.filter(t => t.type === 'Agendamento de Execução').length, 
       total: activeFilteredTasks.length 
     }; 
   }, [activeFilteredTasks]);
@@ -4446,6 +4459,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     if (selectedKpiModal === 'incidents') base = activeFilteredTasks.filter(t => t.type === 'Incidente');
     if (selectedKpiModal === 'features') base = activeFilteredTasks.filter(t => t.type === 'Melhoria');
     if (selectedKpiModal === 'automations') base = activeFilteredTasks.filter(t => t.type === 'Nova Automação');
+    if (selectedKpiModal === 'schedulings') base = activeFilteredTasks.filter(t => t.type === 'Agendamento de Execução');
     
     if (!kpiSearch.trim()) return base;
     const q = kpiSearch.toLowerCase().trim();
@@ -4462,17 +4476,20 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   const modalTitle = selectedKpiModal === 'automations' ? 'Demandas em Automações (Ativas)' :
                      selectedKpiModal === 'features' ? 'Demandas em Melhorias (Ativas)' :
                      selectedKpiModal === 'incidents' ? 'Demandas em Incidentes (Ativas)' :
+                     selectedKpiModal === 'schedulings' ? 'Demandas em Agendamento de Execução (Ativas)' :
                      'Todas as Demandas Ativas em Aberto';
 
   const modalBorderColor = selectedKpiModal === 'automations' ? 'border-indigo-500/70' :
                           selectedKpiModal === 'features' ? 'border-emerald-500/70' :
                           selectedKpiModal === 'incidents' ? 'border-rose-500/70' :
+                          selectedKpiModal === 'schedulings' ? 'border-amber-500/70' :
                           'border-indigo-500/50';
 
   const handleOpenListFiltered = () => {
     const targetType = selectedKpiModal === 'incidents' ? 'Incidente' :
                        selectedKpiModal === 'features' ? 'Melhoria' :
-                       selectedKpiModal === 'automations' ? 'Nova Automação' : null;
+                       selectedKpiModal === 'automations' ? 'Nova Automação' :
+                       selectedKpiModal === 'schedulings' ? 'Agendamento de Execução' : null;
     setSelectedKpiModal(null);
     if (targetType) {
       navigate(`/list?type=${encodeURIComponent(targetType)}`);
@@ -4493,10 +4510,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     }
   };
   const priorityData = useMemo(() => { const counts: Record<string, number> = { '1 - Crítica': 0, '2 - Alta': 0, '3 - Moderada': 0, '4 - Baixa': 0 }; activeFilteredTasks.forEach(t => { counts[t.priority] = (counts[t.priority] || 0) + 1; }); return Object.entries(counts).map(([name, value]) => ({ name, value })); }, [activeFilteredTasks]);
-  const statusByTypeData = useMemo(() => { const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Backlog']; return STATUS_ORDER.map(status => { const tasksInStatus = activeFilteredTasks.filter(t => t.status === status); return { name: status, Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length, Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length, 'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length, total: tasksInStatus.length }; }).filter(d => d.total > 0); }, [activeFilteredTasks]);
-  const devTypeData = useMemo(() => { return devs.map(dev => { const devTasks = activeFilteredTasks.filter(t => t.assignee === dev.name); return { name: dev.name, Incidente: devTasks.filter(t => t.type === 'Incidente').length, Melhoria: devTasks.filter(t => t.type === 'Melhoria').length, 'Nova Automação': devTasks.filter(t => t.type === 'Nova Automação').length, total: devTasks.length }; }).filter(d => d.total > 0).sort((a, b) => b.total - a.total); }, [activeFilteredTasks, devs]);
+  const statusByTypeData = useMemo(() => { const STATUS_ORDER = ['Novo', 'Pendente', 'Em Atendimento', 'Em Progresso', 'Aguardando', 'Backlog']; return STATUS_ORDER.map(status => { const tasksInStatus = activeFilteredTasks.filter(t => t.status === status); return { name: status, Incidente: tasksInStatus.filter(t => t.type === 'Incidente').length, Melhoria: tasksInStatus.filter(t => t.type === 'Melhoria').length, 'Nova Automação': tasksInStatus.filter(t => t.type === 'Nova Automação').length, 'Agendamento de Execução': tasksInStatus.filter(t => t.type === 'Agendamento de Execução').length, total: tasksInStatus.length }; }).filter(d => d.total > 0); }, [activeFilteredTasks]);
+  const devTypeData = useMemo(() => { return devs.map(dev => { const devTasks = activeFilteredTasks.filter(t => t.assignee === dev.name); return { name: dev.name, Incidente: devTasks.filter(t => t.type === 'Incidente').length, Melhoria: devTasks.filter(t => t.type === 'Melhoria').length, 'Nova Automação': devTasks.filter(t => t.type === 'Nova Automação').length, 'Agendamento de Execução': devTasks.filter(t => t.type === 'Agendamento de Execução').length, total: devTasks.length }; }).filter(d => d.total > 0).sort((a, b) => b.total - a.total); }, [activeFilteredTasks, devs]);
   const capacityData = useMemo(() => { return devs.map(dev => { const myTasks = activeFilteredTasks.filter(t => t.assignee === dev.name); const totalHours = myTasks.reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0); return { name: dev.name, activeTasksCount: myTasks.length, totalHours: totalHours }; }).sort((a, b) => a.totalHours - b.totalHours); }, [activeFilteredTasks, devs]);
-  const incidentByAutoData = useMemo(() => { const relevantTasks = tasks.filter(t => { const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); const isTargetType = t.type === 'Incidente' || t.type === 'Melhoria'; return matchesDev && isTargetType; }); const grouped: Record<string, { name: string, Incidente: number, Melhoria: number, 'Nova Automação': number, total: number }> = {}; relevantTasks.forEach(t => { const name = t.automationName || t.subcategory || t.category || 'Não Classificado'; if (!grouped[name]) { grouped[name] = { name, Incidente: 0, Melhoria: 0, 'Nova Automação': 0, total: 0 }; } if (t.type === 'Incidente') grouped[name].Incidente++; else if (t.type === 'Melhoria') grouped[name].Melhoria++; grouped[name].total++; }); return Object.values(grouped).sort((a, b) => b.Incidente - a.Incidente || b.total - a.total).slice(0, 15); }, [tasks, filterDev]);
+  const incidentByAutoData = useMemo(() => { const relevantTasks = tasks.filter(t => { const matchesDev = filterDev.length === 0 || filterDev.includes(t.assignee || ''); const isTargetType = t.type === 'Incidente' || t.type === 'Melhoria' || t.type === 'Agendamento de Execução'; return matchesDev && isTargetType; }); const grouped: Record<string, { name: string, Incidente: number, Melhoria: number, 'Nova Automação': number, 'Agendamento de Execução': number, total: number }> = {}; relevantTasks.forEach(t => { const name = t.automationName || t.subcategory || t.category || 'Não Classificado'; if (!grouped[name]) { grouped[name] = { name, Incidente: 0, Melhoria: 0, 'Nova Automação': 0, 'Agendamento de Execução': 0, total: 0 }; } if (t.type === 'Incidente') grouped[name].Incidente++; else if (t.type === 'Melhoria') grouped[name].Melhoria++; else if (t.type === 'Agendamento de Execução') grouped[name]['Agendamento de Execução']++; grouped[name].total++; }); return Object.values(grouped).sort((a, b) => b.Incidente - a.Incidente || b.total - a.total).slice(0, 15); }, [tasks, filterDev]);
   const automationsByManagerData = useMemo(() => { const relevant = activeFilteredTasks.filter(t => t.type === 'Nova Automação'); const grouped: Record<string, number> = {}; relevant.forEach(t => { const area = t.managementArea || 'Sem Gerência'; grouped[area] = (grouped[area] || 0) + 1; }); return Object.entries(grouped).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value); }, [activeFilteredTasks]);
   const fteByManagerData = useMemo(() => { const grouped: Record<string, number> = {}; let total = 0; activeFilteredTasks.forEach(t => { const area = t.managementArea || 'Sem Gerência'; const fte = Number(t.fteValue) || 0; grouped[area] = (grouped[area] || 0) + fte; total += fte; }); const chartData = Object.entries(grouped).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value); return { chartData, total }; }, [activeFilteredTasks]);
   
@@ -4579,6 +4596,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
     let incidentHours = 0;
     let featureHours = 0;
     let automationHours = 0;
+    let schedulingHours = 0;
 
     activeFilteredTasks.forEach(t => {
       let taskRemaining = 0;
@@ -4602,6 +4620,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
         if (t.type === 'Incidente') taskRemaining = 4;
         else if (t.type === 'Melhoria') taskRemaining = 16;
         else if (t.type === 'Nova Automação') taskRemaining = 40;
+        else if (t.type === 'Agendamento de Execução') taskRemaining = 2;
         else taskRemaining = 8;
       }
 
@@ -4609,6 +4628,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       if (t.type === 'Incidente') incidentHours += taskRemaining;
       else if (t.type === 'Melhoria') featureHours += taskRemaining;
       else if (t.type === 'Nova Automação') automationHours += taskRemaining;
+      else if (t.type === 'Agendamento de Execução') schedulingHours += taskRemaining;
     });
 
     const hasBacklog = totalBacklogHours > 0;
@@ -4637,7 +4657,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
 
     const incPct = totalBacklogHours > 0 ? Math.round((incidentHours / totalBacklogHours) * 100) : 0;
     const featPct = totalBacklogHours > 0 ? Math.round((featureHours / totalBacklogHours) * 100) : 0;
-    const autoPct = totalBacklogHours > 0 ? Math.max(0, 100 - incPct - featPct) : 0;
+    const autoPct = totalBacklogHours > 0 ? Math.round((automationHours / totalBacklogHours) * 100) : 0;
+    const schedPct = totalBacklogHours > 0 ? Math.max(0, 100 - incPct - featPct - autoPct) : 0;
 
     let healthStatus = { label: 'Excelente', color: 'text-emerald-400', bg: 'bg-emerald-950/60 border-emerald-500/40', dot: 'bg-emerald-400' };
     if (!hasBacklog) {
@@ -4664,9 +4685,11 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       incidentHours: Math.round(incidentHours),
       featureHours: Math.round(featureHours),
       automationHours: Math.round(automationHours),
+      schedulingHours: Math.round(schedulingHours),
       incPct,
       featPct,
       autoPct,
+      schedPct,
       daysOptimistic,
       daysRealistic,
       daysConservative,
@@ -4683,7 +4706,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   const moveWidget = (index: number, direction: 'up' | 'down') => { const newWidgets = [...widgets]; if (direction === 'up' && index > 0) { [newWidgets[index], newWidgets[index - 1]] = [newWidgets[index - 1], newWidgets[index]]; } else if (direction === 'down' && index < newWidgets.length - 1) { [newWidgets[index], newWidgets[index + 1]] = [newWidgets[index + 1], newWidgets[index]]; } setWidgets(newWidgets); };
   const toggleVisibility = (id: string) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visible: !w.visible } : w)); };
   const changeVisualStyle = (id: string, style: any) => { setWidgets(prev => prev.map(w => w.id === id ? { ...w, visualStyle: style } : w)); };
-  const exportPPT = () => { const pres = new pptxgen(); pres.layout = 'LAYOUT_WIDE'; let slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Dashboard Nexus Project", { x: 0.5, y: 2, w: '90%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' }); slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 3, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' }); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Visão Geral do Portfólio (Demandas Ativas)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const drawCard = (label: string, value: string, color: string, x: number) => { slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.5, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 3 } }); slide.addText(label, { x, y: 1.8, w: 2.5, fontSize: 14, color: '94a3b8', align: 'center' }); slide.addText(value, { x, y: 2.3, w: 2.5, fontSize: 32, color: 'FFFFFF', bold: true, align: 'center' }); }; drawCard("Total Ativos", metrics.total.toString(), 'ffffff', 0.5); drawCard("Incidentes", metrics.incidents.toString(), 'f43f5e', 3.5); drawCard("Melhorias", metrics.features.toString(), '10b981', 6.5); drawCard("Automações", metrics.automations.toString(), '6366f1', 9.5); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Volume por Status e Prioridade", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); if (priorityData.length > 0) { slide.addChart(pres.ChartType.bar, [ { name: 'Prioridade', labels: priorityData.map(d => d.name), values: priorityData.map(d => d.value) } ], { x: 0.5, y: 1.5, w: 5, h: 4, chartColors: ['8b5cf6'], title: 'Por Prioridade', titleColor: 'ffffff' }); } if (statusByTypeData.length > 0) { const statusLabels = statusByTypeData.map(d => d.name); const incVals = statusByTypeData.map(d => d.Incidente); const melVals = statusByTypeData.map(d => d.Melhoria); const autoVals = statusByTypeData.map(d => d['Nova Automação']); slide.addChart(pres.ChartType.bar, [ { name: 'Incidentes', labels: statusLabels, values: incVals }, { name: 'Melhorias', labels: statusLabels, values: melVals }, { name: 'Automações', labels: statusLabels, values: autoVals } ], { x: 6, y: 1.5, w: 7, h: 4, showLegend: true, barDir: 'col', title: 'Por Status', titleColor: 'ffffff', chartColors: ['f43f5e', '10b981', '6366f1'] }); } slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Capacidade da Equipe & Sugestões", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const tableHeader = ['Desenvolvedor', 'Tarefas', 'Horas Estimadas', 'Dias Estimados', 'Status'].map(t => ({ text: t, options: { bold: true, fill: '334155', color: 'ffffff' } })); const tableRows = capacityData.map(d => { const estimatedDays = Math.ceil(d.totalHours / 8); let statusText = 'Livre'; if (d.totalHours > 40) statusText = 'Sobrecarga'; else if (d.totalHours > 24) statusText = 'Ocupado'; else if (d.totalHours > 8) statusText = 'Moderado'; return [d.name, d.activeTasksCount, formatDuration(d.totalHours), `${estimatedDays}d`, statusText]; }); slide.addTable([tableHeader, ...tableRows] as any, { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', border: { type: 'solid', color: '475569', pt: 0.5 } }); pres.writeFile({ fileName: "Nexus_Dashboard.pptx" }); };
+  const exportPPT = () => { const pres = new pptxgen(); pres.layout = 'LAYOUT_WIDE'; let slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Dashboard Nexus Project", { x: 0.5, y: 2, w: '90%', fontSize: 36, color: 'FFFFFF', bold: true, align: 'center' }); slide.addText(`Gerado em: ${new Date().toLocaleDateString()}`, { x: 0.5, y: 3, w: '90%', fontSize: 18, color: '94a3b8', align: 'center' }); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Visão Geral do Portfólio (Demandas Ativas)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const drawCard = (label: string, value: string, color: string, x: number) => { slide.addShape(pres.ShapeType.roundRect, { x, y: 1.5, w: 2.2, h: 1.5, fill: { color: '1e293b' }, line: { color, width: 2.5 } }); slide.addText(label, { x, y: 1.8, w: 2.2, fontSize: 13, color: '94a3b8', align: 'center' }); slide.addText(value, { x, y: 2.3, w: 2.2, fontSize: 30, color: 'FFFFFF', bold: true, align: 'center' }); }; drawCard("Total Ativos", metrics.total.toString(), 'ffffff', 0.5); drawCard("Incidentes", metrics.incidents.toString(), 'f43f5e', 2.9); drawCard("Melhorias", metrics.features.toString(), '10b981', 5.3); drawCard("Automações", metrics.automations.toString(), '6366f1', 7.7); drawCard("Agendamentos", metrics.schedulings.toString(), 'f59e0b', 10.1); slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Volume por Status e Prioridade", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); if (priorityData.length > 0) { slide.addChart(pres.ChartType.bar, [ { name: 'Prioridade', labels: priorityData.map(d => d.name), values: priorityData.map(d => d.value) } ], { x: 0.5, y: 1.5, w: 5, h: 4, chartColors: ['8b5cf6'], title: 'Por Prioridade', titleColor: 'ffffff' }); } if (statusByTypeData.length > 0) { const statusLabels = statusByTypeData.map(d => d.name); const incVals = statusByTypeData.map(d => d.Incidente); const melVals = statusByTypeData.map(d => d.Melhoria); const autoVals = statusByTypeData.map(d => d['Nova Automação']); const schVals = statusByTypeData.map(d => d['Agendamento de Execução'] || 0); slide.addChart(pres.ChartType.bar, [ { name: 'Incidentes', labels: statusLabels, values: incVals }, { name: 'Melhorias', labels: statusLabels, values: melVals }, { name: 'Automações', labels: statusLabels, values: autoVals }, { name: 'Agendamentos', labels: statusLabels, values: schVals } ], { x: 6, y: 1.5, w: 7, h: 4, showLegend: true, barDir: 'col', title: 'Por Status', titleColor: 'ffffff', chartColors: ['f43f5e', '10b981', '6366f1', 'f59e0b'] }); } slide = pres.addSlide(); slide.background = { color: "0f172a" }; slide.addText("Capacidade da Equipe & Sugestões", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true }); const tableHeader = ['Desenvolvedor', 'Tarefas', 'Horas Estimadas', 'Dias Estimados', 'Status'].map(t => ({ text: t, options: { bold: true, fill: '334155', color: 'ffffff' } })); const tableRows = capacityData.map(d => { const estimatedDays = Math.ceil(d.totalHours / 8); let statusText = 'Livre'; if (d.totalHours > 40) statusText = 'Sobrecarga'; else if (d.totalHours > 24) statusText = 'Ocupado'; else if (d.totalHours > 8) statusText = 'Moderado'; return [d.name, d.activeTasksCount, formatDuration(d.totalHours), `${estimatedDays}d`, statusText]; }); slide.addTable([tableHeader, ...tableRows] as any, { x: 0.5, y: 1.5, w: 12, color: 'cbd5e1', border: { type: 'solid', color: '475569', pt: 0.5 } }); pres.writeFile({ fileName: "Nexus_Dashboard.pptx" }); };
 
   const renderWidget = (widget: Widget) => {
       const style = widget.visualStyle || 'bar';
@@ -4693,14 +4716,14 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
              return <BarChart data={priorityData}><CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} /><XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} /><YAxis stroke="#94a3b8" /><Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} /><Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} /></BarChart>;
           }
           if (widget.type === 'incidentByAuto') {
-              if (style === 'pie') return <PieChart><Pie data={incidentByAutoData} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#f43f5e" label>{incidentByAutoData.map((entry, index) => <Cell key={index} fill={['#f43f5e', '#10b981', '#6366f1'][index % 3]} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /></PieChart>;
-              return <BarChart data={incidentByAutoData} layout="vertical" margin={{ left: 10, right: 30, top: 10 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" hide /><YAxis type="category" dataKey="name" width={180} stroke="#94a3b8" tick={{fontSize: 11, fill: '#cbd5e1'}} interval={0} tickLine={false} axisLine={false} /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} /><Bar dataKey="Incidente" name="Incidentes" stackId="a" fill="#f43f5e"><LabelList dataKey="Incidente" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar><Bar dataKey="Melhoria" name="Melhorias" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar><Bar dataKey="Nova Automação" name="Novas Auto." stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]}><LabelList dataKey="Nova Automação" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar></BarChart>;
+              if (style === 'pie') return <PieChart><Pie data={incidentByAutoData} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#f43f5e" label>{incidentByAutoData.map((entry, index) => <Cell key={index} fill={['#f43f5e', '#10b981', '#6366f1', '#f59e0b'][index % 4]} />)}</Pie><Tooltip contentStyle={{ backgroundColor: '#1e293b' }} /></PieChart>;
+              return <BarChart data={incidentByAutoData} layout="vertical" margin={{ left: 10, right: 30, top: 10 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" /><XAxis type="number" stroke="#94a3b8" hide /><YAxis type="category" dataKey="name" width={180} stroke="#94a3b8" tick={{fontSize: 11, fill: '#cbd5e1'}} interval={0} tickLine={false} axisLine={false} /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{fontSize: '12px', paddingTop: '10px'}} /><Bar dataKey="Incidente" name="Incidentes" stackId="a" fill="#f43f5e"><LabelList dataKey="Incidente" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar><Bar dataKey="Melhoria" name="Melhorias" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar><Bar dataKey="Nova Automação" name="Novas Auto." stackId="a" fill="#6366f1"><LabelList dataKey="Nova Automação" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar><Bar dataKey="Agendamento de Execução" name="Agendamentos" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]}><LabelList dataKey="Agendamento de Execução" position="center" fill="#fff" fontSize={10} formatter={(val:number) => val > 0 ? val : ''} /></Bar></BarChart>;
           }
           if (widget.type === 'status') {
-             return <BarChart data={statusByTypeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }} barSize={40}><CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} /><XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} /><YAxis stroke="#94a3b8" /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{paddingTop: '10px'}} /><Bar dataKey="Incidente" stackId="a" fill="#f43f5e"><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar><Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar><Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]}><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar></BarChart>;
+             return <BarChart data={statusByTypeData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }} barSize={40}><CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} /><XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} /><YAxis stroke="#94a3b8" /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{paddingTop: '10px'}} /><Bar dataKey="Incidente" stackId="a" fill="#f43f5e"><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar><Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar><Bar dataKey="Nova Automação" stackId="a" fill="#6366f1"><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar><Bar dataKey="Agendamento de Execução" name="Agendamento" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]}><LabelList dataKey="Agendamento de Execução" content={renderCustomBarLabel} /></Bar></BarChart>;
           }
           if (widget.type === 'devType') {
-              return <ComposedChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }} barSize={32}><CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} /><XAxis type="number" stroke="#64748b" tick={{fontSize: 10}} hide /><YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} width={150} interval={0} tickLine={false} axisLine={false} /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{paddingTop: '10px'}} /><Bar dataKey="Incidente" stackId="a" fill="#f43f5e" radius={[4, 0, 0, 4]}><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar><Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar><Bar dataKey="Nova Automação" stackId="a" fill="#6366f1" radius={[0, 4, 4, 0]}><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar><Line dataKey="total" stroke="none" isAnimationActive={false}><LabelList dataKey="total" position="right" style={{ fill: "#94a3b8", fontSize: "12px", fontWeight: "bold" }} formatter={(val: any) => `Total: ${val}`} /></Line></ComposedChart>;
+              return <ComposedChart data={devTypeData} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }} barSize={32}><CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} vertical={true} opacity={0.2} /><XAxis type="number" stroke="#64748b" tick={{fontSize: 10}} hide /><YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{fontSize: 12, fill: '#cbd5e1', fontWeight: 500}} width={150} interval={0} tickLine={false} axisLine={false} /><Tooltip content={<CustomTooltip />} cursor={{fill: '#334155', opacity: 0.2}} /><Legend wrapperStyle={{paddingTop: '10px'}} /><Bar dataKey="Incidente" stackId="a" fill="#f43f5e" radius={[4, 0, 0, 4]}><LabelList dataKey="Incidente" content={renderCustomBarLabel} /></Bar><Bar dataKey="Melhoria" stackId="a" fill="#10b981"><LabelList dataKey="Melhoria" content={renderCustomBarLabel} /></Bar><Bar dataKey="Nova Automação" stackId="a" fill="#6366f1"><LabelList dataKey="Nova Automação" content={renderCustomBarLabel} /></Bar><Bar dataKey="Agendamento de Execução" name="Agendamentos" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]}><LabelList dataKey="Agendamento de Execução" content={renderCustomBarLabel} /></Bar><Line dataKey="total" stroke="none" isAnimationActive={false}><LabelList dataKey="total" position="right" style={{ fill: "#94a3b8", fontSize: "12px", fontWeight: "bold" }} formatter={(val: any) => `Total: ${val}`} /></Line></ComposedChart>;
           }
           if (widget.type === 'automationsByManager') {
              return <BarChart data={automationsByManagerData}><CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} /><XAxis dataKey="name" stroke="#94a3b8" tick={{fontSize: 10}} /><YAxis stroke="#94a3b8" allowDecimals={false} /><Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#fff' }} cursor={{fill: '#334155', opacity: 0.4}} /><Bar dataKey="value" name="Automações" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={40}><LabelList dataKey="value" position="top" fill="#fff" /></Bar></BarChart>;
@@ -4757,7 +4780,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
              <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-semibold text-slate-200">{widget.title}</h3><div className="flex items-center gap-2">{isEditMode && ['priority', 'status', 'incidentByAuto', 'automationsByManager', 'fteByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<select className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none" value={widget.visualStyle || 'bar'} onChange={(e) => changeVisualStyle(widget.id, e.target.value)}><option value="bar">Barras</option><option value="pie">Pizza</option></select>)}{isEditMode && (<div className="flex items-center gap-1 bg-slate-900 rounded p-1"><button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400">↔</button><button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400">✕</button></div>)}</div></div>
              <div className="flex-1 min-h-[250px]">
                   {widget.type === 'cards' && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 h-full">
                       <div 
                         onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }} 
                         className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-indigo-400 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
@@ -4828,9 +4851,27 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           <span className="text-[11px] text-indigo-300/70 font-medium">em aberto</span>
                         </div>
                       </div>
+
+                      <div 
+                        onClick={() => { setSelectedKpiModal('schedulings'); setKpiSearch(''); }} 
+                        style={{ animationDelay: '160ms' }}
+                        className="bg-amber-950/20 p-4 rounded-xl border border-amber-500/30 hover:border-amber-400 hover:bg-amber-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        title="Clique para ver os Agendamentos de Execução"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-400 text-xs uppercase font-bold tracking-wider">Agendamentos</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 group-hover:bg-amber-600/30 group-hover:border-amber-400 text-amber-300 group-hover:text-amber-100 transition-all font-semibold flex items-center gap-1">
+                            Ver detalhes →
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-2">
+                          <span className="text-3xl font-bold text-white group-hover:text-amber-100 transition-colors">{metrics.schedulings}</span>
+                          <span className="text-[11px] text-amber-300/70 font-medium">em aberto</span>
+                        </div>
+                      </div>
                     </div>
                   )}
-                 {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 md:grid-cols-4 gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between animate-fade-in transition-all hover:bg-indigo-900/20"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div style={{ animationDelay: '40ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div style={{ animationDelay: '80ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div style={{ animationDelay: '120ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div></div>)}
+                 {widget.type === 'completedKPIs' && (<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 h-full"><div className="bg-indigo-900/10 p-4 rounded-lg border-t-2 border-indigo-500 flex flex-col justify-between animate-fade-in transition-all hover:bg-indigo-900/20"><span className="text-indigo-300 text-xs uppercase font-bold">Total Concluído</span><span className="text-3xl font-bold text-white">{completedMetrics.total}</span></div><div style={{ animationDelay: '40ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-rose-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-rose-300 text-xs uppercase font-bold">Incid. Fechados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.incidents}</span></div><div style={{ animationDelay: '80ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-emerald-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-emerald-300 text-xs uppercase font-bold">Melhorias Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.features}</span></div><div style={{ animationDelay: '120ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-indigo-800 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-indigo-300 text-xs uppercase font-bold">Automações Entregues</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.automations}</span></div><div style={{ animationDelay: '160ms' }} className="bg-slate-900/50 p-4 rounded-lg border-t-2 border-amber-600 flex flex-col justify-between opacity-80 animate-fade-in transition-all hover:opacity-100"><span className="text-amber-300 text-xs uppercase font-bold">Agendamentos Executados</span><span className="text-3xl font-bold text-slate-300">{completedMetrics.schedulings}</span></div></div>)}
                  {widget.type === 'capacity' && (<div className="h-full flex flex-col">{capacityData.length > 0 && (<div className="bg-emerald-900/20 border border-emerald-700/50 px-4 py-4 rounded-lg mb-4 flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"><IconClock className="w-6 h-6" /></div><div><p className="text-[11px] text-emerald-400 font-bold uppercase tracking-widest mb-1">Sugestão (Disponível 1º)</p><p className="text-xl text-white font-bold leading-none">{capacityData[0].name}</p><p className="text-xs text-slate-400 mt-1">Livre em aprox. <span className="text-white font-mono">{formatDuration(capacityData[0].totalHours)}</span></p></div></div>)}<div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2"><table className="w-full text-sm"><thead className="text-xs text-slate-400 uppercase bg-slate-900/50"><tr><th className="text-left p-2 rounded-l">Dev</th><th className="text-center p-2">Qtd</th><th className="text-center p-2">Backlog</th><th className="text-center p-2">Dias Est.</th><th className="text-center p-2 rounded-r">Saúde</th></tr></thead><tbody className="divide-y divide-slate-700/50">{capacityData.map((dev, idx) => { const estimatedDays = Math.ceil(dev.totalHours / 8); let statusColor = 'bg-emerald-500 text-white'; let statusText = 'Livre'; let barColor = 'bg-emerald-500'; if (dev.totalHours > 40) { statusColor = 'bg-rose-500 text-white'; statusText = 'Sobrecarga'; barColor = 'bg-rose-500'; } else if (dev.totalHours > 24) { statusColor = 'bg-orange-500 text-white'; statusText = 'Ocupado'; barColor = 'bg-orange-500'; } else if (dev.totalHours > 8) { statusColor = 'bg-yellow-500 text-black'; statusText = 'Moderado'; barColor = 'bg-yellow-500'; } return (<tr key={dev.name} className="group hover:bg-slate-700/30"><td className="p-2"><div className="font-medium text-slate-200">{dev.name}</div><div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden"><div className={`h-full ${barColor}`} style={{ width: `${Math.min((dev.totalHours / 60) * 100, 100)}%` }}></div></div></td><td className="p-2 text-center text-slate-300 font-bold">{dev.activeTasksCount}</td><td className="p-2 text-center font-mono text-slate-300">{formatDuration(dev.totalHours)}</td><td className="p-2 text-center text-slate-400">{estimatedDays}d</td><td className="p-2 text-center"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusColor}`}>{statusText}</span></td></tr>) })}</tbody></table></div></div>)}
                  {widget.type === 'portfolioForecast' && (
                     <div className="flex flex-col h-full space-y-4 animate-fade-in">
@@ -5025,6 +5066,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           <div style={{ width: `${portfolioForecastData.autoPct}%` }} className="bg-indigo-500 h-full transition-all" title={`Automações: ${portfolioForecastData.automationHours}h (${portfolioForecastData.autoPct}%)`}></div>
                           <div style={{ width: `${portfolioForecastData.featPct}%` }} className="bg-emerald-500 h-full transition-all" title={`Melhorias: ${portfolioForecastData.featureHours}h (${portfolioForecastData.featPct}%)`}></div>
                           <div style={{ width: `${portfolioForecastData.incPct}%` }} className="bg-rose-500 h-full transition-all" title={`Incidentes: ${portfolioForecastData.incidentHours}h (${portfolioForecastData.incPct}%)`}></div>
+                          <div style={{ width: `${portfolioForecastData.schedPct}%` }} className="bg-amber-500 h-full transition-all" title={`Agendamentos: ${portfolioForecastData.schedulingHours}h (${portfolioForecastData.schedPct}%)`}></div>
                         </div>
                         <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-1 gap-2">
                           <span className="flex items-center gap-1.5">
@@ -5038,6 +5080,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           <span className="flex items-center gap-1.5">
                             <span className="w-2 h-2 rounded-full bg-rose-500"></span>
                             <span>Incidentes: <strong className="text-slate-200 font-mono">{portfolioForecastData.incidentHours}h</strong> ({portfolioForecastData.incPct}%)</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                            <span>Agendamentos: <strong className="text-slate-200 font-mono">{portfolioForecastData.schedulingHours}h</strong> ({portfolioForecastData.schedPct}%)</span>
                           </span>
                         </div>
                       </div>
@@ -5173,6 +5219,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
               selectedKpiModal === 'incidents' ? 'bg-gradient-to-r from-rose-500 via-rose-400 to-amber-500' :
               selectedKpiModal === 'features' ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500' :
               selectedKpiModal === 'automations' ? 'bg-gradient-to-r from-indigo-500 via-blue-400 to-cyan-500' :
+              selectedKpiModal === 'schedulings' ? 'bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-500' :
               'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500'
             }`} />
 
@@ -5184,7 +5231,8 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                     <span className="text-xl">
                       {selectedKpiModal === 'incidents' ? '🚨' :
                        selectedKpiModal === 'features' ? '✨' :
-                       selectedKpiModal === 'automations' ? '🤖' : '📊'}
+                       selectedKpiModal === 'automations' ? '🤖' :
+                       selectedKpiModal === 'schedulings' ? '⏱️' : '📊'}
                     </span>
                     <span>{modalTitle}</span>
                   </h3>
@@ -5192,6 +5240,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                     selectedKpiModal === 'incidents' ? 'bg-rose-950/80 text-rose-300 border-rose-500/50' :
                     selectedKpiModal === 'features' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50' :
                     selectedKpiModal === 'automations' ? 'bg-indigo-950/80 text-indigo-300 border-indigo-500/50' :
+                    selectedKpiModal === 'schedulings' ? 'bg-amber-950/80 text-amber-300 border-amber-500/50' :
                     'bg-slate-800 text-slate-200 border-slate-700'
                   }`}>
                     {modalTasks.length} {modalTasks.length === 1 ? 'demanda ativa' : 'demandas ativas'}
@@ -5247,6 +5296,18 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                   >
                     <span>Automações</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{metrics.automations}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedKpiModal('schedulings'); setKpiSearch(''); }}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      selectedKpiModal === 'schedulings'
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-900/50 scale-105'
+                        : 'bg-slate-800/90 text-amber-300 hover:text-amber-100 hover:bg-amber-950/50 border border-slate-700/80'
+                    }`}
+                  >
+                    <span>Agendamentos</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono font-semibold">{metrics.schedulings}</span>
                   </button>
                 </div>
               </div>
@@ -5377,6 +5438,16 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                           title="Mudar classificação para Incidente"
                         >
                           🔄 p/ Incidente
+                        </button>
+                      )}
+                      {t.type !== 'Agendamento de Execução' && (
+                        <button 
+                          type="button"
+                          onClick={() => handleQuickSwitchType(t, 'Agendamento de Execução')}
+                          className="text-[11px] bg-amber-950/70 hover:bg-amber-900 border border-amber-500/50 text-amber-200 px-2.5 py-1 rounded-lg transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                          title="Mudar classificação para Agendamento"
+                        >
+                          🔄 p/ Agendamento
                         </button>
                       )}
                       
@@ -6832,6 +6903,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                                 <option value="Incidente">Incidente</option>
                                 <option value="Melhoria">Melhoria</option>
                                 <option value="Nova Automação">Nova Automação</option>
+                                <option value="Agendamento de Execução">Agendamento de Execução</option>
                             </select>
                         </div>
                         <div>
@@ -7666,10 +7738,18 @@ export default function App() {
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null });
+  const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null, 'Agendamento de Execução': null });
   const [backupExcelFile, setBackupExcelFile] = useState<File | null>(null);
   const [isProcessingBackupExcel, setIsProcessingBackupExcel] = useState(false);
   const [uploadFeedback, setUploadFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [appToast, setAppToast] = useState<{ type: 'error' | 'success' | 'info'; title?: string; message: string } | null>(null);
+
+  const showToast = useCallback((type: 'error' | 'success' | 'info', message: string, title?: string) => {
+    setAppToast({ type, message, title });
+    setTimeout(() => {
+      setAppToast(prev => (prev?.message === message ? null : prev));
+    }, 4500);
+  }, []);
   const [excelBackupPreview, setExcelBackupPreview] = useState<{
     file: File;
     snapshot: any;
@@ -7848,6 +7928,7 @@ export default function App() {
       if (uploadFiles['Incidente']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Incidente'], 'Incidente')]; 
       if (uploadFiles['Melhoria']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Melhoria'], 'Melhoria')]; 
       if (uploadFiles['Nova Automação']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Nova Automação'], 'Nova Automação')]; 
+      if (uploadFiles['Agendamento de Execução']) allNewTasks = [...allNewTasks, ...await ExcelService.parseFile(uploadFiles['Agendamento de Execução'], 'Agendamento de Execução')]; 
       
       if (allNewTasks.length === 0) {
         setUploadFeedback({ type: 'error', message: "Nenhuma demanda válida foi encontrada nos arquivos selecionados. Verifique as colunas das planilhas." });
@@ -7909,9 +7990,10 @@ export default function App() {
     if (!trimmed) {
       return { success: false, message: 'O nome do desenvolvedor não pode ficar vazio.' };
     }
-    const targetClean = String(id || '').trim().toLowerCase();
+    const cleanId = String(id || '').trim();
+    const targetClean = cleanId.toLowerCase();
     const targetDev = devs.find(d => 
-      String(d.id || '').trim() === String(id || '').trim() || 
+      (cleanId && d.id && String(d.id).trim() === cleanId) || 
       d.name.trim().toLowerCase() === targetClean
     );
     if (!targetDev) {
@@ -7920,8 +8002,9 @@ export default function App() {
     if (targetDev.name.trim() === trimmed) {
       return { success: true, message: 'Nome mantido sem alterações.' };
     }
+    const targetDevId = targetDev.id || `dev-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const nameConflict = devs.some(d => 
-      String(d.id || '').trim() !== String(targetDev.id || '').trim() && 
+      ((d.id && String(d.id).trim() !== String(targetDevId).trim()) || (!d.id && d !== targetDev)) && 
       d.name.trim().toLowerCase() === trimmed.toLowerCase()
     );
     if (nameConflict) {
@@ -7929,13 +8012,14 @@ export default function App() {
     }
 
     const oldName = targetDev.name;
-    const updatedDevs = devs.map(d => 
-      (String(d.id || '').trim() === String(targetDev.id || '').trim() || d.name.trim().toLowerCase() === oldName.trim().toLowerCase())
-        ? { ...d, name: trimmed } 
-        : d
-    );
+    const updatedDevs = devs.map(d => {
+      const isTarget = (cleanId && d.id && String(d.id).trim() === cleanId) || 
+                       d.name.trim().toLowerCase() === oldName.trim().toLowerCase();
+      return isTarget ? { ...d, id: d.id || targetDevId, name: trimmed } : d;
+    });
     setDevs(updatedDevs);
-    StorageService.updateDev(targetDev.id, trimmed);
+    StorageService.updateDev(targetDevId, trimmed);
+    StorageService.saveDevs(updatedDevs);
     if (user?.id) {
       FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase update dev notice:', e));
     }
@@ -7951,19 +8035,22 @@ export default function App() {
       if (user?.id) {
         FirebaseService.saveTasksBatch(updatedTasks, user.id).catch(e => console.warn('Cascade dev rename tasks error:', e));
       }
+      showToast('success', `Desenvolvedor atualizado para "${trimmed}" (${assignedTasks.length} demanda(s) vinculada(s) sincronizada(s)).`);
       return { 
         success: true, 
         message: `Desenvolvedor atualizado para "${trimmed}" com sucesso! (${assignedTasks.length} demanda(s) vinculada(s) atualizada(s)).` 
       };
     }
 
+    showToast('success', `Desenvolvedor atualizado para "${trimmed}" com sucesso!`);
     return { success: true, message: `Nome do desenvolvedor alterado para "${trimmed}" com sucesso!` };
   };
 
   const handleDeleteDev = (id: string): { success: boolean; message: string } => {
-    const targetClean = String(id || '').trim().toLowerCase();
+    const cleanId = String(id || '').trim();
+    const targetClean = cleanId.toLowerCase();
     const devToDelete = devs.find(d => 
-      String(d.id || '').trim() === String(id || '').trim() || 
+      (cleanId && d.id && String(d.id).trim() === cleanId) || 
       d.name.trim().toLowerCase() === targetClean
     );
     if (!devToDelete) {
@@ -7971,14 +8058,17 @@ export default function App() {
     }
 
     const devName = devToDelete.name;
-    const updatedDevs = devs.filter(d => 
-      String(d.id || '').trim() !== String(devToDelete.id || '').trim() && 
-      d.name.trim().toLowerCase() !== devName.trim().toLowerCase()
-    );
+    const devId = devToDelete.id || devName;
+    const updatedDevs = devs.filter(d => {
+      const isTarget = (cleanId && d.id && String(d.id).trim() === cleanId) || 
+                       d.name.trim().toLowerCase() === devName.trim().toLowerCase();
+      return !isTarget;
+    });
     setDevs(updatedDevs);
-    StorageService.deleteDev(devToDelete.id);
+    StorageService.deleteDev(devId);
+    StorageService.saveDevs(updatedDevs);
     if (user?.id) {
-      FirebaseService.deleteDev(devToDelete.id, user.id).catch(e => console.warn('Firebase deleteDev notice:', e));
+      FirebaseService.deleteDev(devId, user.id).catch(e => console.warn('Firebase deleteDev notice:', e));
       FirebaseService.saveDevs(updatedDevs, user.id).catch(e => console.warn('Firebase saveDevs after delete notice:', e));
     }
 
@@ -7995,6 +8085,7 @@ export default function App() {
       }
     }
 
+    showToast('success', `Desenvolvedor "${devName}" excluído com sucesso da equipe.`);
     return { 
       success: true, 
       message: `Desenvolvedor "${devName}" excluído com sucesso da equipe.` 
@@ -8004,16 +8095,24 @@ export default function App() {
   const handleTaskUpdate = (updatedTask: Task) => { 
     if (!user) return; 
     const cleanId = (updatedTask.id || '').trim();
-    if (!cleanId) { return; } 
+    if (!cleanId) { 
+      showToast('error', 'O número do chamado (ID) é obrigatório.', 'Campo Obrigatório');
+      return; 
+    } 
     const cleanSummary = (updatedTask.summary || '').trim();
-    if (!cleanSummary) { return; }
+    if (!cleanSummary) { 
+      showToast('error', 'A descrição da solicitação é obrigatória.', 'Campo Obrigatório');
+      return; 
+    }
 
     if (updatedTask.estimatedTime && !isValidDurationString(updatedTask.estimatedTime)) {
-        return;
+      showToast('error', 'Formato de tempo estimado inválido (ex: 8h, 2d ou 02:30).', 'Formato Inválido');
+      return;
     }
 
     if (updatedTask.actualTime && !isValidDurationString(updatedTask.actualTime)) {
-        return;
+      showToast('error', 'Formato de tempo real inválido (ex: 8h, 2d ou 02:30).', 'Formato Inválido');
+      return;
     }
 
     const isCreating = !editingTask?.id || editingTask.id.trim() === '';
@@ -8026,6 +8125,11 @@ export default function App() {
     );
 
     if (duplicate) {
+      showToast(
+        'error',
+        `O número de chamado (ID) "${cleanId}" já está cadastrado na demanda "${duplicate.summary}". Não é permitido duplicar o número de chamado. Por favor, informe um ID único.`,
+        'Número de Chamado Repetido!'
+      );
       console.warn(`Tentativa de cadastrar chamado com ID duplicado "${cleanId}". Operação bloqueada.`);
       return;
     }
@@ -8405,6 +8509,7 @@ export default function App() {
                   <option value="Melhoria">Forçar todas como Melhoria</option>
                   <option value="Nova Automação">Forçar todas como Nova Automação</option>
                   <option value="Incidente">Forçar todas como Incidente</option>
+                  <option value="Agendamento de Execução">Forçar todas como Agendamento de Execução</option>
                 </select>
               </div>
             </div>
@@ -8448,6 +8553,7 @@ export default function App() {
                                   incidentsCount: updatedTasks.filter((task: any) => task.type === 'Incidente').length,
                                   improvementsCount: updatedTasks.filter((task: any) => task.type === 'Melhoria').length,
                                   automationsCount: updatedTasks.filter((task: any) => task.type === 'Nova Automação').length,
+                                  schedulingsCount: updatedTasks.filter((task: any) => task.type === 'Agendamento de Execução').length,
                                 };
                                 setExcelBackupPreview({
                                   ...excelBackupPreview,
@@ -8466,12 +8572,15 @@ export default function App() {
                                   ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
                                   : t.type === 'Nova Automação'
                                   ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                  : t.type === 'Agendamento de Execução'
+                                  ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
                                   : 'bg-rose-950/80 text-rose-300 border-rose-600/50'
                               }`}
                             >
                               <option value="Melhoria">Melhoria</option>
                               <option value="Nova Automação">Nova Automação</option>
                               <option value="Incidente">Incidente</option>
+                              <option value="Agendamento de Execução">Agendamento de Execução</option>
                             </select>
                           </td>
                           <td className="py-1.5 px-2 truncate max-w-[200px]" title={t.summary}>{t.summary}</td>
@@ -8552,7 +8661,8 @@ export default function App() {
         {[
           { type: 'Melhoria' as TaskType, desc: 'Evolutivas, melhorias em robôs/processos e novas features', badgeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
           { type: 'Nova Automação' as TaskType, desc: 'Projetos de criação e implantação de novos robôs RPA', badgeColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' },
-          { type: 'Incidente' as TaskType, desc: 'Chamados técnicos, erros, falhas e correções', badgeColor: 'text-rose-400 bg-rose-500/10 border-rose-500/30' }
+          { type: 'Incidente' as TaskType, desc: 'Chamados técnicos, erros, falhas e correções', badgeColor: 'text-rose-400 bg-rose-500/10 border-rose-500/30' },
+          { type: 'Agendamento de Execução' as TaskType, desc: 'Agendamentos e disparos periódicos de robôs e rotinas', badgeColor: 'text-amber-400 bg-amber-500/10 border-amber-500/30' }
         ].map(({ type, desc, badgeColor }) => (
           <div key={type} className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-700/60">
             <div className="flex-1 min-w-0">
@@ -8615,6 +8725,38 @@ export default function App() {
     onDelete={handleTaskDelete}
     onOpenManageDevs={() => setIsManageDevsOpen(true)}
   />
+)}
+{appToast && (
+  <div 
+    className="fixed top-5 right-5 z-[100] max-w-md w-full animate-fade-in p-4 rounded-2xl shadow-2xl backdrop-blur-md border flex items-start gap-3 transition-all"
+    style={{
+      backgroundColor: appToast.type === 'error' ? 'rgba(69, 10, 10, 0.95)' : appToast.type === 'success' ? 'rgba(6, 78, 59, 0.95)' : 'rgba(15, 23, 42, 0.95)',
+      borderColor: appToast.type === 'error' ? 'rgba(239, 68, 68, 0.8)' : appToast.type === 'success' ? 'rgba(16, 185, 129, 0.8)' : 'rgba(99, 102, 241, 0.8)',
+    }}
+    role="alert"
+  >
+    <span className="text-xl shrink-0 mt-0.5">
+      {appToast.type === 'error' ? '⚠️' : appToast.type === 'success' ? '✅' : 'ℹ️'}
+    </span>
+    <div className="flex-1 min-w-0">
+      {appToast.title && (
+        <h4 className="font-bold text-sm text-white leading-snug">
+          {appToast.title}
+        </h4>
+      )}
+      <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
+        {appToast.message}
+      </p>
+    </div>
+    <button 
+      type="button" 
+      onClick={() => setAppToast(null)}
+      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+      aria-label="Fechar notificação"
+    >
+      ✕
+    </button>
+  </div>
 )}
 <DeveloperManagementModal
   isOpen={isManageDevsOpen}

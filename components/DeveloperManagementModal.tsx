@@ -127,7 +127,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
   };
 
   const handleStartEdit = (dev: Developer) => {
-    setEditingId(dev.id);
+    setEditingId(dev.id || dev.name);
     setEditingName(dev.name);
     setFeedback(null);
   };
@@ -304,8 +304,12 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
               </p>
             </div>
           ) : (
-            filteredDevelopers.map(dev => {
-              const isEditing = editingId === dev.id;
+            filteredDevelopers.map((dev, idx) => {
+              const devKey = dev.id || dev.name || `dev-${idx}`;
+              const isEditing = editingId !== null && (
+                String(editingId).trim() === String(dev.id || '').trim() || 
+                String(editingId).trim().toLowerCase() === dev.name.trim().toLowerCase()
+              );
               const assignedTasksCount = taskCountByDev[dev.name.trim().toLowerCase()] || 0;
               const gradient = getAvatarGradient(dev.name);
               const initials = getInitials(dev.name);
@@ -313,7 +317,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
               if (isEditing) {
                 return (
                   <form
-                    key={dev.id}
+                    key={devKey}
                     onSubmit={(e) => handleSaveEditSubmit(dev, e)}
                     className="p-3 bg-dark-950 border-2 border-indigo-500/80 rounded-xl shadow-lg flex flex-col sm:flex-row items-stretch sm:items-center gap-2 animate-fade-in"
                   >
@@ -339,7 +343,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
                     </div>
                     <div className="flex items-center justify-end gap-1.5 shrink-0 pt-1 sm:pt-0">
                       <button
-                        type="submit"
+                        type="button"
                         onClick={(e) => handleSaveEditSubmit(dev, e)}
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm cursor-pointer transition-colors"
                         title="Salvar alteração (Enter)"
@@ -365,7 +369,7 @@ export const DeveloperManagementModal: React.FC<DeveloperManagementModalProps> =
 
               return (
                 <div
-                  key={dev.id}
+                  key={devKey}
                   className="group p-3 bg-dark-950/80 hover:bg-dark-950 border border-slate-800 hover:border-slate-700/80 rounded-xl flex items-center justify-between gap-3 transition-all"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">

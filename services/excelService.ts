@@ -405,8 +405,17 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
       .replace(/[\u0300-\u036f]/g, '')
       .trim();
 
-    // 1. Melhoria check (includes "melhoria em robo", "melhoria rpa", "melhoria de automacao", "projeto de melhoria", "evolutiva", "ajuste", "otimizacao", "feature", "change", etc.)
+    // 0. Agendamento de Execução check
     if (
+      et.includes('agend') || 
+      et.includes('execuc') || 
+      et.includes('schedul') ||
+      et.includes('disparo')
+    ) {
+      explicitType = 'Agendamento de Execução';
+    }
+    // 1. Melhoria check (check this FIRST to catch "Melhoria em Robô" / "Evolutiva de Automação")
+    else if (
       et.includes('melhoria') || 
       et.includes('evolutiv') || 
       et.includes('enhancement') || 
@@ -456,7 +465,9 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
   // Check Category or Subcategory if explicitType not found yet
   if (!explicitType) {
     const catScan = `${category} ${subcategory}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (catScan.includes('melhoria') || catScan.includes('evolutiv') || catScan.includes('enhancement') || catScan.includes('feature') || catScan.includes('ajuste')) {
+    if (catScan.includes('agend') || catScan.includes('execuc') || catScan.includes('schedul')) {
+      explicitType = 'Agendamento de Execução';
+    } else if (catScan.includes('melhoria') || catScan.includes('evolutiv') || catScan.includes('enhancement') || catScan.includes('feature') || catScan.includes('ajuste')) {
       explicitType = 'Melhoria';
     } else if (catScan.includes('incid') || catScan.includes('bug') || catScan.includes('defeito') || catScan.includes('corretiv')) {
       explicitType = 'Incidente';
@@ -468,7 +479,9 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
   let type: TaskType = explicitType || defaultType || 'Incidente';
   if (!explicitType && !defaultType) {
     const idClean = String(id).toUpperCase().trim();
-    if (idClean.match(/^(INC|BUG|ERR|DEF|CHAM|SUP)/i)) {
+    if (idClean.match(/^(SCH|AGE|EXEC)/i)) {
+      type = 'Agendamento de Execução';
+    } else if (idClean.match(/^(INC|BUG|ERR|DEF|CHAM|SUP)/i)) {
       type = 'Incidente';
     } else if (idClean.match(/^(MEL|IMP|ENH|FEAT|US|HIST|CHG|RFC)/i)) {
       type = 'Melhoria';
@@ -480,6 +493,13 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
       if (
+        textToScan.includes('agend') ||
+        textToScan.includes('execuc') ||
+        textToScan.includes('schedul') ||
+        textToScan.includes('disparo')
+      ) {
+        type = 'Agendamento de Execução';
+      } else if (
         textToScan.includes('melhoria') || 
         textToScan.includes('evolutiv') || 
         textToScan.includes('feature') || 
@@ -780,6 +800,7 @@ export const ExcelService = {
       incidentsCount: parsedTasks.filter(t => t.type === 'Incidente').length,
       improvementsCount: parsedTasks.filter(t => t.type === 'Melhoria').length,
       automationsCount: parsedTasks.filter(t => t.type === 'Nova Automação').length,
+      schedulingsCount: parsedTasks.filter(t => t.type === 'Agendamento de Execução').length,
       devsCount: devs.length,
       robotsCount: parsedRobots.length
     };
