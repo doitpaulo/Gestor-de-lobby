@@ -265,6 +265,40 @@ export const parseCivilDate = (dateStr?: string | null): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
+export interface AppNotification {
+  id: string;
+  taskId: string;
+  task: Task;
+  category: 'SCHEDULE_TODAY' | 'DEADLINE_TODAY' | 'DEADLINE_TOMORROW' | 'DEADLINE_APPROACHING' | 'OVERDUE';
+  title: string;
+  subtitle: string;
+  dateStr: string;
+  diffDays: number;
+  severity: 'danger' | 'warning' | 'info';
+  isSchedule: boolean;
+}
+
+export const getTodayCivilString = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getDaysDifferenceFromToday = (targetDateStr?: string | null): number | null => {
+  if (!targetDateStr) return null;
+  const cleanTarget = String(targetDateStr).split('T')[0].trim();
+  const targetDate = parseCivilDate(cleanTarget);
+  if (!targetDate) return null;
+
+  const today = parseCivilDate(getTodayCivilString());
+  if (!today) return null;
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  return Math.round((targetDate.getTime() - today.getTime()) / msPerDay);
+};
+
 // Safe duration parser (returns strictly positive finite number in hours, never NaN or negative)
 export const parseDuration = (timeStr?: string | number | null): number => {
   if (timeStr === undefined || timeStr === null) return 0;
