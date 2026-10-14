@@ -15,7 +15,7 @@ import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { DeveloperManagementModal } from './components/DeveloperManagementModal';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
@@ -273,6 +273,31 @@ const ConsolidatedReportService = {
       'Pasta': r.folder
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(robotData), "Inventário RPA");
+
+    // 6. Demandas de Envio & Custos (Agendamentos de Execução)
+    const schedTasks = tasks.filter(t => t.type === 'Agendamento de Execução' || t.hasCost !== undefined);
+    if (schedTasks.length > 0) {
+      const enviosCustosData = schedTasks.map(t => {
+        const dispatch = Number(t.dispatchCount) || 0;
+        const cost = Number(t.costValue) || 0;
+        const unitCost = dispatch > 0 && cost > 0 ? (cost / dispatch).toFixed(4) : '-';
+        return {
+          'ID / Chamado': t.id,
+          'Demanda / Resumo': t.summary,
+          'Automação / Robô': t.automationName || t.category || '-',
+          'Houve Custo?': t.hasCost ? 'Sim' : 'Não',
+          'Quantidade de Envios': dispatch > 0 ? dispatch : 0,
+          'Valor do Custo (R$)': cost > 0 ? cost : 0,
+          'Custo Unitário (R$/envio)': unitCost,
+          'Responsável': t.assignee || 'Não Atribuído',
+          'Status': t.status,
+          'Prioridade': t.priority,
+          'Solicitante': t.requester || '-',
+          'Data Registro': t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '-'
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(enviosCustosData), "Envios e Custos");
+    }
 
     XLSX.writeFile(wb, `Nexus_Consolidado_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`);
   },
@@ -2256,7 +2281,29 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
                         <option value="Agendamento de Execução" className="bg-slate-900 text-white">Agendamento de Execução</option>
                       </select>
                     </td>
-                    <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">{task.summary}</td>
+                    <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">
+                      <div>{task.summary}</div>
+                      {task.type === 'Agendamento de Execução' && (
+                        <div className="flex items-center gap-2 mt-1 text-[10px] font-mono">
+                          {task.hasCost ? (
+                            <>
+                              <span className="bg-amber-950/70 border border-amber-500/50 text-amber-300 px-1.5 py-0.5 rounded font-semibold">
+                                💰 R$ {Number(task.costValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                              {task.dispatchCount && (
+                                <span className="text-amber-200/80 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded">
+                                  🚀 {Number(task.dispatchCount).toLocaleString('pt-BR')} envios
+                                </span>
+                              )}
+                            </>
+                          ) : task.hasCost === false ? (
+                            <span className="text-slate-400 bg-slate-900/60 border border-slate-700/60 px-1.5 py-0.5 rounded text-[9px]">
+                              🚫 Sem custo
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                    </td>
                     <td className="p-3.5"><Badge type={task.priority} /></td>
                     <td className="p-3.5">
                       <select 
@@ -3792,9 +3839,35 @@ const ProjectReportView = ({ tasks, workflowConfig, devs, sprints = [] }: { task
     );
 };
 
-const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { tasks: Task[], devs: Developer[], robots: Robot[], workflowConfig: WorkflowPhase[], docsConfig: DocumentConfig[] }) => {
+const ReportsView = ({ 
+    tasks, 
+    devs, 
+    robots, 
+    workflowConfig, 
+    docsConfig,
+    onEditTask,
+    onCreateTask,
+    onUpdateTask
+}: { 
+    tasks: Task[]; 
+    devs: Developer[]; 
+    robots: Robot[]; 
+    workflowConfig: WorkflowPhase[]; 
+    docsConfig: DocumentConfig[];
+    onEditTask?: (task: Task) => void;
+    onCreateTask?: () => void;
+    onUpdateTask?: (task: Task) => void;
+}) => {
+    const [activeReportTab, setActiveReportTab] = useState<'downloads' | 'envios_custos' | 'custom' | 'all'>('downloads');
     const [apiKey, setApiKey] = useState<string | null>(StorageService.getApiKey());
-    const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['general', 'exec_summary', 'chart_status']));
+    const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['envios_custos', 'general', 'backlog', 'robots', 'capacity_table', 'exec_summary', 'chart_status']));
+
+    // Filters for "Demandas de Envio e Seus Valores" report
+    const [searchQuery, setSearchQuery] = useState('');
+    const [costFilter, setCostFilter] = useState<'ALL' | 'WITH_COST' | 'WITHOUT_COST'>('ALL');
+    const [statusFilter, setStatusFilter] = useState('ALL');
+    const [devFilter, setDevFilter] = useState('ALL');
+    const [sortBy, setSortBy] = useState<'cost_desc' | 'dispatch_desc' | 'unit_cost_desc' | 'recent' | 'id'>('cost_desc');
 
     const toggleModule = (id: string) => {
         const next = new Set(selectedModules);
@@ -3804,14 +3877,460 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
     };
 
     const handleConsolidatedExport = async () => {
-      // Calls both XLSX and PPT consolidated exports
       ConsolidatedReportService.exportExcel(tasks, robots, workflowConfig, docsConfig, devs);
       await ConsolidatedReportService.exportPPT(tasks, robots, workflowConfig, docsConfig, devs);
+    };
+
+    // All execution scheduling tasks (or any tasks with dispatch/cost data)
+    const schedulingTasks = useMemo(() => {
+        return tasks.filter(t => t.type === 'Agendamento de Execução' || t.hasCost !== undefined || (t.dispatchCount && t.dispatchCount > 0));
+    }, [tasks]);
+
+    // Financial & Operational Metrics
+    const costTasks = useMemo(() => schedulingTasks.filter(t => t.hasCost === true), [schedulingTasks]);
+    const noCostTasks = useMemo(() => schedulingTasks.filter(t => t.hasCost === false), [schedulingTasks]);
+    const totalDispatches = useMemo(() => schedulingTasks.reduce((sum, t) => sum + (Number(t.dispatchCount) || 0), 0), [schedulingTasks]);
+    const totalCost = useMemo(() => schedulingTasks.reduce((sum, t) => sum + (Number(t.costValue) || 0), 0), [schedulingTasks]);
+    const avgCostPerDispatch = totalDispatches > 0 ? (totalCost / totalDispatches) : 0;
+    const avgCostPerDemand = costTasks.length > 0 ? (totalCost / costTasks.length) : 0;
+
+    // Filtered demands for the report table
+    const filteredSchedulingTasks = useMemo(() => {
+        return schedulingTasks.filter(t => {
+            if (costFilter === 'WITH_COST' && t.hasCost !== true) return false;
+            if (costFilter === 'WITHOUT_COST' && t.hasCost === true) return false;
+            if (statusFilter !== 'ALL' && t.status !== statusFilter) return false;
+            if (devFilter !== 'ALL' && (t.assignee || 'Não Atribuído') !== devFilter) return false;
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase().trim();
+                const idMatch = (t.id || '').toLowerCase().includes(q);
+                const summaryMatch = (t.summary || '').toLowerCase().includes(q);
+                const autoMatch = (t.automationName || t.category || '').toLowerCase().includes(q);
+                const devMatch = (t.assignee || '').toLowerCase().includes(q);
+                const reqMatch = (t.requester || '').toLowerCase().includes(q);
+                if (!idMatch && !summaryMatch && !autoMatch && !devMatch && !reqMatch) return false;
+            }
+            return true;
+        }).sort((a, b) => {
+            const costA = Number(a.costValue) || 0;
+            const costB = Number(b.costValue) || 0;
+            const dispA = Number(a.dispatchCount) || 0;
+            const dispB = Number(b.dispatchCount) || 0;
+            const unitA = dispA > 0 ? costA / dispA : 0;
+            const unitB = dispB > 0 ? costB / dispB : 0;
+            if (sortBy === 'cost_desc') return costB - costA;
+            if (sortBy === 'dispatch_desc') return dispB - dispA;
+            if (sortBy === 'unit_cost_desc') return unitB - unitA;
+            if (sortBy === 'id') return (a.id || '').localeCompare(b.id || '');
+            return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        });
+    }, [schedulingTasks, costFilter, statusFilter, devFilter, searchQuery, sortBy]);
+
+    // Filtered totals for dynamic table footer
+    const filteredTotalDispatches = useMemo(() => filteredSchedulingTasks.reduce((s, t) => s + (Number(t.dispatchCount) || 0), 0), [filteredSchedulingTasks]);
+    const filteredTotalCost = useMemo(() => filteredSchedulingTasks.reduce((s, t) => s + (Number(t.costValue) || 0), 0), [filteredSchedulingTasks]);
+    const filteredAvgUnit = filteredTotalDispatches > 0 ? (filteredTotalCost / filteredTotalDispatches) : 0;
+
+    // Breakdown by Automation
+    const automationBreakdown = useMemo(() => {
+        const map: { [key: string]: { count: number; dispatches: number; cost: number } } = {};
+        schedulingTasks.forEach(t => {
+            const key = t.automationName || t.category || (t.summary.length > 25 ? t.summary.substring(0, 25) + '...' : t.summary);
+            if (!map[key]) map[key] = { count: 0, dispatches: 0, cost: 0 };
+            map[key].count += 1;
+            map[key].dispatches += Number(t.dispatchCount) || 0;
+            map[key].cost += Number(t.costValue) || 0;
+        });
+        return Object.entries(map)
+            .map(([name, data]) => ({ name, ...data, unitCost: data.dispatches > 0 ? data.cost / data.dispatches : 0 }))
+            .sort((a, b) => b.cost - a.cost);
+    }, [schedulingTasks]);
+
+    // Breakdown by Status
+    const statusBreakdown = useMemo(() => {
+        const map: { [key: string]: { count: number; dispatches: number; cost: number } } = {};
+        schedulingTasks.forEach(t => {
+            const key = t.status || 'Novo';
+            if (!map[key]) map[key] = { count: 0, dispatches: 0, cost: 0 };
+            map[key].count += 1;
+            map[key].dispatches += Number(t.dispatchCount) || 0;
+            map[key].cost += Number(t.costValue) || 0;
+        });
+        return Object.entries(map).map(([status, data]) => ({ status, ...data })).sort((a, b) => b.cost - a.cost);
+    }, [schedulingTasks]);
+
+    // Breakdown by Dev
+    const devBreakdown = useMemo(() => {
+        const map: { [key: string]: { count: number; dispatches: number; cost: number } } = {};
+        schedulingTasks.forEach(t => {
+            const key = t.assignee || 'Não Atribuído';
+            if (!map[key]) map[key] = { count: 0, dispatches: 0, cost: 0 };
+            map[key].count += 1;
+            map[key].dispatches += Number(t.dispatchCount) || 0;
+            map[key].cost += Number(t.costValue) || 0;
+        });
+        return Object.entries(map).map(([dev, data]) => ({ dev, ...data })).sort((a, b) => b.cost - a.cost);
+    }, [schedulingTasks]);
+
+    // Export Scheduling Report to Excel
+    const handleExportSchedulingExcel = () => {
+        const wb = XLSX.utils.book_new();
+
+        // 1. Resumo Executivo
+        const summaryData = [
+            { Indicador: 'Total de Demandas de Agendamento', Valor: schedulingTasks.length },
+            { Indicador: 'Demandas com Custo Financeiro (Sim)', Valor: costTasks.length },
+            { Indicador: 'Demandas sem Custo (Não)', Valor: noCostTasks.length },
+            { Indicador: 'Volume Total de Envios / Disparos', Valor: totalDispatches },
+            { Indicador: 'Custo Financeiro Total Acumulado (R$)', Valor: totalCost },
+            { Indicador: 'Custo Médio por Envio / Disparo (R$)', Valor: avgCostPerDispatch.toFixed(4) },
+            { Indicador: 'Custo Médio por Demanda Faturada (R$)', Valor: avgCostPerDemand.toFixed(2) },
+            { Indicador: 'Data da Extração', Valor: new Date().toLocaleString('pt-BR') }
+        ];
+        const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, wsSummary, "Resumo Executivo");
+
+        // 2. Tabela Detalhada
+        const detailsData = filteredSchedulingTasks.map(t => {
+            const disp = Number(t.dispatchCount) || 0;
+            const cost = Number(t.costValue) || 0;
+            const unit = disp > 0 && cost > 0 ? (cost / disp).toFixed(4) : '-';
+            return {
+                'ID / Chamado': t.id,
+                'Tipo': t.type,
+                'Demanda / Resumo': t.summary,
+                'Automação / Robô': t.automationName || t.category || '-',
+                'Houve Custo?': t.hasCost ? 'Sim' : 'Não',
+                'Quantidade de Envios': disp,
+                'Valor do Custo (R$)': cost,
+                'Custo Unitário (R$/envio)': unit,
+                'Responsável': t.assignee || 'Não Atribuído',
+                'Status': t.status,
+                'Prioridade': t.priority,
+                'Solicitante': t.requester || '-',
+                'Data Início': t.startDate || '-',
+                'Data Fim': t.endDate || '-',
+                'Data de Cadastro': t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '-'
+            };
+        });
+        const wsDetails = XLSX.utils.json_to_sheet(detailsData);
+        XLSX.utils.book_append_sheet(wb, wsDetails, "Demandas de Envio & Custos");
+
+        // 3. Resumo por Automação
+        const autoData = automationBreakdown.map(a => ({
+            'Automação / Solução': a.name,
+            'Qtd. Demandas': a.count,
+            'Total Envios': a.dispatches,
+            'Custo Total (R$)': a.cost,
+            'Custo Médio Unitário (R$)': a.unitCost.toFixed(4)
+        }));
+        const wsAuto = XLSX.utils.json_to_sheet(autoData);
+        XLSX.utils.book_append_sheet(wb, wsAuto, "Custos por Automação");
+
+        XLSX.writeFile(wb, `Nexus_Relatorio_Envios_e_Custos_${Date.now()}.xlsx`);
+    };
+
+    // Export Scheduling Report to CSV
+    const handleExportSchedulingCSV = () => {
+        const header = 'ID;Demanda;Automacao;HouveCusto;QuantidadeEnvios;ValorCusto;CustoUnitario;Responsavel;Status;Solicitante;DataCadastro';
+        const rows = filteredSchedulingTasks.map(t => {
+            const disp = Number(t.dispatchCount) || 0;
+            const cost = Number(t.costValue) || 0;
+            const unit = disp > 0 && cost > 0 ? (cost / disp).toFixed(4) : '0';
+            return `"${t.id}";"${(t.summary || '').replace(/"/g, '""')}";"${(t.automationName || t.category || '').replace(/"/g, '""')}";"${t.hasCost ? 'Sim' : 'Não'}";${disp};${cost.toFixed(2)};${unit};"${t.assignee || 'Não Atribuído'}";"${t.status}";"${t.requester || '-'}";"${t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '-'}"`;
+        });
+        const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [header, ...rows].join('\n');
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement('a');
+        link.setAttribute('href', encodedUri);
+        link.setAttribute('download', `Nexus_Demandas_Envios_Custos_${Date.now()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    // 1. Export Base Geral de Demandas
+    const handleExportBaseGeralExcel = () => {
+        const data = tasks.map(t => ({
+            'ID': t.id,
+            'Tipo': t.type,
+            'Resumo': t.summary,
+            'Prioridade': t.priority,
+            'Status': t.status,
+            'Responsável': t.assignee || 'Não Atribuído',
+            'Criado Em': t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '',
+            'Solicitante': t.requester || '-',
+            'Estimativa': t.estimatedTime || '',
+            'Tempo Real': t.actualTime || '',
+            'Início': t.startDate || '',
+            'Fim': t.endDate || '',
+            'Gerência': t.managementArea || '',
+            'FTE': t.fteValue || 0,
+            'Houve Custo?': t.hasCost !== undefined ? (t.hasCost ? 'Sim' : 'Não') : '-',
+            'Qtd. Envios': t.dispatchCount || 0,
+            'Valor Custo (R$)': t.costValue || 0
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Base Geral");
+        XLSX.writeFile(wb, `Nexus_Base_Geral_Demandas_${Date.now()}.xlsx`);
+    };
+
+    // 2. Export Relatório de Backlog Ativo
+    const handleExportBacklogExcel = () => {
+        const backlog = tasks.filter(t => !isCompletedStatus(t.status) && !isCancelledStatus(t.status));
+        const data = backlog.map(t => ({
+            'ID': t.id,
+            'Tipo': t.type,
+            'Resumo': t.summary,
+            'Status': t.status,
+            'Prioridade': t.priority,
+            'Responsável': t.assignee || 'Não Atribuído',
+            'Solicitante': t.requester || '-',
+            'Início': t.startDate || '-',
+            'Fim Previsto': t.endDate || '-',
+            'Estimativa': t.estimatedTime || '-'
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Backlog Ativo");
+        XLSX.writeFile(wb, `Nexus_Relatorio_Backlog_${Date.now()}.xlsx`);
+    };
+
+    // 3. Export Inventário de Robôs (RPA)
+    const handleExportRobotsExcel = () => {
+        const data = robots.map(r => ({
+            'Nome do Robô': r.name,
+            'Situação': r.status,
+            'Área': r.area,
+            'Desenvolvedor': r.developer,
+            'Owners': r.owners || '-',
+            'FTE Gerado': r.fte || 0,
+            'Chamado Origem': r.ticketNumber || '-',
+            'Pasta Armazenamento': r.folder
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Inventário Robôs");
+        XLSX.writeFile(wb, `Nexus_Inventario_Robos_${Date.now()}.xlsx`);
+    };
+
+    // 4. Export Capacidade da Equipe (Capacity)
+    const handleExportCapacityExcel = () => {
+        const capacityData = devs.map(dev => {
+            const myTasks = tasks.filter(t => t.assignee === dev.name && !isCompletedStatus(t.status) && !isCancelledStatus(t.status));
+            const totalHours = myTasks.reduce((acc, t) => acc + parseDuration(t.estimatedTime), 0);
+            return {
+                'Desenvolvedor': dev.name,
+                'Demandas Ativas': myTasks.length,
+                'Carga Estimada (h)': totalHours.toFixed(1),
+                'Dias Úteis Estimados': Math.ceil(totalHours / 8),
+                'Diagnóstico de Carga': totalHours > 160 ? 'Sobrecarregado' : totalHours > 100 ? 'Alta Carga' : 'Adequada'
+            };
+        });
+        const ws = XLSX.utils.json_to_sheet(capacityData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Capacidade Equipe");
+        XLSX.writeFile(wb, `Nexus_Capacidade_Equipe_${Date.now()}.xlsx`);
+    };
+
+    // 5. Export Esteira Documental de Projetos
+    const handleExportEsteiraExcel = () => {
+        const activeDocs = docsConfig.filter(d => d.active);
+        const projectDocs = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
+        const data = projectDocs.map(t => {
+            const row: any = {
+                'ID': t.id,
+                'Projeto': t.summary,
+                'Tipo': t.type,
+                'Responsável': t.assignee || 'Não Atribuído',
+                'Status Global': t.status
+            };
+            activeDocs.forEach(d => {
+                row[d.label] = (t.docStatuses || {})[d.id] || 'Pendente';
+            });
+            return row;
+        });
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Esteira Documental");
+        XLSX.writeFile(wb, `Nexus_Esteira_Documental_${Date.now()}.xlsx`);
+    };
+
+    // 6. Export Fluxo de Projetos e Fases
+    const handleExportFluxoExcel = () => {
+        const projectTasks = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
+        const data = projectTasks.map(t => {
+            const row: any = {
+                'ID': t.id,
+                'Projeto': t.summary,
+                'Tipo': t.type,
+                'Responsável': t.assignee || 'Não Atribuído',
+                'Status Global': t.status
+            };
+            workflowConfig.forEach(phase => {
+                const isCurrent = t.projectData?.currentPhaseId === phase.id;
+                row[phase.name] = isCurrent ? (t.projectData?.phaseStatus || 'Não Iniciado') : 'Aguardando/Concluído';
+            });
+            return row;
+        });
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Fluxo de Projetos");
+        XLSX.writeFile(wb, `Nexus_Fluxo_Projetos_${Date.now()}.xlsx`);
+    };
+
+    // 7. Export Fila Estratégica & Riscos PMO
+    const handleExportPmoQueueExcel = () => {
+        const activeTasks = tasks.filter(t => !isCompletedStatus(t.status) && !isCancelledStatus(t.status));
+        const data = activeTasks.map(t => ({
+            'ID do Chamado': t.id,
+            'Tipo de Demanda': t.type,
+            'Título do Projeto': t.summary,
+            'Prioridade': t.priority,
+            'Status': t.status,
+            'FTE Alocado': t.fteValue || 0,
+            'Responsável': t.assignee || 'Sem Alocação',
+            'Data Término': t.endDate || '-',
+            'Gargalo / Blocker': t.blocker || '-'
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Fila e Riscos PMO");
+        XLSX.writeFile(wb, `Nexus_Fila_Riscos_PMO_${Date.now()}.xlsx`);
+    };
+
+    // 8. Export Apresentação Slides PPTX
+    const handleExportPPTXOnly = async () => {
+        await ConsolidatedReportService.exportPPT(tasks, robots, workflowConfig, docsConfig, devs);
+    };
+
+    // Shortcut to create new execution scheduling task
+    const handleNewSchedulingTask = () => {
+        if (onEditTask) {
+            onEditTask({
+                id: '',
+                type: 'Agendamento de Execução',
+                summary: '',
+                description: '',
+                priority: '3 - Moderada',
+                status: 'Novo',
+                assignee: devs.length > 0 ? devs[0].name : null,
+                estimatedTime: '4h',
+                actualTime: '',
+                startDate: new Date().toISOString().split('T')[0],
+                endDate: '',
+                projectPath: '',
+                automationName: '',
+                managementArea: '',
+                fteValue: undefined,
+                createdAt: new Date().toISOString(),
+                requester: 'Key User / Operações',
+                projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] },
+                blocker: '',
+                hasCost: true,
+                dispatchCount: 10000,
+                costValue: 250.00
+            });
+        } else if (onCreateTask) {
+            onCreateTask();
+        }
+    };
+
+    // Quick seed demo scheduling tasks for the key user
+    const handleSeedDemoScheduling = () => {
+        if (!onUpdateTask) return;
+        const now = new Date();
+        const demoTasks: Task[] = [
+            {
+                id: `AG-${Math.floor(1000 + Math.random() * 9000)}`,
+                type: 'Agendamento de Execução',
+                summary: 'Disparo Mensal de Extratos e Demonstrativos Financeiros via Robô RPA',
+                description: 'Processamento em lote e envio massivo de extratos mensais para a carteira de clientes corporativos.',
+                automationName: 'Robô Extratos Faturamento B2B',
+                category: 'Financeiro',
+                priority: '2 - Alta',
+                status: 'Concluído',
+                assignee: devs.length > 0 ? devs[0].name : 'Especialista RPA',
+                requester: 'Gerência Financeira',
+                startDate: new Date(now.getTime() - 86400000 * 5).toISOString().split('T')[0],
+                endDate: new Date(now.getTime() - 86400000 * 2).toISOString().split('T')[0],
+                hasCost: true,
+                dispatchCount: 125000,
+                costValue: 3125.00,
+                createdAt: new Date(now.getTime() - 86400000 * 5).toISOString(),
+                projectData: { currentPhaseId: '4', phaseStatus: 'Concluído', completedActivities: ['Disparo Homologado', 'Lote Transmitido'] }
+            },
+            {
+                id: `AG-${Math.floor(1000 + Math.random() * 9000)}`,
+                type: 'Agendamento de Execução',
+                summary: 'Disparo de Notificações de Cobrança Preventiva WhatsApp D+3',
+                description: 'Envio automatizado de mensagens ativas com código PIX e link de boleto para clientes em atraso recente.',
+                automationName: 'Robô Cobrança Omnichannel',
+                category: 'Crédito & Cobrança',
+                priority: '1 - Crítica',
+                status: 'Em Atendimento',
+                assignee: devs.length > 1 ? devs[1].name : (devs[0]?.name || 'Dev CoE'),
+                requester: 'Operações de Crédito',
+                startDate: new Date(now.getTime() - 86400000 * 2).toISOString().split('T')[0],
+                endDate: new Date(now.getTime() + 86400000 * 3).toISOString().split('T')[0],
+                hasCost: true,
+                dispatchCount: 68400,
+                costValue: 2052.00,
+                createdAt: new Date(now.getTime() - 86400000 * 2).toISOString(),
+                projectData: { currentPhaseId: '3', phaseStatus: 'Em Execução', completedActivities: ['Validação Base'] }
+            },
+            {
+                id: `AG-${Math.floor(1000 + Math.random() * 9000)}`,
+                type: 'Agendamento de Execução',
+                summary: 'Envio Diário de Relatório de Fechamento Operacional por E-mail',
+                description: 'Compilação de dados do ERP e disparo diário de e-mails para os supervisores de turno. Processamento sem custo de disparador externo.',
+                automationName: 'Robô Fechamento Diário ERP',
+                category: 'Controladoria',
+                priority: '3 - Moderada',
+                status: 'Concluído',
+                assignee: devs.length > 0 ? devs[0].name : 'Dev Nexus',
+                requester: 'Supervisão de Turno',
+                startDate: new Date(now.getTime() - 86400000 * 1).toISOString().split('T')[0],
+                endDate: new Date(now.getTime()).toISOString().split('T')[0],
+                hasCost: false,
+                dispatchCount: 850,
+                costValue: 0,
+                createdAt: new Date(now.getTime() - 86400000 * 1).toISOString(),
+                projectData: { currentPhaseId: '4', phaseStatus: 'Concluído', completedActivities: [] }
+            }
+        ];
+        demoTasks.forEach(t => onUpdateTask(t));
     };
 
     const handleCustomExportExcel = () => {
         if (selectedModules.size === 0) return alert('Selecione ao menos um módulo!');
         const wb = XLSX.utils.book_new();
+
+        if (selectedModules.has('envios_custos')) {
+            const schedTasks = tasks.filter(t => t.type === 'Agendamento de Execução' || t.hasCost !== undefined);
+            const data = schedTasks.map(t => {
+                const count = Number(t.dispatchCount) || 0;
+                const cost = Number(t.costValue) || 0;
+                return {
+                    'ID / Chamado': t.id,
+                    'Tipo': t.type,
+                    'Resumo / Demanda': t.summary,
+                    'Automação / Robô': t.automationName || t.category || '-',
+                    'Houve Custo?': t.hasCost ? 'Sim' : 'Não',
+                    'Quantidade de Envios': count,
+                    'Valor do Custo (R$)': cost,
+                    'Custo Unitário (R$/envio)': count > 0 && cost > 0 ? (cost / count).toFixed(4) : '-',
+                    'Responsável': t.assignee || 'Não Atribuído',
+                    'Status': t.status,
+                    'Prioridade': t.priority,
+                    'Solicitante': t.requester || '-',
+                    'Data Registro': t.createdAt ? new Date(t.createdAt).toLocaleDateString('pt-BR') : '-'
+                };
+            });
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Envios e Custos");
+        }
 
         if (selectedModules.has('general')) {
             const data = tasks.map(t => ({ 'ID': t.id, 'Tipo': t.type, 'Resumo': t.summary, 'Prioridade': t.priority, 'Status': t.status, 'Responsável': t.assignee || 'Não Atribuído', 'Criado Em': t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '', 'Solicitante': t.requester, 'Estimativa': t.estimatedTime || '', 'Tempo Real': t.actualTime || '', 'Início': t.startDate || '', 'Fim': t.endDate || '', 'Gerência': t.managementArea || '', 'FTE': t.fteValue || 0 }));
@@ -3838,6 +4357,30 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
             const ws = XLSX.utils.json_to_sheet(capacityData);
             XLSX.utils.book_append_sheet(wb, ws, "Capacidade Equipe");
         }
+        if (selectedModules.has('esteira')) {
+            const activeDocs = docsConfig.filter(d => d.active);
+            const projectDocs = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
+            const data = projectDocs.map(t => {
+                const row: any = { 'ID': t.id, 'Projeto': t.summary, 'Tipo': t.type, 'Responsável': t.assignee || 'Não Atribuído', 'Status': t.status };
+                activeDocs.forEach(d => { row[d.label] = (t.docStatuses || {})[d.id] || 'Pendente'; });
+                return row;
+            });
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Esteira Documental");
+        }
+        if (selectedModules.has('flow')) {
+            const projectTasks = tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação');
+            const data = projectTasks.map(t => {
+                const row: any = { 'ID': t.id, 'Projeto': t.summary, 'Tipo': t.type, 'Responsável': t.assignee || 'Não Atribuído', 'Status': t.status };
+                workflowConfig.forEach(phase => {
+                    const isCurrent = t.projectData?.currentPhaseId === phase.id;
+                    row[phase.name] = isCurrent ? (t.projectData?.phaseStatus || 'Não Iniciado') : 'Aguardando/Concluído';
+                });
+                return row;
+            });
+            const ws = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Fluxo de Projetos");
+        }
 
         XLSX.writeFile(wb, "Nexus_Report_Personalizado.xlsx");
     };
@@ -3847,7 +4390,6 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
         const pres = new pptxgen();
         pres.layout = 'LAYOUT_WIDE';
 
-        // Slide de Capa
         let slide = pres.addSlide();
         slide.background = { color: "0f172a" };
         slide.addText("Relatório de Performance Nexus", { x: 1, y: 3, w: '80%', fontSize: 36, color: 'FFFFFF', bold: true });
@@ -3921,110 +4463,1024 @@ const ReportsView = ({ tasks, devs, robots, workflowConfig, docsConfig }: { task
     const copyToClipboard = () => { if (powerBiUrl) { navigator.clipboard.writeText(powerBiUrl); alert('URL copiada para a área de transferência!'); } };
 
     const exportOptions = [
+        { id: 'envios_custos', label: 'Demandas de Envio & Custos (Agendamentos)', cat: 'Operacional', icon: <IconClock className="w-4 h-4" /> },
         { id: 'general', label: 'Base Geral de Demandas', cat: 'Operacional', icon: <IconList className="w-4 h-4" /> },
         { id: 'backlog', label: 'Relatório de Backlog', cat: 'Operacional', icon: <IconClock className="w-4 h-4" /> },
         { id: 'robots', label: 'Inventário de Robôs', cat: 'Operacional', icon: <IconRobot className="w-4 h-4" /> },
         { id: 'capacity_table', label: 'Tabela de Capacidade', cat: 'Operacional', icon: <IconUsers className="w-4 h-4" /> },
+        { id: 'esteira', label: 'Esteira Documental', cat: 'Operacional', icon: <IconDocument className="w-4 h-4" /> },
+        { id: 'flow', label: 'Fluxo de Projetos / Fases', cat: 'Operacional', icon: <IconProject className="w-4 h-4" /> },
         { id: 'exec_summary', label: 'KPIs do Portfólio (Cards)', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
         { id: 'chart_status', label: 'Gráfico: Status por Tipo', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
         { id: 'chart_fte', label: 'Gráfico: FTE por Área', cat: 'Gerencial', icon: <IconChartBar className="w-4 h-4" /> },
         { id: 'table_capacity', label: 'Tabela: Carga da Equipe', cat: 'Gerencial', icon: <IconUsers className="w-4 h-4" /> },
     ];
 
+    // Catálogo completo de Opções de Relatório para Baixar (10 opções com a nova opção de Envios e Custos)
+    const reportDownloadOptions = [
+        {
+            id: 'envios_custos',
+            title: 'Demandas de Envio & Custos',
+            subtitle: 'Agendamentos de Execução com Gestão Financeira',
+            badge: 'NOVA OPÇÃO',
+            badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/50',
+            cardBorder: 'border-2 border-amber-500/60 bg-gradient-to-br from-amber-950/25 via-slate-900 to-amber-950/40 shadow-xl shadow-amber-950/30',
+            icon: '💰',
+            description: 'Relatório dedicado ao controle de volumetria de disparos, custos totais apurados, custo unitário por envio e faturamento dos agendamentos de execução.',
+            stats: [
+                { label: 'Agendamentos', value: `${schedulingTasks.length}` },
+                { label: 'Total de Envios', value: totalDispatches.toLocaleString('pt-BR') },
+                { label: 'Custo Total', value: `R$ ${totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` }
+            ],
+            actions: [
+                { label: 'Baixar em Excel (.xlsx)', onClick: handleExportSchedulingExcel, variant: 'primary', icon: <IconDownload className="w-4 h-4" /> },
+                { label: 'Baixar em CSV', onClick: handleExportSchedulingCSV, variant: 'secondary', icon: <IconDocument className="w-4 h-4" /> }
+            ],
+            isNew: true
+        },
+        {
+            id: 'consolidado',
+            title: 'Relatório Semanal Consolidado',
+            subtitle: 'Dossiê Executivo de Gestão (PPT + Excel)',
+            badge: 'PACOTE COMPLETO',
+            badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50',
+            cardBorder: 'border border-emerald-500/40 bg-slate-900/80 hover:border-emerald-500/70',
+            icon: '📑',
+            description: 'Dossiê semanal completo contendo visão executiva de indicadores, base de projetos, esteira documental, fluxo de fases, robôs e demandas de envio.',
+            stats: [
+                { label: 'Demandas Ativas', value: `${tasks.filter(t => !isCompletedStatus(t.status)).length}` },
+                { label: 'Robôs Catalogados', value: `${robots.length}` },
+                { label: 'Formato', value: 'PPTX + XLSX' }
+            ],
+            actions: [
+                { label: 'Exportar Report Semanal (PPT + Excel)', onClick: handleConsolidatedExport, variant: 'success', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'geral',
+            title: 'Base Geral de Demandas',
+            subtitle: 'Todas as Demandas Cadastradas no Sistema',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50',
+            cardBorder: 'border border-indigo-500/40 bg-slate-900/80 hover:border-indigo-500/70',
+            icon: '📋',
+            description: 'Planilha tabular completa com todas as tarefas cadastradas (Incidentes, Melhorias, Novas Automações e Agendamentos), campos, datas e horas.',
+            stats: [
+                { label: 'Total Registros', value: `${tasks.length}` },
+                { label: 'Completas', value: `${tasks.filter(t => isCompletedStatus(t.status)).length}` },
+                { label: 'Em Andamento', value: `${tasks.filter(t => !isCompletedStatus(t.status)).length}` }
+            ],
+            actions: [
+                { label: 'Baixar Base Geral (.xlsx)', onClick: handleExportBaseGeralExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'backlog',
+            title: 'Relatório de Backlog Ativo',
+            subtitle: 'Fila Operacional e Demandas Pendentes',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/50',
+            cardBorder: 'border border-sky-500/40 bg-slate-900/80 hover:border-sky-500/70',
+            icon: '⏱️',
+            description: 'Demandas em fila, pendentes ou aguardando aprovação, estruturadas com prioridades, prazos previstos e desenvolvedores designados.',
+            stats: [
+                { label: 'Demandas Backlog', value: `${tasks.filter(t => !isCompletedStatus(t.status) && !isCancelledStatus(t.status)).length}` },
+                { label: 'Críticas', value: `${tasks.filter(t => !isCompletedStatus(t.status) && String(t.priority || '').includes('1')).length}` },
+                { label: 'Não Atribuídas', value: `${tasks.filter(t => !isCompletedStatus(t.status) && !t.assignee).length}` }
+            ],
+            actions: [
+                { label: 'Baixar Backlog (.xlsx)', onClick: handleExportBacklogExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'robos',
+            title: 'Inventário de Robôs (RPA)',
+            subtitle: 'Catálogo de Automações e Retorno FTE',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/50',
+            cardBorder: 'border border-purple-500/40 bg-slate-900/80 hover:border-purple-500/70',
+            icon: '🤖',
+            description: 'Inventário de robôs da empresa com status (Ativo/Desativo), área demandante, desenvolvedor responsável, pasta de repositório e FTE gerado.',
+            stats: [
+                { label: 'Robôs Totais', value: `${robots.length}` },
+                { label: 'Ativos', value: `${robots.filter(r => r.status === 'ATIVO').length}` },
+                { label: 'FTE Acumulado', value: `${robots.reduce((acc, r) => acc + (Number(r.fte) || 0), 0).toFixed(2)}` }
+            ],
+            actions: [
+                { label: 'Baixar Inventário Robôs (.xlsx)', onClick: handleExportRobotsExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'capacity',
+            title: 'Capacidade & Carga da Equipe',
+            subtitle: 'Distribuição de Esforço por Desenvolvedor',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50',
+            cardBorder: 'border border-cyan-500/40 bg-slate-900/80 hover:border-cyan-500/70',
+            icon: '👥',
+            description: 'Análise de alocação horária, total de horas estimadas em aberto, dias úteis de trabalho e diagnóstico de carga por especialista.',
+            stats: [
+                { label: 'Desenvolvedores', value: `${devs.length}` },
+                { label: 'Demandas em Carga', value: `${tasks.filter(t => !isCompletedStatus(t.status) && t.assignee).length}` },
+                { label: 'Média de Horas', value: devs.length > 0 ? `${(tasks.filter(t => !isCompletedStatus(t.status)).reduce((s, t) => s + parseDuration(t.estimatedTime), 0) / devs.length).toFixed(0)}h` : '0h' }
+            ],
+            actions: [
+                { label: 'Baixar Capacidade da Equipe (.xlsx)', onClick: handleExportCapacityExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'esteira',
+            title: 'Esteira Documental de Projetos',
+            subtitle: 'Governança e Matriz de Artefatos',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-blue-500/20 text-blue-300 border-blue-500/50',
+            cardBorder: 'border border-blue-500/40 bg-slate-900/80 hover:border-blue-500/70',
+            icon: '📂',
+            description: 'Matriz de conformidade dos documentos obrigatórios da esteira (PDD, SDD, Homologação QA, DoD, Go Live) para todos os projetos ativos.',
+            stats: [
+                { label: 'Projetos em Esteira', value: `${tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação').length}` },
+                { label: 'Docs Obrigatórios', value: `${docsConfig.filter(d => d.active).length}` },
+                { label: 'Tipo', value: 'Governança' }
+            ],
+            actions: [
+                { label: 'Baixar Esteira Documental (.xlsx)', onClick: handleExportEsteiraExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'fluxo',
+            title: 'Fluxo de Projetos e Fases',
+            subtitle: 'Pipeline de Entrega (Assessment a Go Live)',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-teal-500/20 text-teal-300 border-teal-500/50',
+            cardBorder: 'border border-teal-500/40 bg-slate-900/80 hover:border-teal-500/70',
+            icon: '🔄',
+            description: 'Acompanhamento etapa por etapa do pipeline de projetos, registrando em qual fase cada iniciativa se encontra e o status de entrega.',
+            stats: [
+                { label: 'Fases no Pipeline', value: `${workflowConfig.length}` },
+                { label: 'Projetos Mapeados', value: `${tasks.filter(t => t.type === 'Melhoria' || t.type === 'Nova Automação').length}` },
+                { label: 'Status', value: 'Faseamento' }
+            ],
+            actions: [
+                { label: 'Baixar Fluxo de Fases (.xlsx)', onClick: handleExportFluxoExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'pmo',
+            title: 'Fila Estratégica & Riscos PMO',
+            subtitle: 'Priorização, Gargalos e Impedimentos',
+            badge: 'EXCEL (.XLSX)',
+            badgeClass: 'bg-rose-500/20 text-rose-300 border-rose-500/50',
+            cardBorder: 'border border-rose-500/40 bg-slate-900/80 hover:border-rose-500/70',
+            icon: '🎯',
+            description: 'Visão analítica de projetos prioritários, identificação de bloqueios (blockers), alocação de capacidade e datas estimadas de término.',
+            stats: [
+                { label: 'Fila Priorizada', value: `${tasks.filter(t => !isCompletedStatus(t.status)).length}` },
+                { label: 'Com Impedimento', value: `${tasks.filter(t => t.blocker && !isCompletedStatus(t.status)).length}` },
+                { label: 'Foco', value: 'PMO / Gestão' }
+            ],
+            actions: [
+                { label: 'Baixar Fila & Riscos (.xlsx)', onClick: handleExportPmoQueueExcel, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        },
+        {
+            id: 'pptx',
+            title: 'Apresentação Executiva do Portfólio',
+            subtitle: 'Deck Corporativo em Slides para Diretoria',
+            badge: 'POWERPOINT (.PPTX)',
+            badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/50',
+            cardBorder: 'border border-orange-500/40 bg-slate-900/80 hover:border-orange-500/70',
+            icon: '📽️',
+            description: 'Apresentação em slides 16:9 widescreen pronta para comitês e reuniões, com cards de volume, distribuição por status e alocação.',
+            stats: [
+                { label: 'Formato', value: 'Widescreen 16:9' },
+                { label: 'Tema', value: 'Dark Corporativo' },
+                { label: 'Conteúdo', value: 'Visual & Gráficos' }
+            ],
+            actions: [
+                { label: 'Baixar Apresentação (.pptx)', onClick: handleExportPPTXOnly, variant: 'outline', icon: <IconDownload className="w-4 h-4" /> }
+            ],
+            isNew: false
+        }
+    ];
+
     return (
         <div className="space-y-6 pb-20 animate-fade-in">
-            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            {/* HEADER PRINCIPAL DA CENTRAL DE RELATÓRIOS */}
+            <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl">
                 <div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Central de Relatórios</h2>
-                    <p className="text-slate-400">Extração de dados personalizada para gestão e operações.</p>
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                            <IconDocument className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h2 className="text-2xl font-bold text-white tracking-tight">Central de Relatórios</h2>
+                            <p className="text-sm text-slate-400">Extração de relatórios gerenciais, operacionais, acompanhamento de custos e integrações.</p>
+                        </div>
+                    </div>
                 </div>
-                <Button onClick={handleConsolidatedExport} variant="success" className="py-3 px-6 text-base animate-pulse hover:animate-none">
-                    <IconDownload className="w-6 h-6" /> Exportar Report Semanal (PPT + Excel)
-                </Button>
+                <div className="flex flex-wrap items-center gap-3">
+                    <Button onClick={handleConsolidatedExport} variant="success" className="py-2.5 px-4 text-xs font-bold flex items-center gap-2 shadow-lg">
+                        <IconDownload className="w-4 h-4" /> Exportar Report Semanal (PPT + Excel)
+                    </Button>
+                    <button
+                        onClick={handleExportSchedulingExcel}
+                        className="py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-amber-950/60 cursor-pointer"
+                        title="Baixar planilha com a nova opção de Relatório de Envios & Custos"
+                    >
+                        <span>💰</span> Baixar Relatório de Envios (.xlsx)
+                    </button>
+                </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-6">
-                    <Card className="border-indigo-500/30 bg-indigo-900/5">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                <IconDocument className="w-6 h-6 text-indigo-400" /> Relatório Personalizado
+            {/* BARRA DE NAVEGAÇÃO INTERNA ENTRE SEÇÕES DE RELATÓRIO */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 shadow-md">
+                <button
+                    onClick={() => setActiveReportTab('downloads')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeReportTab === 'downloads'
+                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/60'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                >
+                    <span>📥</span>
+                    <span>Opções de Relatórios para Baixar</span>
+                    <span className="text-[10px] bg-slate-950/80 px-2 py-0.5 rounded-full font-mono text-amber-300 border border-amber-500/40 font-bold">
+                        10 Opções
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => setActiveReportTab('envios_custos')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeReportTab === 'envios_custos'
+                            ? 'bg-amber-600 text-white shadow-lg shadow-amber-950/60'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                >
+                    <span>📊</span>
+                    <span>Painel de Demandas de Envio & Custos (Key User)</span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded uppercase font-bold">
+                        Gestão
+                    </span>
+                </button>
+
+                <button
+                    onClick={() => setActiveReportTab('custom')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeReportTab === 'custom'
+                            ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/60'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                >
+                    <span>🛠️</span>
+                    <span>Relatório Personalizado & Power BI</span>
+                </button>
+
+                <button
+                    onClick={() => setActiveReportTab('all')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ml-auto ${
+                        activeReportTab === 'all'
+                            ? 'bg-slate-700 text-white shadow-md'
+                            : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                >
+                    <span>🌐</span>
+                    <span>Exibir Tudo na Mesma Tela</span>
+                </button>
+            </div>
+
+            {/* SEÇÃO PRINCIPAL: OPÇÕES DE RELATÓRIO PARA BAIXAR (TODOS OS 10 RELATÓRIOS EXISTENTES + NOVA OPÇÃO DE ENVIOS & CUSTOS) */}
+            {(activeReportTab === 'downloads' || activeReportTab === 'all') && (
+                <div className="space-y-4">
+                    <div className="bg-slate-850/80 p-4 rounded-xl border border-slate-750 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <span>📥</span> Opções de Relatórios Disponíveis para Download
                             </h3>
-                            <div className="flex gap-2">
-                                <button onClick={() => setSelectedModules(new Set(exportOptions.map(o => o.id)))} className="text-xs text-indigo-400 hover:underline">Selecionar Todos</button>
-                                <button onClick={() => setSelectedModules(new Set())} className="text-xs text-slate-500 hover:underline">Limpar</button>
-                            </div>
+                            <p className="text-xs text-slate-400">
+                                Selecione qualquer um dos 10 relatórios abaixo para baixar imediatamente em Excel (.xlsx), CSV ou PowerPoint (.pptx).
+                            </p>
                         </div>
+                        <span className="text-xs font-mono text-emerald-400 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg">
+                            ✓ Todos os relatórios preservados + Nova opção adicionada
+                        </span>
+                    </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                            <div>
-                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Operacionais</h4>
-                                <div className="space-y-2">
-                                    {exportOptions.filter(o => o.cat === 'Operacional').map(opt => (
-                                        <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedModules.has(opt.id) ? 'bg-indigo-600/10 border-indigo-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                                            <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center border ${selectedModules.has(opt.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600'}`}>
-                                                {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {reportDownloadOptions.map((rep) => (
+                            <div
+                                key={rep.id}
+                                className={`rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 ${rep.cardBorder}`}
+                            >
+                                <div className="space-y-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xl shadow-inner">
+                                                {rep.icon}
                                             </div>
-                                            <span className="text-sm font-medium">{opt.label}</span>
-                                        </label>
-                                    ))}
+                                            <div>
+                                                <h4 className="font-bold text-white text-sm leading-tight">{rep.title}</h4>
+                                                <p className="text-[11px] text-slate-400">{rep.subtitle}</p>
+                                            </div>
+                                        </div>
+                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border whitespace-nowrap ${rep.badgeClass}`}>
+                                            {rep.badge}
+                                        </span>
+                                    </div>
+
+                                    <p className="text-xs text-slate-300 leading-relaxed min-h-[48px]">
+                                        {rep.description}
+                                    </p>
+
+                                    {/* Stats Grid */}
+                                    <div className="bg-slate-950/70 p-2 rounded-xl border border-slate-800 grid grid-cols-3 gap-2 text-center">
+                                        {rep.stats.map((st, i) => (
+                                            <div key={i} className="min-w-0">
+                                                <div className="text-[10px] text-slate-400 truncate">{st.label}</div>
+                                                <div className="text-xs font-bold text-white font-mono truncate">{st.value}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Download Actions */}
+                                <div className="pt-4 border-t border-slate-800/80 flex flex-wrap gap-2 mt-4">
+                                    {rep.actions.map((act, i) => {
+                                        if (act.variant === 'primary') {
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={act.onClick}
+                                                    className="flex-1 min-w-[120px] py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-950/60 cursor-pointer transition-all"
+                                                >
+                                                    {act.icon}
+                                                    <span>{act.label}</span>
+                                                </button>
+                                            );
+                                        }
+                                        if (act.variant === 'success') {
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={act.onClick}
+                                                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer transition-all"
+                                                >
+                                                    {act.icon}
+                                                    <span>{act.label}</span>
+                                                </button>
+                                            );
+                                        }
+                                        if (act.variant === 'secondary') {
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={act.onClick}
+                                                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                                >
+                                                    {act.icon}
+                                                    <span>{act.label}</span>
+                                                </button>
+                                            );
+                                        }
+                                        return (
+                                            <button
+                                                key={i}
+                                                onClick={act.onClick}
+                                                className="w-full py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:border-indigo-500 text-slate-200 hover:text-white border border-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                                            >
+                                                {act.icon}
+                                                <span>{act.label}</span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                            <div>
-                                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Gerenciais (PPT)</h4>
-                                <div className="space-y-2">
-                                    {exportOptions.filter(o => o.cat === 'Gerencial').map(opt => (
-                                        <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedModules.has(opt.id) ? 'bg-emerald-600/10 border-emerald-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                                            <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center border ${selectedModules.has(opt.id) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
-                                                {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
-                                            </div>
-                                            <span className="text-sm font-medium">{opt.label}</span>
-                                        </label>
-                                    ))}
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* SEÇÃO CONSTRUTOR PERSONALIZADO & INTEGRAÇÃO POWER BI */}
+            {(activeReportTab === 'custom' || activeReportTab === 'all') && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-2">
+                    {/* Coluna 1: Relatório Personalizado (Excel e PowerPoint) */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <Card className="border-indigo-500/30 bg-indigo-900/5">
+                            <div className="flex justify-between items-center mb-6">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                        <IconDocument className="w-6 h-6 text-indigo-400" /> Montar Relatório Personalizado
+                                    </h3>
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Selecione os módulos desejados para exportar em planilha Excel (.xlsx) combinada ou apresentação (.pptx).
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setSelectedModules(new Set(exportOptions.map(o => o.id)))} className="text-xs text-indigo-400 hover:underline cursor-pointer">Selecionar Todos</button>
+                                    <button onClick={() => setSelectedModules(new Set())} className="text-xs text-slate-500 hover:underline cursor-pointer">Limpar</button>
                                 </div>
                             </div>
-                        </div>
 
-                        <div className="flex flex-wrap gap-4 pt-6 border-t border-slate-700">
-                            <Button variant="success" onClick={handleCustomExportExcel} className="flex-1 min-w-[200px] py-3">
-                                <IconDownload className="w-5 h-5" /> Exportar para Excel (.xlsx)
-                            </Button>
-                            <Button variant="primary" onClick={handleCustomExportPPT} className="flex-1 min-w-[200px] py-3">
-                                <IconDownload className="w-5 h-5" /> Exportar para PowerPoint (.pptx)
-                            </Button>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Operacionais</h4>
+                                    <div className="space-y-2">
+                                        {exportOptions.filter(o => o.cat === 'Operacional').map(opt => (
+                                            <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                                opt.id === 'envios_custos'
+                                                    ? (selectedModules.has(opt.id) ? 'bg-amber-600/15 border-amber-500/60 text-amber-200 ring-1 ring-amber-500/40' : 'bg-slate-900/50 border-amber-500/30 text-amber-300 hover:border-amber-400')
+                                                    : (selectedModules.has(opt.id) ? 'bg-indigo-600/10 border-indigo-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600')
+                                            }`}>
+                                                <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
+                                                <div className={`w-5 h-5 rounded flex items-center justify-center border ${
+                                                    selectedModules.has(opt.id) 
+                                                        ? (opt.id === 'envios_custos' ? 'bg-amber-500 border-amber-500' : 'bg-indigo-500 border-indigo-500') 
+                                                        : 'border-slate-600'
+                                                }`}>
+                                                    {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm font-medium flex items-center gap-1.5">
+                                                        <span>{opt.label}</span>
+                                                        {opt.id === 'envios_custos' && (
+                                                            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded font-bold uppercase">Novo</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Módulos Gerenciais (PPT)</h4>
+                                    <div className="space-y-2">
+                                        {exportOptions.filter(o => o.cat === 'Gerencial').map(opt => (
+                                            <label key={opt.id} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedModules.has(opt.id) ? 'bg-emerald-600/10 border-emerald-500/50 text-white' : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                                                <input type="checkbox" className="hidden" checked={selectedModules.has(opt.id)} onChange={() => toggleModule(opt.id)} />
+                                                <div className={`w-5 h-5 rounded flex items-center justify-center border ${selectedModules.has(opt.id) ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600'}`}>
+                                                    {selectedModules.has(opt.id) && <IconCheck className="w-3 h-3 text-white" />}
+                                                </div>
+                                                <span className="text-sm font-medium">{opt.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-4 pt-6 border-t border-slate-700">
+                                <Button variant="success" onClick={handleCustomExportExcel} className="flex-1 min-w-[200px] py-3">
+                                    <IconDownload className="w-5 h-5" /> Exportar para Excel (.xlsx)
+                                </Button>
+                                <Button variant="primary" onClick={handleCustomExportPPT} className="flex-1 min-w-[200px] py-3">
+                                    <IconDownload className="w-5 h-5" /> Exportar para PowerPoint (.pptx)
+                                </Button>
+                            </div>
+                        </Card>
+                    </div>
+
+                    {/* Coluna 2: Integração Power BI */}
+                    <div className="space-y-6">
+                        <Card className="border-yellow-500/30 bg-yellow-900/5">
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <h4 className="font-bold text-white flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-yellow-500"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg>
+                                        Integração Power BI
+                                    </h4>
+                                    <p className="text-xs text-slate-400 mt-1">Sincronização em tempo real via endpoint JSON.</p>
+                                </div>
+                                <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${apiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>{apiKey ? 'Ativo' : 'Inativo'}</div>
+                            </div>
+                            {apiKey ? (
+                                <div className="space-y-3">
+                                    <div className="bg-slate-900 border border-slate-700 rounded p-3 flex items-center justify-between">
+                                        <code className="text-xs text-slate-300 font-mono break-all">{powerBiUrl}</code>
+                                        <button onClick={copyToClipboard} className="ml-2 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white cursor-pointer" title="Copiar URL">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5" /></svg>
+                                        </button>
+                                    </div>
+                                    <Button variant="warning" onClick={handleGenerateKey} className="w-full text-xs mt-2">Regerar Chave</Button>
+                                </div>
+                            ) : (
+                                <Button variant="primary" onClick={handleGenerateKey} className="w-full">Gerar Chave de Acesso</Button>
+                            )}
+                        </Card>
+                    </div>
+                </div>
+            )}
+
+            {/* SEÇÃO 2: PAINEL DE GESTÃO E CONTROLE: DEMANDAS DE ENVIO E SEUS VALORES */}
+            <div className="space-y-6 pt-4 border-t-2 border-slate-800">
+                {/* Header Panel */}
+                <div className="bg-gradient-to-br from-slate-800/90 via-slate-850 to-amber-950/30 p-6 rounded-2xl border-2 border-amber-500/40 shadow-2xl flex flex-col lg:flex-row justify-between items-start lg:items-center gap-5">
+                    <div className="space-y-1.5">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-2xl shadow-md">
+                                ⏱️
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2.5 flex-wrap">
+                                    <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                                        Painel de Gestão: Demandas de Envio & Custos
+                                    </h3>
+                                    <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                        Controle Operacional & Financeiro
+                                    </span>
+                                </div>
+                                <p className="text-xs sm:text-sm text-slate-300">
+                                    Visão interativa para o Key User gerenciar e controlar as demandas de envio, seus custos e volumetria.
+                                </p>
+                            </div>
                         </div>
-                    </Card>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+                        <button
+                            onClick={handleNewSchedulingTask}
+                            className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-amber-950/60 cursor-pointer"
+                        >
+                            <IconPlus className="w-4 h-4" />
+                            <span>Novo Agendamento</span>
+                        </button>
+                        <button
+                            onClick={handleExportSchedulingExcel}
+                            className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/60 cursor-pointer"
+                            title="Baixar planilha formatada com resumo e demandas"
+                        >
+                            <IconDownload className="w-4 h-4" />
+                            <span>Baixar Excel</span>
+                        </button>
+                        <button
+                            onClick={handleExportSchedulingCSV}
+                            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-2 transition-all cursor-pointer"
+                            title="Baixar arquivo CSV compatível com Power BI e planilhas"
+                        >
+                            <IconDocument className="w-4 h-4" />
+                            <span>CSV</span>
+                        </button>
+                        {schedulingTasks.length === 0 && (
+                            <button
+                                onClick={handleSeedDemoScheduling}
+                                className="px-3.5 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-2 transition-all cursor-pointer"
+                                title="Inserir dados demonstrativos de agendamento para testar o relatório"
+                            >
+                                <span>⚡ Exemplos</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
 
-                <div className="space-y-6">
-                    <h3 className="text-xl font-bold text-yellow-500 flex items-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg> Integração Power BI
-                    </h3>
-                    <Card className="border-yellow-500/30 bg-yellow-900/5">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h4 className="font-bold text-white">Chave de Conexão</h4>
-                                <p className="text-sm text-slate-400 mt-1">Sincronização em tempo real via endpoint JSON.</p>
-                            </div>
-                            <div className={`px-2 py-1 rounded text-xs font-bold uppercase ${apiKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>{apiKey ? 'Ativo' : 'Inativo'}</div>
+                {/* Executive KPI Cards (6 Cards) */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+                    {/* Total de Agendamentos */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border border-slate-700/80 shadow-md">
+                        <div className="flex items-center justify-between text-slate-400 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Agendamentos</span>
+                            <span className="text-amber-400">⏱️</span>
                         </div>
-                        {apiKey ? (
-                            <div className="space-y-3">
-                                <div className="bg-slate-900 border border-slate-700 rounded p-3 flex items-center justify-between">
-                                    <code className="text-xs text-slate-300 font-mono break-all">{powerBiUrl}</code>
-                                    <button onClick={copyToClipboard} className="ml-2 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5" /></svg>
-                                    </button>
-                                </div>
-                                <Button variant="warning" onClick={handleGenerateKey} className="w-full text-xs mt-2">Regerar Chave</Button>
-                            </div>
+                        <div className="text-2xl font-black text-white font-mono">{schedulingTasks.length}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">demandas cadastradas</div>
+                    </div>
+
+                    {/* Demandas com Custo */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border border-amber-600/40 shadow-md">
+                        <div className="flex items-center justify-between text-amber-300 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Com Custo</span>
+                            <span>💰</span>
+                        </div>
+                        <div className="text-2xl font-black text-amber-400 font-mono">{costTasks.length}</div>
+                        <div className="text-[10px] text-amber-200/80 mt-0.5">
+                            {schedulingTasks.length > 0 ? `${Math.round((costTasks.length / schedulingTasks.length) * 100)}% das demandas` : '0%'}
+                        </div>
+                    </div>
+
+                    {/* Demandas Sem Custo */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border border-slate-700/80 shadow-md">
+                        <div className="flex items-center justify-between text-slate-400 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Sem Custo</span>
+                            <span>🚫</span>
+                        </div>
+                        <div className="text-2xl font-black text-slate-300 font-mono">{noCostTasks.length}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">gratuitas / isentas</div>
+                    </div>
+
+                    {/* Volume Total de Envios */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border border-sky-600/40 shadow-md">
+                        <div className="flex items-center justify-between text-sky-300 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Total Envios</span>
+                            <span>🚀</span>
+                        </div>
+                        <div className="text-2xl font-black text-sky-400 font-mono truncate" title={totalDispatches.toLocaleString('pt-BR')}>
+                            {totalDispatches.toLocaleString('pt-BR')}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">disparos acumulados</div>
+                    </div>
+
+                    {/* Custo Financeiro Total */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border-2 border-emerald-500/50 shadow-md">
+                        <div className="flex items-center justify-between text-emerald-300 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Custo Total</span>
+                            <span>💵</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black text-emerald-400 font-mono truncate" title={`R$ ${totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}>
+                            R$ {totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-[10px] text-emerald-200/80 mt-0.5">valor total apurado</div>
+                    </div>
+
+                    {/* Custo Médio Unitário por Disparo */}
+                    <div className="bg-slate-850/90 p-4 rounded-xl border border-indigo-600/40 shadow-md">
+                        <div className="flex items-center justify-between text-indigo-300 mb-1">
+                            <span className="text-[11px] font-bold uppercase tracking-wider">Custo / Envio</span>
+                            <span>🏷️</span>
+                        </div>
+                        <div className="text-xl font-black text-indigo-300 font-mono truncate">
+                            R$ {avgCostPerDispatch.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">média por disparo</div>
+                    </div>
+                </div>
+
+                {/* Visual Analytics Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* 1. Ranking por Automação */}
+                    <Card className="border-slate-700 bg-slate-900/60 p-5 space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                <span>🤖</span> Top Automações por Custo & Envios
+                            </h4>
+                            <span className="text-[10px] text-slate-400 font-mono">{automationBreakdown.length} agrupamentos</span>
+                        </div>
+
+                        {automationBreakdown.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic py-4 text-center">Nenhum dado cadastrado.</p>
                         ) : (
-                            <Button variant="primary" onClick={handleGenerateKey} className="w-full">Gerar Chave de Acesso</Button>
+                            <div className="space-y-3 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                                {automationBreakdown.slice(0, 5).map((auto, idx) => {
+                                    const pct = totalCost > 0 ? (auto.cost / totalCost) * 100 : 0;
+                                    return (
+                                        <div key={idx} className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5">
+                                            <div className="flex justify-between items-start text-xs gap-2">
+                                                <span className="font-semibold text-slate-200 truncate" title={auto.name}>{auto.name}</span>
+                                                <span className="font-mono font-bold text-emerald-400 whitespace-nowrap">
+                                                    R$ {auto.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                                                <div className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.max(5, pct))}%` }}></div>
+                                            </div>
+                                            <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono">
+                                                <span>🚀 {auto.dispatches.toLocaleString('pt-BR')} envios</span>
+                                                <span>🏷️ R$ {auto.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} / un</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </Card>
+
+                    {/* 2. Status das Demandas de Envio */}
+                    <Card className="border-slate-700 bg-slate-900/60 p-5 space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                <span>📊</span> Demandas por Status
+                            </h4>
+                            <span className="text-[10px] text-slate-400 font-mono">{statusBreakdown.length} estados</span>
+                        </div>
+
+                        {statusBreakdown.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic py-4 text-center">Nenhum dado cadastrado.</p>
+                        ) : (
+                            <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                                {statusBreakdown.map((s, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`w-2 h-2 rounded-full ${
+                                                s.status === 'Concluído' || s.status === 'Fechado' ? 'bg-emerald-500' :
+                                                s.status === 'Em Progresso' || s.status === 'Em Atendimento' ? 'bg-indigo-500' :
+                                                s.status === 'Aguardando' || s.status === 'Pendente' ? 'bg-amber-500' : 'bg-slate-500'
+                                            }`}></span>
+                                            <span className="font-semibold text-slate-200">{s.status}</span>
+                                            <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded font-mono">
+                                                {s.count} {s.count === 1 ? 'demanda' : 'demandas'}
+                                            </span>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-mono font-bold text-emerald-400">
+                                                R$ {s.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </div>
+                                            <div className="text-[10px] text-slate-400 font-mono">
+                                                {s.dispatches.toLocaleString('pt-BR')} envios
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </Card>
+
+                    {/* 3. Distribuição por Responsável */}
+                    <Card className="border-slate-700 bg-slate-900/60 p-5 space-y-4">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                <span>👥</span> Demandas por Responsável
+                            </h4>
+                            <span className="text-[10px] text-slate-400 font-mono">{devBreakdown.length} responsáveis</span>
+                        </div>
+
+                        {devBreakdown.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic py-4 text-center">Nenhum dado cadastrado.</p>
+                        ) : (
+                            <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                                {devBreakdown.map((d, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 rounded-full bg-indigo-900/80 border border-indigo-700/60 flex items-center justify-center text-[10px] font-bold text-indigo-300">
+                                                {d.dev.substring(0, 1).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <div className="font-semibold text-slate-200">{d.dev}</div>
+                                                <div className="text-[10px] text-slate-400">{d.count} agendamento(s)</div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-mono font-bold text-emerald-400">
+                                                R$ {d.cost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </div>
+                                            <div className="text-[10px] text-slate-400 font-mono">
+                                                {d.dispatches.toLocaleString('pt-BR')} envios
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         )}
                     </Card>
                 </div>
+
+                {/* Filter and Control Bar */}
+                <Card className="border-slate-800 bg-slate-900/80 p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                        {/* Search */}
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Buscar ID, demanda, robô..."
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500 transition-all"
+                            />
+                        </div>
+
+                        {/* Custo: Sim / Não / Todos */}
+                        <div>
+                            <select
+                                value={costFilter}
+                                onChange={(e) => setCostFilter(e.target.value as any)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-all cursor-pointer"
+                            >
+                                <option value="ALL">💰 Custo: Todos os Agendamentos</option>
+                                <option value="WITH_COST">💰 Apenas com Custo (Sim)</option>
+                                <option value="WITHOUT_COST">🚫 Sem Custo (Não)</option>
+                            </select>
+                        </div>
+
+                        {/* Status */}
+                        <div>
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-all cursor-pointer"
+                            >
+                                <option value="ALL">Status: Todos</option>
+                                {STATUSES.map(s => (
+                                    <option key={s} value={s}>{s}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Responsável */}
+                        <div>
+                            <select
+                                value={devFilter}
+                                onChange={(e) => setDevFilter(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-all cursor-pointer"
+                            >
+                                <option value="ALL">Responsável: Todos</option>
+                                <option value="Não Atribuído">Não Atribuído</option>
+                                {devs.map(d => (
+                                    <option key={d.id} value={d.name}>{d.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Ordenação */}
+                        <div>
+                            <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-all cursor-pointer"
+                            >
+                                <option value="cost_desc">Ordenar: Maior Custo (R$)</option>
+                                <option value="dispatch_desc">Ordenar: Maior Volume de Envios</option>
+                                <option value="unit_cost_desc">Ordenar: Maior Custo Unitário</option>
+                                <option value="recent">Ordenar: Mais Recentes</option>
+                                <option value="id">Ordenar: Chamado / ID</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Filter Status Tag & Reset */}
+                    <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/80">
+                        <div>
+                            Exibindo <span className="text-white font-bold">{filteredSchedulingTasks.length}</span> de <span className="text-white font-bold">{schedulingTasks.length}</span> agendamentos encontrados
+                        </div>
+                        {(searchQuery || costFilter !== 'ALL' || statusFilter !== 'ALL' || devFilter !== 'ALL') && (
+                            <button
+                                onClick={() => {
+                                    setSearchQuery('');
+                                    setCostFilter('ALL');
+                                    setStatusFilter('ALL');
+                                    setDevFilter('ALL');
+                                }}
+                                className="text-amber-400 hover:text-amber-300 font-semibold cursor-pointer"
+                            >
+                                Limpar Filtros
+                            </button>
+                        )}
+                    </div>
+                </Card>
+
+                {/* Interactive Table of Demands */}
+                <Card className="border-slate-800 bg-slate-900/90 overflow-hidden shadow-2xl">
+                    <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-850/50">
+                        <div>
+                            <h4 className="text-base font-bold text-white flex items-center gap-2">
+                                <span>📋</span> Demandas de Envio e Seus Valores
+                            </h4>
+                            <p className="text-xs text-slate-400">
+                                Clique em &quot;Editar&quot; em qualquer linha para abrir o formulário e ajustar a quantidade de envios ou o valor.
+                            </p>
+                        </div>
+                        <span className="text-xs bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-lg font-mono">
+                            Total: R$ {filteredTotalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr className="border-b border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400 bg-slate-950/70">
+                                    <th className="py-3 px-4">Chamado (ID)</th>
+                                    <th className="py-3 px-4">Demanda / Automação</th>
+                                    <th className="py-3 px-4 text-center">Houve Custo?</th>
+                                    <th className="py-3 px-4 text-right">Qtd. Envios</th>
+                                    <th className="py-3 px-4 text-right">Valor Custo (R$)</th>
+                                    <th className="py-3 px-4 text-right">Custo / Envio</th>
+                                    <th className="py-3 px-4">Responsável</th>
+                                    <th className="py-3 px-4">Status</th>
+                                    <th className="py-3 px-4">Data</th>
+                                    <th className="py-3 px-4 text-center">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-850 text-slate-200">
+                                {filteredSchedulingTasks.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={10} className="py-12 text-center text-slate-500">
+                                            <div className="flex flex-col items-center justify-center space-y-3">
+                                                <span className="text-3xl">📭</span>
+                                                <p className="text-sm font-semibold text-slate-300">
+                                                    Nenhuma demanda de Agendamento de Execução encontrada para os filtros selecionados.
+                                                </p>
+                                                <p className="text-xs text-slate-500 max-w-md">
+                                                    Cadastre uma nova demanda informando se houve custo e os envios, ou clique em &quot;Limpar Filtros&quot;.
+                                                </p>
+                                                <button
+                                                    onClick={handleNewSchedulingTask}
+                                                    className="mt-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold text-xs cursor-pointer shadow-md"
+                                                >
+                                                    + Cadastrar Agendamento
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    filteredSchedulingTasks.map((task) => {
+                                        const disp = Number(task.dispatchCount) || 0;
+                                        const cost = Number(task.costValue) || 0;
+                                        const unit = disp > 0 && cost > 0 ? (cost / disp) : 0;
+                                        return (
+                                            <tr key={task.id} className="hover:bg-slate-800/40 transition-colors group">
+                                                <td className="py-3 px-4 font-mono font-bold text-amber-300 whitespace-nowrap">
+                                                    {task.id}
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <div className="font-semibold text-slate-100 group-hover:text-amber-200 transition-colors">
+                                                        {task.summary}
+                                                    </div>
+                                                    {(task.automationName || task.category) && (
+                                                        <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1 font-mono">
+                                                            <span>🤖</span>
+                                                            <span>{task.automationName || task.category}</span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                    {task.hasCost ? (
+                                                        <span className="bg-amber-950/80 border border-amber-500/60 text-amber-300 px-2 py-0.5 rounded-full font-bold text-[10px]">
+                                                            💰 Sim (Com Custo)
+                                                        </span>
+                                                    ) : task.hasCost === false ? (
+                                                        <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-semibold text-[10px]">
+                                                            🚫 Não (Sem Custo)
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-500 text-[10px] italic">Não informado</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-3 px-4 text-right font-mono font-bold text-sky-300 whitespace-nowrap">
+                                                    {disp > 0 ? disp.toLocaleString('pt-BR') : '-'}
+                                                </td>
+                                                <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400 whitespace-nowrap">
+                                                    {cost > 0 ? `R$ ${cost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (task.hasCost === false ? 'R$ 0,00' : '-')}
+                                                </td>
+                                                <td className="py-3 px-4 text-right font-mono text-indigo-300 whitespace-nowrap text-[11px]">
+                                                    {disp > 0 && cost > 0 ? `R$ ${unit.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}` : '-'}
+                                                </td>
+                                                <td className="py-3 px-4 whitespace-nowrap text-slate-300">
+                                                    {task.assignee || <span className="text-slate-500 italic">Não Atribuído</span>}
+                                                </td>
+                                                <td className="py-3 px-4 whitespace-nowrap">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                                        task.status === 'Concluído' || task.status === 'Fechado'
+                                                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                                                            : task.status === 'Em Progresso' || task.status === 'Em Atendimento'
+                                                            ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                                            : task.status === 'Pendente' || task.status === 'Aguardando'
+                                                            ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                                                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                                                    }`}>
+                                                        {task.status}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 px-4 whitespace-nowrap text-slate-400 font-mono text-[11px]">
+                                                    {task.createdAt ? new Date(task.createdAt).toLocaleDateString('pt-BR') : '-'}
+                                                </td>
+                                                <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                    <button
+                                                        onClick={() => onEditTask && onEditTask(task)}
+                                                        className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 mx-auto"
+                                                        title="Editar demanda, envios ou valor"
+                                                    >
+                                                        <IconPencil className="w-3 h-3" />
+                                                        <span>Editar</span>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+
+                            {/* Totals Summary Footer */}
+                            {filteredSchedulingTasks.length > 0 && (
+                                <tfoot>
+                                    <tr className="bg-slate-950 border-t-2 border-slate-700 text-white font-bold text-xs">
+                                        <td className="py-3 px-4 font-mono text-amber-400 uppercase">Totais</td>
+                                        <td className="py-3 px-4 text-slate-300">
+                                            {filteredSchedulingTasks.length} {filteredSchedulingTasks.length === 1 ? 'demanda filtrada' : 'demandas filtradas'}
+                                        </td>
+                                        <td className="py-3 px-4 text-center font-mono text-amber-300">
+                                            {filteredSchedulingTasks.filter(t => t.hasCost).length} com custo
+                                        </td>
+                                        <td className="py-3 px-4 text-right font-mono text-sky-400">
+                                            {filteredTotalDispatches.toLocaleString('pt-BR')} envios
+                                        </td>
+                                        <td className="py-3 px-4 text-right font-mono text-emerald-400 text-sm">
+                                            R$ {filteredTotalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-3 px-4 text-right font-mono text-indigo-300">
+                                            R$ {filteredAvgUnit.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                                        </td>
+                                        <td colSpan={4} className="py-3 px-4 text-right text-slate-400 text-[11px] font-normal italic">
+                                            Totais dinâmicos conforme filtros aplicados
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            )}
+                        </table>
+                    </div>
+                </Card>
             </div>
         </div>
     );
@@ -6614,6 +8070,9 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         } 
         let finalValue = value; 
         if (name === 'fteValue') finalValue = value === '' ? undefined : parseFloat(value); 
+        if (name === 'hasCost') finalValue = value === 'true' || value === true;
+        if (name === 'dispatchCount') finalValue = value === '' ? undefined : parseInt(value, 10);
+        if (name === 'costValue') finalValue = value === '' ? undefined : parseFloat(value);
         setFormData(prev => ({ ...prev, [name]: finalValue })); 
     };
     const handleProjectDataChange = (key: string, value: any) => { setFormData(prev => ({ ...prev, projectData: { ...prev.projectData!, [key]: value } })); };
@@ -6659,6 +8118,22 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             const fteNum = Number(formData.fteValue);
             if (!isNaN(fteNum) && fteNum < 0) {
                 errs.fteValue = 'O valor FTE não pode ser negativo.';
+            }
+        }
+
+        // Validation for Agendamento de Execução cost fields
+        if (formData.type === 'Agendamento de Execução') {
+            if (formData.hasCost === undefined || formData.hasCost === null) {
+                errs.hasCost = 'Selecione se houve custo ou não (Sim ou Não) para este agendamento de execução.';
+            } else if (formData.hasCost === true) {
+                const count = formData.dispatchCount !== undefined && formData.dispatchCount !== null && String(formData.dispatchCount).trim() !== '' ? Number(formData.dispatchCount) : NaN;
+                if (isNaN(count) || count <= 0) {
+                    errs.dispatchCount = 'A quantidade de envios é obrigatória e deve ser maior que zero quando houver custo.';
+                }
+                const cost = formData.costValue !== undefined && formData.costValue !== null && String(formData.costValue).trim() !== '' ? Number(formData.costValue) : NaN;
+                if (isNaN(cost) || cost < 0) {
+                    errs.costValue = 'O valor do custo é obrigatório quando houver custo.';
+                }
             }
         }
 
@@ -6922,6 +8397,175 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                             </select>
                         </div>
                     </div>
+
+                    {/* Execution Scheduling Cost & Dispatch Management Section */}
+                    {formData.type === 'Agendamento de Execução' && (
+                      <div className="p-4 sm:p-5 bg-gradient-to-br from-amber-950/40 via-slate-900 to-amber-950/20 border-2 border-amber-500/50 rounded-2xl shadow-xl space-y-4 animate-fade-in">
+                        <div className="flex items-center justify-between border-b border-amber-500/30 pb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-lg shadow-sm shrink-0">
+                              ⏱️
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-sm font-bold text-white tracking-tight">
+                                  Gestão de Custos & Envios
+                                </h4>
+                                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                  Agendamento de Execução
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 mt-0.5">
+                                Informe se esta demanda gerou custo financeiro e a volumetria de envios para controle gerencial.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Campo: Houve custo Sim / Não */}
+                        <div>
+                          <label className="block text-xs text-amber-200 font-bold uppercase tracking-wider mb-2">
+                            Houve custo neste agendamento? <span className="text-rose-400">*</span>
+                          </label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({ ...prev, hasCost: true }));
+                                if (formErrors.hasCost) {
+                                  setFormErrors(prev => { const n = { ...prev }; delete n.hasCost; return n; });
+                                }
+                              }}
+                              className={`py-3 px-4 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                                formData.hasCost === true
+                                  ? 'bg-amber-600 text-white border-amber-400 shadow-lg shadow-amber-950/60 scale-[1.02]'
+                                  : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-slate-600 hover:bg-slate-800'
+                              }`}
+                            >
+                              <span>💰 Sim, houve custo</span>
+                              {formData.hasCost === true && <span className="text-white font-bold">✓</span>}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({ 
+                                  ...prev, 
+                                  hasCost: false,
+                                  dispatchCount: undefined,
+                                  costValue: undefined 
+                                }));
+                                setFormErrors(prev => { 
+                                  const n = { ...prev }; 
+                                  delete n.dispatchCount; 
+                                  delete n.costValue; 
+                                  return n; 
+                                });
+                              }}
+                              className={`py-3 px-4 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                                formData.hasCost === false
+                                  ? 'bg-slate-700 text-white border-slate-500 shadow-md shadow-black/40 scale-[1.02]'
+                                  : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-slate-600 hover:bg-slate-800'
+                              }`}
+                            >
+                              <span>🚫 Não, sem custo</span>
+                              {formData.hasCost === false && <span className="text-white font-bold">✓</span>}
+                            </button>
+                          </div>
+                          {formErrors.hasCost && (
+                            <p className="text-rose-400 text-xs mt-2 font-semibold flex items-center gap-1 bg-rose-950/40 p-2 rounded-lg border border-rose-500/30">
+                              <span>⚠️</span> {formErrors.hasCost}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Se Sim: Campos obrigatórios da quantidade de envios e do valor */}
+                        {formData.hasCost === true && (
+                          <div className="pt-3 border-t border-amber-500/25 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 animate-fade-in">
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label htmlFor="task-dispatchCount" className="block text-xs text-amber-200 font-bold uppercase tracking-wider">
+                                  Quantidade de Envios <span className="text-rose-400">*</span>
+                                </label>
+                                <span className="text-[10px] bg-rose-950/80 border border-rose-500/50 text-rose-300 px-2 py-0.5 rounded font-semibold">
+                                  Obrigatório
+                                </span>
+                              </div>
+                              <input 
+                                id="task-dispatchCount"
+                                name="dispatchCount"
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={formData.dispatchCount !== undefined && formData.dispatchCount !== null ? formData.dispatchCount : ''}
+                                onChange={handleChange}
+                                placeholder="Ex: 5000 (total de envios/disparos)"
+                                className={`w-full bg-slate-950 border rounded-xl px-3.5 py-2.5 text-white font-mono text-sm outline-none transition-all ${
+                                  formErrors.dispatchCount 
+                                    ? 'border-rose-500 ring-2 ring-rose-500/30' 
+                                    : 'border-amber-500/60 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/40'
+                                }`}
+                              />
+                              {formErrors.dispatchCount && (
+                                <p className="text-rose-400 text-xs mt-1.5 font-semibold flex items-center gap-1">
+                                  <span>⚠️</span> {formErrors.dispatchCount}
+                                </p>
+                              )}
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                Número total de envios, disparos de mensagens, e-mails ou execuções.
+                              </p>
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label htmlFor="task-costValue" className="block text-xs text-amber-200 font-bold uppercase tracking-wider">
+                                  Valor do Custo (R$) <span className="text-rose-400">*</span>
+                                </label>
+                                <span className="text-[10px] bg-rose-950/80 border border-rose-500/50 text-rose-300 px-2 py-0.5 rounded font-semibold">
+                                  Obrigatório
+                                </span>
+                              </div>
+                              <div className="relative">
+                                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400 font-mono text-xs font-bold pointer-events-none">
+                                  R$
+                                </span>
+                                <input 
+                                  id="task-costValue"
+                                  name="costValue"
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={formData.costValue !== undefined && formData.costValue !== null ? formData.costValue : ''}
+                                  onChange={handleChange}
+                                  placeholder="0,00"
+                                  className={`w-full bg-slate-950 border rounded-xl pl-11 pr-3.5 py-2.5 text-white font-mono text-sm outline-none transition-all ${
+                                    formErrors.costValue 
+                                      ? 'border-rose-500 ring-2 ring-rose-500/30' 
+                                      : 'border-amber-500/60 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/40'
+                                  }`}
+                                />
+                              </div>
+                              {formErrors.costValue && (
+                                <p className="text-rose-400 text-xs mt-1.5 font-semibold flex items-center gap-1">
+                                  <span>⚠️</span> {formErrors.costValue}
+                                </p>
+                              )}
+                              {formData.dispatchCount && Number(formData.dispatchCount) > 0 && formData.costValue && Number(formData.costValue) > 0 ? (
+                                <p className="text-[11px] text-emerald-400 mt-1 font-mono font-medium flex items-center gap-1">
+                                  <span>🏷️</span>
+                                  <span>
+                                    Custo unitário: R$ {(Number(formData.costValue) / Number(formData.dispatchCount)).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} por envio
+                                  </span>
+                                </p>
+                              ) : (
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                  Valor total faturado/cobrado pelo agendamento.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         <div>
@@ -8091,7 +9735,7 @@ export default function App() {
       message: `Desenvolvedor "${devName}" excluído com sucesso da equipe.` 
     };
   };
-  const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: '', requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '' });
+  const handleCreateTask = () => setEditingTask({ id: '', type: 'Incidente', summary: '', description: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, createdAt: '', requester: user?.name || 'Manual', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] }, blocker: '', hasCost: false, dispatchCount: undefined, costValue: undefined });
   const handleTaskUpdate = (updatedTask: Task) => { 
     if (!user) return; 
     const cleanId = (updatedTask.id || '').trim();
@@ -8767,5 +10411,5 @@ export default function App() {
   onEditDev={handleEditDev}
   onDeleteDev={handleDeleteDev}
 />
-<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }

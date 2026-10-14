@@ -602,8 +602,31 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
   }
 
   // 16. DevOps IDs
-  const devopsUserStoryId = getRowVal(row, ['devopsUserStoryId', 'User Story ID', 'ID User Story', 'DevOps Story']);
-  const devopsFeatureId = getRowVal(row, ['devopsFeatureId', 'Feature ID', 'ID Feature', 'DevOps Feature']);
+  const devopsUserStoryId = getRowVal(row, ['devopsUserStoryId', 'User Story ID', 'User Story', 'DevOps US ID', 'Work Item User Story']);
+  const devopsFeatureId = getRowVal(row, ['devopsFeatureId', 'Feature ID', 'Feature', 'DevOps Feature ID', 'Work Item Feature']);
+
+  // 17. Execution Scheduling & Cost Management
+  const hasCostRaw = getRowVal(row, ['hasCost', 'Houve Custo', 'Custo (Sim/Não)', 'Custo', 'Possui Custo']);
+  let hasCost: boolean | undefined = undefined;
+  if (hasCostRaw !== null && hasCostRaw !== undefined && String(hasCostRaw).trim() !== '') {
+    const s = String(hasCostRaw).trim().toLowerCase();
+    hasCost = s === 'true' || s === 'sim' || s === 'yes' || s === '1' || s === 's';
+  }
+
+  const dispatchCountRaw = getRowVal(row, ['dispatchCount', 'Quantidade de Envios', 'Qtd Envios', 'Qtd. Envios', 'Envios', 'Disparos', 'Número de Envios']);
+  let dispatchCount: number | undefined = undefined;
+  if (dispatchCountRaw !== null && dispatchCountRaw !== undefined && String(dispatchCountRaw).trim() !== '') {
+    const num = parseInt(String(dispatchCountRaw).replace(/\D/g, ''), 10);
+    if (!isNaN(num)) dispatchCount = num;
+  }
+
+  const costValueRaw = getRowVal(row, ['costValue', 'Valor do Custo', 'Valor Total', 'Custo Total', 'Valor', 'Custo (R$)', 'Valor (R$)']);
+  let costValue: number | undefined = undefined;
+  if (costValueRaw !== null && costValueRaw !== undefined && String(costValueRaw).trim() !== '') {
+    const cleaned = String(costValueRaw).replace(/R\$\s*/gi, '').replace(/\./g, '').replace(',', '.').trim();
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) costValue = num;
+  }
 
   return {
     id,
@@ -632,7 +655,10 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
     docStatuses,
     subTasks,
     devopsUserStoryId: devopsUserStoryId ? String(devopsUserStoryId).trim() : undefined,
-    devopsFeatureId: devopsFeatureId ? String(devopsFeatureId).trim() : undefined
+    devopsFeatureId: devopsFeatureId ? String(devopsFeatureId).trim() : undefined,
+    hasCost,
+    dispatchCount,
+    costValue
   };
 };
 
@@ -843,6 +869,9 @@ export const ExcelService = {
       'Descrição Detalhada': t.description || '',
       'User Story ID': t.devopsUserStoryId || '',
       'Feature ID': t.devopsFeatureId || '',
+      'Houve Custo': t.hasCost !== undefined ? (t.hasCost ? 'Sim' : 'Não') : '',
+      'Quantidade de Envios': t.dispatchCount !== undefined ? t.dispatchCount : '',
+      'Valor do Custo (R$)': t.costValue !== undefined ? t.costValue : '',
       'Histórico': t.history && t.history.length > 0 ? JSON.stringify(t.history) : '',
       'Ciclo de Vida': t.projectData ? JSON.stringify(t.projectData) : '',
       'Status Documentos': t.docStatuses ? JSON.stringify(t.docStatuses) : '',

@@ -94,6 +94,11 @@ export interface Task {
   devopsEpicId?: string;
   devopsUserStoryId?: string;
   devopsFeatureId?: string;
+
+  // Execution Scheduling & Cost Management fields
+  hasCost?: boolean;
+  dispatchCount?: number;
+  costValue?: number;
 }
 
 export interface SubTask {

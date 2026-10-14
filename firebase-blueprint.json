@@ -26,7 +26,10 @@
         "assignee": { "type": "string", "optional": true },
         "requester": { "type": "string", "optional": true },
         "createdAt": { "type": "string", "optional": true },
-        "updatedAt": { "type": "string", "optional": true }
+        "updatedAt": { "type": "string", "optional": true },
+        "hasCost": { "type": "boolean", "optional": true },
+        "dispatchCount": { "type": "number", "optional": true },
+        "costValue": { "type": "number", "optional": true }
       }
     },
     "Developer": {
