@@ -269,13 +269,14 @@ export interface AppNotification {
   id: string;
   taskId: string;
   task: Task;
-  category: 'SCHEDULE_TODAY' | 'DEADLINE_TODAY' | 'DEADLINE_TOMORROW' | 'DEADLINE_APPROACHING' | 'OVERDUE';
+  category: 'SCHEDULE_TODAY' | 'SCHEDULE_UPCOMING' | 'DEADLINE_TODAY' | 'DEADLINE_TOMORROW' | 'DEADLINE_APPROACHING' | 'OVERDUE';
   title: string;
   subtitle: string;
   dateStr: string;
   diffDays: number;
   severity: 'danger' | 'warning' | 'info';
   isSchedule: boolean;
+  isRead?: boolean;
 }
 
 export const getTodayCivilString = (): string => {

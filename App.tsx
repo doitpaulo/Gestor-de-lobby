@@ -14,8 +14,11 @@ import { BackupService } from './services/backupService';
 import { FirebaseService } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { DeveloperManagementModal } from './components/DeveloperManagementModal';
+import { NotificationCenter } from './components/NotificationCenter';
+import { TodayNotificationBanner } from './components/TodayNotificationBanner';
+import { NotificationService } from './services/notificationService';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
@@ -5811,7 +5814,7 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     return (<div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden"><div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4"><h3 className="text-lg font-bold mb-4 text-white">Etapas Existentes</h3><div className="space-y-2">{currentConfig.map((phase: WorkflowPhase, idx: number) => (<div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}><div><span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span><span className="font-medium text-slate-200">{phase.name}</span><p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p></div><div className="flex gap-1"><button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400">✏️</button><button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400">🗑️</button></div></div>))}</div><div className="mt-4"><Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs"><IconPlus className="w-3 h-3" /> Adicionar Nova Fase</Button></div></div><div className="flex-1 flex flex-col"><h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3><div className="space-y-4 flex-1"><div><label className="block text-xs text-slate-400 mb-1">Nome da Fase</label><input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" /></div><div><label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não Iniciado, Em Andamento, Concluído..." /></div><div><label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." /></div></div><div className="flex justify-end gap-2 mt-6"><Button variant="secondary" onClick={onClose}>Fechar</Button><Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button></div></div></div>);
 };
 
-const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, onCreateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void, onOpenUpload?: () => void, onCreateTask?: () => void }) => {
+const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, onCreateTask, onOpenNotifications, user }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void, onOpenUpload?: () => void, onCreateTask?: () => void, onOpenNotifications?: () => void, user?: User }) => {
   const navigate = useNavigate();
   const [widgets, setWidgets] = useState<Widget[]>(() => {
       try {
@@ -6553,6 +6556,14 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   }
   return (
     <div className="space-y-6 animate-fade-in pb-20">
+      {/* Today Schedulings & Upcoming Deadlines Proactive Reminder Banner */}
+      <TodayNotificationBanner 
+        tasks={tasks} 
+        user={user} 
+        onOpenNotificationCenter={() => onOpenNotifications && onOpenNotifications()} 
+        onEditTask={onEditTask} 
+      />
+
       <div className="relative z-30 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">One Page Report</h2>
@@ -6563,6 +6574,18 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
             <MultiSelect options={TASK_TYPES} selected={filterType} onChange={setFilterType} placeholder="Tipos: Todos" />
             <MultiSelect options={['Não Atribuído', ...devs.map(d => d.name)]} selected={filterDev} onChange={setFilterDev} placeholder="Devs: Todos" />
           </div>
+          {onOpenNotifications && (
+            <Button 
+              onClick={onOpenNotifications} 
+              variant="secondary" 
+              className="h-9 px-3 text-xs font-semibold gap-1.5 shadow-sm text-slate-300 hover:text-white"
+              title="Abrir Central de Notificações, Lembretes de Prazos e Agendamentos"
+            >
+              <IconBell className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Lembretes & Prazos</span>
+              <span className="sm:hidden">Lembretes</span>
+            </Button>
+          )}
           {onOpenUpload && (
             <Button onClick={onOpenUpload} variant="success" className="h-9 px-3.5 text-xs font-bold shadow-sm shadow-emerald-950/40">
               <IconUpload className="w-3.5 h-3.5" /> Importar Planilha
@@ -7214,7 +7237,7 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
     );
 };
 
-const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCreateTask, onOpenUpload, onOpenManageDevs }: any) => {
+const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCreateTask, onOpenUpload, onOpenManageDevs, onOpenNotifications, unreadNotificationsCount = 0, hasCriticalNotifications = false }: any) => {
   const navigate = useNavigate(); 
   const location = useLocation(); 
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -7297,6 +7320,27 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             >
               <IconUsers className="w-4 h-4 text-indigo-400" />
               <span>Gerenciar Desenvolvedores (Equipe)</span>
+            </button>
+          )}
+          {onOpenNotifications && (
+            <button
+              onClick={() => {
+                onOpenNotifications();
+                setIsMobileDrawerOpen(false);
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-dark-800 hover:bg-dark-750 text-amber-300 border border-amber-800/60 text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer active:scale-95 transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <IconBell className="w-4 h-4 text-amber-400" />
+                <span>Lembretes & Agendamentos</span>
+              </div>
+              {unreadNotificationsCount > 0 && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] text-white font-bold ${
+                  hasCriticalNotifications ? 'bg-rose-600 animate-pulse' : 'bg-indigo-600'
+                }`}>
+                  {unreadNotificationsCount}
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -7539,6 +7583,31 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
             <div className="pointer-events-auto flex items-center">
               {headerContent}
             </div>
+
+            {/* Notification Bell Button */}
+            {onOpenNotifications && (
+              <button
+                type="button"
+                onClick={onOpenNotifications}
+                className="relative h-9 w-9 sm:w-auto sm:px-2.5 flex items-center justify-center gap-1.5 bg-dark-800/90 hover:bg-dark-750 border border-slate-700/80 text-slate-200 rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-sm group"
+                title="Central de Notificações: Agendamentos de Hoje e Prazos Próximos"
+                aria-label="Abrir Notificações"
+              >
+                <div className="relative flex items-center justify-center">
+                  <IconBell className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" />
+                  {unreadNotificationsCount > 0 && (
+                    <span className={`absolute -top-1.5 -right-2 min-w-[17px] h-[17px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center text-white border-2 border-dark-900 shadow-md ${
+                      hasCriticalNotifications ? 'bg-rose-500 animate-pulse' : 'bg-indigo-600'
+                    }`}>
+                      {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                    </span>
+                  )}
+                </div>
+                <span className="hidden xl:inline text-xs font-semibold text-slate-300 group-hover:text-white">
+                  Lembretes
+                </span>
+              </button>
+            )}
 
             {/* Profile Avatar Button */}
             <button
@@ -9381,6 +9450,40 @@ export default function App() {
   }, [user?.id]);
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
+    return NotificationService.getReadNotificationIds(user?.id);
+  });
+
+  // Keep readNotificationIds in sync when user changes
+  useEffect(() => {
+    setReadNotificationIds(NotificationService.getReadNotificationIds(user?.id));
+  }, [user?.id]);
+
+  // Live calculated notifications from tasks and schedulings
+  const notifications = useMemo(() => {
+    return NotificationService.calculateNotifications(tasks, readNotificationIds);
+  }, [tasks, readNotificationIds]);
+
+  const unreadNotificationsCount = useMemo(() => {
+    return notifications.filter(n => !n.isRead).length;
+  }, [notifications]);
+
+  const hasCriticalNotifications = useMemo(() => {
+    return notifications.some(n => !n.isRead && (n.category === 'DEADLINE_TODAY' || n.category === 'SCHEDULE_TODAY' || n.category === 'OVERDUE'));
+  }, [notifications]);
+
+  const handleMarkNotificationAsRead = useCallback((id: string) => {
+    const updated = NotificationService.markAsRead(id, user?.id);
+    setReadNotificationIds(new Set(updated));
+  }, [user?.id]);
+
+  const handleMarkAllNotificationsAsRead = useCallback(() => {
+    const ids = notifications.map(n => n.id);
+    const updated = NotificationService.markAllAsRead(ids, user?.id);
+    setReadNotificationIds(new Set(updated));
+  }, [notifications, user?.id]);
+
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [uploadFiles, setUploadFiles] = useState<{ [key: string]: File | null }>({ 'Incidente': null, 'Melhoria': null, 'Nova Automação': null, 'Agendamento de Execução': null });
   const [backupExcelFile, setBackupExcelFile] = useState<File | null>(null);
@@ -9961,7 +10064,7 @@ export default function App() {
       </Button>
     </div>
   );
-  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)} onOpenManageDevs={() => setIsManageDevsOpen(true)}>{isUploadModalOpen && (
+  return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)} onOpenManageDevs={() => setIsManageDevsOpen(true)} onOpenNotifications={() => setIsNotificationCenterOpen(true)} unreadNotificationsCount={unreadNotificationsCount} hasCriticalNotifications={hasCriticalNotifications}>{isUploadModalOpen && (
   <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4">
     <div className="bg-slate-900 p-5 sm:p-7 rounded-2xl border border-slate-700 max-w-2xl w-full shadow-2xl shadow-black/60 max-h-[92vh] overflow-y-auto custom-scrollbar">
       <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-3">
@@ -10411,5 +10514,15 @@ export default function App() {
   onEditDev={handleEditDev}
   onDeleteDev={handleDeleteDev}
 />
-<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+<NotificationCenter
+  isOpen={isNotificationCenterOpen}
+  onClose={() => setIsNotificationCenterOpen(false)}
+  tasks={tasks}
+  user={user || { id: '0', name: 'Usuário', email: '' }}
+  onEditTask={setEditingTask}
+  readNotificationIds={readNotificationIds}
+  onMarkAsRead={handleMarkNotificationAsRead}
+  onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+/>
+<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
