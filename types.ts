@@ -94,6 +94,7 @@ export interface Task {
   devopsEpicId?: string;
   devopsUserStoryId?: string;
   devopsFeatureId?: string;
+  iterationPath?: string; // Caminho da Iteração (ex: "Hyperautomation\Sprint 1" ou "MeuProjeto\Iteration 2")
 
   // Execution Scheduling & Cost Management fields
   hasCost?: boolean;
@@ -161,6 +162,16 @@ export interface DevOpsConfig {
   project: string;
   pat: string;
   isActive: boolean;
+  defaultIterationPath?: string;
+}
+
+export interface AIAgentApiConfig {
+  apiKey: string;
+  isEnabled: boolean;
+  allowCreate: boolean;
+  allowUpdate: boolean;
+  allowDelete: boolean;
+  createdAt: string;
 }
 
 export interface BackupConfig {

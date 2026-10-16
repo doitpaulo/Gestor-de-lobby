@@ -72,11 +72,34 @@ const initialCache = loadLocalCache();
 let currentUserId: string | null = initialCache?.user?.id || null;
 let inMemoryTasks: Task[] = initialCache?.tasks || [];
 let inMemoryDevs: Developer[] = initialCache?.devs || [];
+const DEVOPS_PERSISTENT_KEY = 'nexus_devops_config_saved_v2';
+
+const getSavedDevOpsConfig = (): DevOpsConfig => {
+  try {
+    const raw = localStorage.getItem(DEVOPS_PERSISTENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          organization: parsed.organization || '',
+          project: parsed.project || '',
+          pat: parsed.pat || '',
+          isActive: Boolean(parsed.isActive),
+          defaultIterationPath: parsed.defaultIterationPath || ''
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading persistent DevOps config:', e);
+  }
+  return initialCache?.devops || { organization: '', project: '', pat: '', isActive: false, defaultIterationPath: '' };
+};
+
 let inMemoryRobots: Robot[] = initialCache?.robots || [];
 let inMemorySprints: Sprint[] = initialCache?.sprints || [];
 let inMemoryWorkflow: WorkflowPhase[] = initialCache?.workflow || [];
 let inMemoryDocs: DocumentConfig[] = initialCache?.docs || [];
-let inMemoryDevOps: DevOpsConfig = initialCache?.devops || { organization: '', project: '', pat: '', isActive: false };
+let inMemoryDevOps: DevOpsConfig = getSavedDevOpsConfig();
 let inMemoryUser: User | null = initialCache?.user || null;
 let inMemoryApiKey: string | null = initialCache?.apiKey || null;
 
@@ -87,7 +110,7 @@ export const StorageService = {
 
   getCurrentUserId: () => currentUserId,
 
-  // Reset all state in memory to clean zero slate
+  // Reset user session state in memory (keeps persistent tool credentials like DevOps safe)
   clearAllMemory: () => {
     currentUserId = null;
     inMemoryTasks = [];
@@ -96,7 +119,7 @@ export const StorageService = {
     inMemorySprints = [];
     inMemoryWorkflow = [];
     inMemoryDocs = [];
-    inMemoryDevOps = { organization: '', project: '', pat: '', isActive: false };
+    // Do NOT wipe inMemoryDevOps - it must survive logins, logouts, and reloads!
     inMemoryUser = null;
     inMemoryApiKey = null;
     try {
@@ -234,19 +257,43 @@ export const StorageService = {
 
   // --- Azure DevOps Configuration ---
   getDevOpsConfig: (): DevOpsConfig => {
+    if (inMemoryDevOps && (inMemoryDevOps.organization || inMemoryDevOps.pat)) {
+      return inMemoryDevOps;
+    }
+    const saved = getSavedDevOpsConfig();
+    if (saved && (saved.organization || saved.pat)) {
+      inMemoryDevOps = saved;
+      return saved;
+    }
     return inMemoryDevOps;
   },
 
   setDevOpsConfigInMemory: (config: DevOpsConfig) => {
     inMemoryDevOps = config;
+    try {
+      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(config));
+    } catch {}
     saveLocalCache();
+    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: config }));
   },
 
   saveDevOpsConfig: (config: DevOpsConfig) => {
     inMemoryDevOps = config;
+    try {
+      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(config));
+    } catch (e) {
+      console.warn('Error saving persistent DevOps config:', e);
+    }
     saveLocalCache();
+    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: config }));
     BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
     FirebaseService.saveSetting('devops', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting devops error:', e));
+    // Persist to backend store for complete resilience
+    fetch('/api/devops/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    }).catch(() => {});
   },
 
   // --- API Key / Power BI ---

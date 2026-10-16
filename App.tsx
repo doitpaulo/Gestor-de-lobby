@@ -16,9 +16,10 @@ import { BackupManagementSection } from './components/BackupManagementSection';
 import { DeveloperManagementModal } from './components/DeveloperManagementModal';
 import { NotificationCenter } from './components/NotificationCenter';
 import { TodayNotificationBanner } from './components/TodayNotificationBanner';
+import { AIAgentApiModal } from './components/AIAgentApiModal';
 import { NotificationService } from './services/notificationService';
 import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
-import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle } from './components/Icons';
+import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle, IconBot, IconCode, IconKey } from './components/Icons';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
@@ -6982,14 +6983,44 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   );
 };
 
-const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: User) => void, onResetData: () => Promise<boolean | void> | void }) => {
+const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: User, setUser: (u: User) => void, onResetData: () => Promise<boolean | void> | void, onOpenAIAgentApi?: () => void }) => {
     const [name, setName] = useState(user.name); 
     const [avatar, setAvatar] = useState(user.avatar || ''); 
     const [password, setPassword] = useState(user.password || '');
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
+    const [devopsSavedFeedback, setDevopsSavedFeedback] = useState(false);
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
     const [resetSuccessMessage, setResetSuccessMessage] = useState('');
+
+    useEffect(() => {
+      const handleUpdate = (e: any) => {
+        if (e.detail) setDevopsConfig(e.detail);
+      };
+      window.addEventListener('nexus-devops-config-updated', handleUpdate);
+
+      // Also ensure backend config is synced if local storage was freshly opened
+      fetch('/api/devops/config')
+        .then(res => res.json())
+        .then(cfg => {
+          if (cfg && (cfg.organization || cfg.pat)) {
+            setDevopsConfig(prev => {
+              const merged: DevOpsConfig = {
+                organization: prev.organization || cfg.organization || '',
+                project: prev.project || cfg.project || '',
+                pat: prev.pat || cfg.pat || '',
+                isActive: prev.isActive ?? cfg.isActive ?? false,
+                defaultIterationPath: prev.defaultIterationPath || cfg.defaultIterationPath || ''
+              };
+              StorageService.setDevOpsConfigInMemory(merged);
+              return merged;
+            });
+          }
+        })
+        .catch(() => {});
+
+      return () => window.removeEventListener('nexus-devops-config-updated', handleUpdate);
+    }, []);
 
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
@@ -7111,9 +7142,20 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
 
         {/* Azure DevOps Configuration */}
         <div className="space-y-4">
-          <h3 className="text-lg font-bold text-indigo-400 mb-2">Integração Azure DevOps</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-sky-400 mb-0 flex items-center gap-2">
+              <IconTerminal className="w-5 h-5 text-sky-400" />
+              Integração Azure DevOps
+            </h3>
+            <span className="text-xs bg-sky-950/80 text-sky-300 border border-sky-500/30 px-3 py-1 rounded-full font-medium flex items-center gap-1.5">
+              <IconShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Persistência Segura Ativa
+            </span>
+          </div>
           <Card className="space-y-6">
-            <p className="text-xs text-slate-400">Configure as credenciais do Azure DevOps para conectar as demandas manualmente ou sincronizar de forma automatizada ao cadastrar novas automações, melhorias e incidentes.</p>
+            <p className="text-xs text-slate-300">
+              Configure as credenciais do Azure DevOps para conectar as demandas manualmente ou sincronizar de forma automatizada. <strong>Seus dados agora são armazenados de forma persistente</strong> (no navegador, na nuvem Firestore e no servidor), permanecendo salvos mesmo após reiniciar ou fazer novo login.
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1 font-medium">Organização (ex: Bkbrasil)</label>
@@ -7127,13 +7169,89 @@ const UserProfile = ({ user, setUser, onResetData }: { user: User, setUser: (u: 
                 <label className="block text-xs text-slate-400 mb-1 font-medium">Token de Acesso Pessoal (PAT)</label>
                 <input type="password" value={devopsConfig.pat} onChange={e => setDevopsConfig({...devopsConfig, pat: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="Insira o seu PAT - CQJSl..." />
               </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Iteration Path Padrão (Azure DevOps)</label>
+                <input 
+                  value={devopsConfig.defaultIterationPath || ''} 
+                  onChange={e => setDevopsConfig({ ...devopsConfig, defaultIterationPath: e.target.value })} 
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" 
+                  placeholder="ex: Hyperautomation\Sprint 1 ou \Iteration 2" 
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Caminho padrão da iteração / Sprint no Azure DevOps (campo System.IterationPath). Novas demandas herdarão este caminho caso não especificado individualmente.
+                </p>
+              </div>
               <div className="md:col-span-2 flex items-center gap-2 pt-2">
                 <input type="checkbox" id="devops_active" checked={devopsConfig.isActive} onChange={e => setDevopsConfig({...devopsConfig, isActive: e.target.checked})} className="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" />
-                <label htmlFor="devops_active" className="text-sm text-slate-200 cursor-pointer">Sincronização Ativa (Cria recursos automaticamente no Azure DevOps)</label>
+                <label htmlFor="devops_active" className="text-sm text-slate-200 cursor-pointer">Sincronização Ativa (Cria e atualiza recursos automaticamente no Azure DevOps)</label>
               </div>
             </div>
+
+            {devopsSavedFeedback && (
+              <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+                <IconCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>As configurações do Azure DevOps foram armazenadas com sucesso no navegador e na nuvem. Você não precisará preenchê-las novamente!</span>
+              </div>
+            )}
+
             <div className="flex justify-end pt-4 border-t border-slate-700">
-              <Button onClick={() => { StorageService.saveDevOpsConfig(devopsConfig); alert('Credenciais e preferências do Azure DevOps salvas com sucesso!'); }}>Salvar Configurações DevOps</Button>
+              <Button onClick={() => { 
+                StorageService.saveDevOpsConfig(devopsConfig); 
+                setDevopsSavedFeedback(true);
+                setTimeout(() => setDevopsSavedFeedback(false), 5000);
+                alert('Credenciais e preferências do Azure DevOps salvas e persistidas com sucesso!'); 
+              }}>
+                Salvar Configurações DevOps
+              </Button>
+            </div>
+          </Card>
+        </div>
+
+        {/* AI Agent API Card */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-indigo-400 flex items-center gap-2">
+              <IconBot className="w-5 h-5 text-indigo-400" />
+              API para Agentes de Inteligência Artificial
+            </h3>
+            <span className="text-xs bg-indigo-950/80 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full font-medium">
+              Operação Autônoma Ativa
+            </span>
+          </div>
+
+          <Card className="space-y-4">
+            <p className="text-xs text-slate-300">
+              Disponibilizamos uma API REST e de <strong>Tool Calling</strong> para permitir a integração e operação do Nexus Project por meio de agentes de Inteligência Artificial (ChatGPT, Claude, AutoGen, CrewAI, LangChain e n8n). Agentes podem consultar demandas, criar automações informando o <em>Iteration Path</em>, atualizar status e recuperar relatórios executivos.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Rota de Demandas</span>
+                <span className="text-xs font-mono text-sky-300">/api/ai/tasks</span>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Rota de Métricas</span>
+                <span className="text-xs font-mono text-emerald-300">/api/ai/metrics</span>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">Tool Dispatcher</span>
+                <span className="text-xs font-mono text-purple-300">/api/ai/execute-tool</span>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-700/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <span className="text-xs text-slate-400">
+                Chave de API Nexus, esquemas OpenAPI 3.0 e prompts prontos para copiar.
+              </span>
+              {onOpenAIAgentApi && (
+                <Button
+                  onClick={onOpenAIAgentApi}
+                  className="text-xs gap-1.5 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-500 hover:to-sky-500 text-white shadow-md shadow-indigo-950/50"
+                >
+                  <IconBot className="w-4 h-4" />
+                  Abrir Central de API de IA
+                </Button>
+              )}
             </div>
           </Card>
         </div>
@@ -7956,7 +8074,8 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         project: config.project,
                         pat: config.pat,
                         epicId: formData.devopsEpicId,
-                        projectName: formData.automationName || formData.summary || "RPA Automação"
+                        projectName: formData.automationName || formData.summary || "RPA Automação",
+                        iterationPath: formData.iterationPath || config.defaultIterationPath || undefined
                     })
                 });
 
@@ -7974,6 +8093,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 setSyncLog(prev => [
                     ...prev,
                     `✔ Feature criada com sucesso | ID ${data.featureId} | N/A | ${formData.automationName || formData.summary}`,
+                    formData.iterationPath ? `✔ Iteration Path aplicado: ${formData.iterationPath}` : '',
                     `✔ User Story 'Preparação Comitê CoE' criada | ID ${data.userStories.coe}`,
                     `✔ User Story 'Fluxograma do Processo' criada | ID ${data.userStories.flowchart}`,
                     `✔ User Story 'Especificação do Processo' criada | ID ${data.userStories.specification}`,
@@ -7982,7 +8102,7 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     `✔ User Story 'Sustentação' criada | ID ${data.userStories.sustentation}`,
                     `✔ User Story 'Melhoria' criada | ID ${data.userStories.improvement}`,
                     `🎉 Estrutura de Ciclo de Vida do Projeto criada e vinculada com sucesso no DevOps!`
-                ]);
+                ].filter(Boolean));
 
                 setFormData(prev => ({ ...prev, devopsFeatureId: String(data.featureId) }));
             } else {
@@ -8009,7 +8129,8 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         userStoryId: formData.devopsUserStoryId,
                         title: `${formData.id || 'N/A'} - ${formData.summary}`,
                         estimate: hoursValue,
-                        tag: tag
+                        tag: tag,
+                        iterationPath: formData.iterationPath || config.defaultIterationPath || undefined
                     })
                 });
 
@@ -8067,7 +8188,8 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     status: formData.status,
                     estimate: estHours,
                     completed: actHours,
-                    assignee: formData.assignee || undefined
+                    assignee: formData.assignee || undefined,
+                    iterationPath: formData.iterationPath || config.defaultIterationPath || undefined
                 })
             });
 
@@ -8092,10 +8214,11 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 ...prev,
                 `✔ Título: ${formData.id || 'N/A'} - ${formData.summary}`,
                 `✔ Status/Estado: ${formData.status}`,
+                formData.iterationPath ? `✔ Iteration Path: ${formData.iterationPath}` : '',
                 `✔ Horas Estimadas: ${estHours} | Horas Realizadas: ${actHours}`,
                 `✔ Responsável: ${formData.assignee || 'Sem Atribuição'}`,
                 `🎉 ${successMsg}`
-            ]);
+            ].filter(Boolean));
 
             // Add history entry to formData
             setFormData(prev => ({
@@ -8857,6 +8980,25 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 </div>
             )}
 
+            {/* Iteration Path (Azure DevOps) Input Field */}
+            <div className="pt-2 border-t border-slate-800/80">
+                <label htmlFor="task-iterationPath" className="block text-[11px] text-slate-400 mb-1 font-bold uppercase tracking-wider">
+                    Iteration Path (Caminho da Iteração / Sprint no Azure DevOps)
+                </label>
+                <input 
+                    id="task-iterationPath"
+                    name="iterationPath" 
+                    aria-label="Iteration Path (Azure DevOps)"
+                    value={formData.iterationPath || ''} 
+                    onChange={handleChange} 
+                    placeholder="Ex: Hyperautomation\Sprint 1 ou \Iteration 2" 
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:ring-2 focus:ring-sky-500 outline-none font-mono" 
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                    Caminho da Iteração no Azure DevOps (campo <code className="text-sky-300">System.IterationPath</code>). Enviado automaticamente durante a integração ou sincronização.
+                </p>
+            </div>
+
             {syncLog.length > 0 && (
                 <div className="bg-slate-950/90 p-3 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300 max-h-36 overflow-y-auto custom-scrollbar space-y-1 block max-w-full">
                     <div className="text-sky-400 border-b border-slate-800 pb-1 mb-1 font-bold tracking-wider uppercase">Logs de Integração DevOps:</div>
@@ -9451,9 +9593,54 @@ export default function App() {
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [isAIAgentApiModalOpen, setIsAIAgentApiModalOpen] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
     return NotificationService.getReadNotificationIds(user?.id);
   });
+
+  // Sync client state with server AI Agent store
+  useEffect(() => {
+    if (tasks.length > 0 || devs.length > 0 || robots.length > 0) {
+      fetch('/api/ai/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tasks, devs, robots })
+      }).catch(() => {});
+    }
+  }, [tasks.length, devs.length, robots.length]);
+
+  // Pull tasks created or modified by external AI Agents
+  const syncFromAIAgentStore = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ai/sync');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tasks && data.tasks.length > 0) {
+          const currentMap = new Map(tasks.map(t => [t.id.toLowerCase(), t]));
+          let hasNewTasks = false;
+          const merged = [...tasks];
+          data.tasks.forEach((serverTask: Task) => {
+            if (!currentMap.has(serverTask.id.toLowerCase())) {
+              merged.unshift(serverTask);
+              hasNewTasks = true;
+            }
+          });
+          if (hasNewTasks) {
+            setTasks(merged);
+            StorageService.saveTasks(merged);
+            if (user?.id) {
+              FirebaseService.saveTasksBatch(merged, user.id).catch(() => {});
+            }
+            showToast('info', 'Novas demandas criadas por Agente de IA foram sincronizadas no painel.');
+          }
+        }
+      }
+    } catch {}
+  }, [tasks, user?.id]);
+
+  useEffect(() => {
+    syncFromAIAgentStore();
+  }, []);
 
   // Keep readNotificationIds in sync when user changes
   useEffect(() => {
@@ -9959,7 +10146,8 @@ export default function App() {
                     status: finalTask.status,
                     estimate: estHours,
                     completed: actHours,
-                    assignee: finalTask.assignee || undefined
+                    assignee: finalTask.assignee || undefined,
+                    iterationPath: finalTask.iterationPath || undefined
                 })
             }).then(async (res) => {
                 if (res.ok) {
@@ -10061,6 +10249,17 @@ export default function App() {
         title="Gerenciar lista de desenvolvedores da equipe"
       >
         <IconUsers className="w-3.5 h-3.5 text-indigo-400" /> Devs
+      </Button>
+
+      <Button 
+        onClick={() => setIsAIAgentApiModalOpen(true)} 
+        variant="ghost" 
+        className="h-9 px-2.5 text-xs font-semibold gap-1.5 text-sky-300 hover:text-white hover:bg-sky-950/50 border border-sky-500/40 shadow-sm"
+        title="API para Agentes de Inteligência Artificial (REST & Tools)"
+      >
+        <IconBot className="w-3.5 h-3.5 text-sky-400" />
+        <span className="hidden sm:inline">API IA</span>
+        <span className="sm:hidden">IA</span>
       </Button>
     </div>
   );
@@ -10524,5 +10723,10 @@ export default function App() {
   onMarkAsRead={handleMarkNotificationAsRead}
   onMarkAllAsRead={handleMarkAllNotificationsAsRead}
 />
-<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+<AIAgentApiModal
+  isOpen={isAIAgentApiModalOpen}
+  onClose={() => setIsAIAgentApiModalOpen(false)}
+  onRefreshData={syncFromAIAgentStore}
+/>
+<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
 }
