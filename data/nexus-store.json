@@ -31,9 +31,940 @@
           "action": "Atualizado pelo Agente de IA: status: Novo -> Em Atendimento, assignee: vazio -> Paulo Dev, iterationPath: Hyperautomation\\Sprint 1 -> Hyperautomation\\Sprint 2. Nota: Iniciada análise técnica da demanda via agente autônomo"
         }
       ]
+    },
+    {
+      "automationName": "",
+      "description": "",
+      "id": "1233",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "history": [
+        {
+          "action": "Tarefa criada manualmente",
+          "date": "2026-10-07T20:16:44.708Z",
+          "user": "Paulo Martinio",
+          "id": "30y94018x"
+        }
+      ],
+      "endDate": "",
+      "estimatedTime": "",
+      "requester": "Paulo Martinio",
+      "managementArea": "",
+      "blocker": "",
+      "actualTime": "",
+      "assignee": "Mayara Rocha de Jesus",
+      "createdAt": "2026-10-07T20:16:44.708Z",
+      "projectPath": "",
+      "status": "Novo",
+      "devopsFeatureId": "106611",
+      "type": "Incidente",
+      "summary": "Analise processamento",
+      "projectData": {
+        "currentPhaseId": "1",
+        "phaseStatus": "Não Iniciado",
+        "completedActivities": []
+      },
+      "devopsUserStoryId": "55385",
+      "priority": "3 - Moderada",
+      "startDate": ""
+    },
+    {
+      "status": "Pendente",
+      "createdAt": "filipe.cam",
+      "priority": "1 - Crítica",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "subcategory": "Sugestão de nova automação",
+      "summary": "Conciliação Financeira e Quebra de caixa",
+      "description": "Conciliação Financeira e Quebra de caixa",
+      "projectData": {
+        "completedActivities": [],
+        "currentPhaseId": "1",
+        "phaseStatus": "Não Iniciado"
+      },
+      "boardPosition": 0,
+      "category": "RPA",
+      "updatedAt": "2026-10-07T20:16:44.712Z",
+      "history": [
+        {
+          "action": "Alterou fase do projeto",
+          "date": "2026-10-06T14:57:39.456Z",
+          "id": "pzwgfun1u",
+          "user": "Paulo Martinio"
+        },
+        {
+          "date": "2026-10-06T15:02:58.406Z",
+          "action": "Prioridade ajustada para '1 - Crítica' devido à posição na lista",
+          "id": "1blipl446",
+          "user": "Sistema"
+        }
+      ],
+      "id": "RITM0189160",
+      "requester": "Sistema",
+      "estimatedTime": "Pendente",
+      "type": "Nova Automação",
+      "managementArea": "00 | 201  GERENCIA FINANCEIRA"
+    },
+    {
+      "summary": "Rescisão - Starbucks (ADP)",
+      "priority": "1 - Crítica",
+      "status": "Em Atendimento",
+      "createdAt": "renata.vie",
+      "id": "RITM0201410",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "description": "Rescisão - Starbucks (ADP)",
+      "subcategory": "Sugestão de nova automação",
+      "boardPosition": 0,
+      "category": "RPA",
+      "estimatedTime": "Em Atendimento",
+      "managementArea": "00 | 802  GERENCIA DE GESTAO",
+      "updatedAt": "2026-10-07T20:16:44.713Z",
+      "type": "Nova Automação",
+      "history": [
+        {
+          "id": "y2mz44dzd",
+          "user": "Sistema",
+          "action": "Prioridade ajustada para '1 - Crítica' devido à posição na lista",
+          "date": "2026-10-05T15:07:27.283Z"
+        }
+      ],
+      "requester": "Sistema"
+    },
+    {
+      "priority": "3 - Moderada",
+      "assignee": null,
+      "estimatedTime": "Aguardando Atendimento",
+      "createdAt": "paulo.mart",
+      "category": "RPA",
+      "type": "Nova Automação",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "subcategory": "Sugestão de nova automação",
+      "requester": "Sistema",
+      "id": "RITM0211228",
+      "summary": "Automação Cadastro de Benefícios SBUX",
+      "status": "Aguardando Atendimento",
+      "description": "Automação Cadastro de Benefícios SBUX",
+      "updatedAt": "2026-10-07T20:16:44.713Z"
+    },
+    {
+      "description": "Automação do processo de sindicato x pagadoria",
+      "type": "Nova Automação",
+      "subcategory": "Sugestão de nova automação",
+      "summary": "Automação do processo de sindicato x pagadoria",
+      "status": "Aguardando Atendimento",
+      "requester": "Sistema",
+      "category": "RPA",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "managementArea": "00 | 804  GERENCIA DE SERVICOS DE GENTE",
+      "assignee": null,
+      "id": "RITM0219641",
+      "priority": "2 - Alta",
+      "estimatedTime": "Aguardando Atendimento",
+      "createdAt": "dassia.gom"
+    },
+    {
+      "managementArea": "00 | 701  GERENCIA JURIDICA",
+      "description": "jur003-Gerenciamento de contratos de locação",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "type": "Nova Automação",
+      "subcategory": "Sugestão de nova automação",
+      "requester": "Sistema",
+      "summary": "jur003-Gerenciamento de contratos de locação",
+      "category": "RPA",
+      "id": "RITM0222878",
+      "assignee": null,
+      "createdAt": "victoria.m",
+      "status": "Aguardando Atendimento",
+      "estimatedTime": "Aguardando Atendimento",
+      "priority": "2 - Alta"
+    },
+    {
+      "projectData": {
+        "currentPhaseId": "1",
+        "phaseStatus": "Não Iniciado",
+        "completedActivities": []
+      },
+      "estimatedTime": "Em Atendimento",
+      "boardPosition": 1,
+      "createdAt": "wellington",
+      "history": [
+        {
+          "date": "2026-10-05T15:07:27.283Z",
+          "id": "b1bsv8tye",
+          "user": "Sistema",
+          "action": "Prioridade ajustada para '2 - Alta' devido à posição na lista"
+        },
+        {
+          "action": "Alterou Responsável de 'Paulo César Pereira Da Luz' para 'Paulo Henrique Rodrigues Martinio'",
+          "date": "2026-10-05T16:49:43.458Z",
+          "id": "oc0v5o0s3",
+          "user": "Paulo Martinio"
+        },
+        {
+          "user": "Paulo Martinio",
+          "action": "Alterou fase do projeto",
+          "id": "xvzwn56lc",
+          "date": "2026-10-05T16:49:43.458Z"
+        }
+      ],
+      "category": "RPA",
+      "id": "RITM0224135",
+      "summary": "Emissão de notas fiscais de venda Matriz Café Pacifico",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "status": "Em Atendimento",
+      "description": "Emissão de notas fiscais de venda Matriz Café Pacifico",
+      "priority": "2 - Alta",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "type": "Nova Automação",
+      "managementArea": "00 | 201  GERENCIA FINANCEIRA",
+      "subcategory": "Sugestão de nova automação",
+      "requester": "Sistema"
+    },
+    {
+      "managementArea": "00 | 804  GERENCIA DE SERVICOS DE GENTE",
+      "createdAt": "dassia.gom",
+      "status": "Em Progresso",
+      "priority": "4 - Baixa",
+      "boardPosition": 7,
+      "estimatedTime": "Pendente",
+      "assignee": "Daniel Freire da Costa",
+      "id": "RITM0224745",
+      "history": [
+        {
+          "date": "2026-10-05T15:21:51.787Z",
+          "id": "ynlhoekp5",
+          "user": "Paulo Martinio",
+          "action": "Alterou status para Em Progresso"
+        }
+      ],
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "summary": "Solicitamos que o processo de lançamento da planilha do De para seja realizado diretamente no SAP,",
+      "type": "Melhoria",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "requester": "Sistema",
+      "description": "Solicitamos que o processo de lançamento da planilha do De para seja realizado diretamente no SAP,",
+      "category": "RPA"
+    },
+    {
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "requester": "Sistema",
+      "summary": "Processo de captura de e-mails de vendas e livros fiscais",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "priority": "3 - Moderada",
+      "managementArea": "00 | 201  GERENCIA FINANCEIRA",
+      "createdAt": "luc.santos",
+      "description": "Processo de captura de e-mails de vendas e livros fiscais",
+      "boardPosition": 2,
+      "subcategory": "Sugestão de nova automação",
+      "type": "Nova Automação",
+      "id": "RITM0225855",
+      "status": "Em Atendimento",
+      "estimatedTime": "Em Atendimento",
+      "history": [
+        {
+          "user": "Sistema",
+          "action": "Prioridade ajustada para '3 - Moderada' devido à posição na lista",
+          "date": "2026-10-05T15:07:27.283Z",
+          "id": "vi292hvym"
+        }
+      ],
+      "category": "RPA"
+    },
+    {
+      "summary": "Controle de Pagamento de Consumo",
+      "estimatedTime": "Em Atendimento",
+      "description": "Controle de Pagamento de Consumo",
+      "createdAt": "stephanie.",
+      "subcategory": "Sugestão de nova automação",
+      "category": "RPA",
+      "boardPosition": 3,
+      "status": "Em Atendimento",
+      "managementArea": "00 | 201  GERENCIA FINANCEIRA",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "type": "Nova Automação",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "id": "RITM0226257",
+      "priority": "4 - Baixa",
+      "requester": "Sistema",
+      "history": [
+        {
+          "user": "Sistema",
+          "action": "Prioridade ajustada para '4 - Baixa' devido à posição na lista",
+          "date": "2026-10-05T15:07:27.283Z",
+          "id": "elzgflttq"
+        }
+      ]
+    },
+    {
+      "devopsUserStoryId": "46469",
+      "history": [
+        {
+          "user": "Paulo Martinio",
+          "id": "9k0lavj5x",
+          "action": "Alterou Responsável de 'Amanda Ribeiro de Oliveira' para ' Arthur Faria Santos'",
+          "date": "2026-10-06T15:00:24.287Z"
+        },
+        {
+          "action": "Alterou fase do projeto",
+          "date": "2026-10-06T15:00:24.287Z",
+          "id": "azi0vtwxu",
+          "user": "Paulo Martinio"
+        },
+        {
+          "user": "Paulo Martinio",
+          "date": "2026-10-06T15:02:34.485Z",
+          "id": "ursv66avd",
+          "action": "Alterou Responsável de ' Arthur Faria Santos' para 'Arthur Faria Santos'"
+        }
+      ],
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "category": "RPA",
+      "description": "O RPA separar e abrir automaticamente chamados de livros fiscais no e-mail do aluguel",
+      "createdAt": "luc.santos",
+      "projectData": {
+        "currentPhaseId": "1",
+        "phaseStatus": "Não Iniciado",
+        "completedActivities": []
+      },
+      "estimatedTime": "Em Atendimento",
+      "devopsFeatureId": "106328",
+      "managementArea": "00 | 201  GERENCIA FINANCEIRA",
+      "assignee": "Arthur Faria Santos",
+      "id": "RITM0228702",
+      "summary": "O RPA separar e abrir automaticamente chamados de livros fiscais no e-mail do aluguel",
+      "requester": "Sistema",
+      "priority": "4 - Baixa",
+      "status": "Em Atendimento",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "type": "Melhoria",
+      "boardPosition": 5
+    },
+    {
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "requester": "Sistema",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "priority": "4 - Baixa",
+      "history": [
+        {
+          "user": "Sistema",
+          "id": "54cqkqm81",
+          "date": "2026-10-05T15:07:27.283Z",
+          "action": "Prioridade ajustada para '4 - Baixa' devido à posição na lista"
+        }
+      ],
+      "description": "Envio automático de relatório em grupos no teams",
+      "subcategory": "Sugestão de nova automação",
+      "createdAt": "daniel.fil",
+      "boardPosition": 6,
+      "summary": "Envio automático de relatório em grupos no teams",
+      "status": "Em Atendimento",
+      "managementArea": "00 | 502  GERENCIA DE CCO",
+      "id": "RITM0228947",
+      "category": "RPA",
+      "estimatedTime": "Em Atendimento",
+      "type": "Nova Automação"
+    },
+    {
+      "type": "Nova Automação",
+      "assignee": "Daniel Freire da Costa",
+      "id": "RITM0230359",
+      "estimatedTime": "Em Atendimento",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "createdAt": "paulo.mart",
+      "priority": "4 - Baixa",
+      "boardPosition": 9,
+      "summary": "Migração RPA Admissão IBM",
+      "description": "Migração RPA Admissão IBM",
+      "history": [
+        {
+          "date": "2026-10-05T15:07:27.283Z",
+          "action": "Prioridade ajustada para '4 - Baixa' devido à posição na lista",
+          "id": "40k3tuu6u",
+          "user": "Sistema"
+        }
+      ],
+      "subcategory": "Sugestão de nova automação",
+      "updatedAt": "2026-10-07T20:16:44.714Z",
+      "category": "RPA",
+      "status": "Em Atendimento",
+      "requester": "Sistema"
+    },
+    {
+      "subcategory": "Sugestão de nova automação",
+      "createdAt": "eliene.sil",
+      "id": "RITM0231336",
+      "description": "PROCESSO DE LANÇAMENTO NO PORTAL DE TRADE MARKETING  X ARIBA",
+      "status": "Aguardando Atendimento",
+      "category": "RPA",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "summary": "PROCESSO DE LANÇAMENTO NO PORTAL DE TRADE MARKETING  X ARIBA",
+      "managementArea": "00 | 411  GERENCIA TRADE MARKETING CAMPO",
+      "requester": "Sistema",
+      "assignee": null,
+      "type": "Nova Automação",
+      "priority": "2 - Alta",
+      "estimatedTime": "Aguardando Atendimento"
+    },
+    {
+      "category": "RPA",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "description": "Clipping de Notícias - Concorrentes ZAMP",
+      "requester": "Sistema",
+      "subcategory": "Sugestão de nova automação",
+      "estimatedTime": "Aguardando Atendimento",
+      "summary": "Clipping de Notícias - Concorrentes ZAMP",
+      "createdAt": "paulo.mart",
+      "priority": "2 - Alta",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "type": "Nova Automação",
+      "id": "RITM0233029",
+      "assignee": null,
+      "status": "Aguardando Atendimento"
+    },
+    {
+      "managementArea": "00 | 212 - Gerência de Contabilidade",
+      "type": "Melhoria",
+      "id": "RITM0234380",
+      "createdAt": "mateus.luc",
+      "category": "RPA",
+      "summary": "SITE atual atualizou e precisará refazer caminho do RPA para gerar a CND de SP.",
+      "status": "Em Atendimento",
+      "boardPosition": 10,
+      "assignee": "Arthur Faria Santos",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "description": "SITE atual atualizou e precisará refazer caminho do RPA para gerar a CND de SP.",
+      "priority": "4 - Baixa",
+      "requester": "Sistema",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "estimatedTime": "Em Atendimento"
+    },
+    {
+      "createdAt": "paulo.mart",
+      "id": "RITM0235550",
+      "assignee": "Arthur Faria Santos",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "priority": "4 - Baixa",
+      "history": [
+        {
+          "action": "Alterou status para Backlog",
+          "date": "2026-10-06T15:02:58.406Z",
+          "id": "ku4189m8l",
+          "user": "Paulo Martinio"
+        }
+      ],
+      "type": "Melhoria",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "requester": "Sistema",
+      "boardPosition": 4,
+      "summary": "Jur001- Pagamento guias trabalhistas",
+      "estimatedTime": "Em Atendimento",
+      "status": "Backlog",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "category": "RPA",
+      "description": "Jur001- Pagamento guias trabalhistas"
+    },
+    {
+      "category": "RPA",
+      "id": "RITM0235552",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "description": "jur002- Pagamentos guias Civis/ projeto estorno",
+      "requester": "Sistema",
+      "subcategory": "Sugestão de nova automação",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "estimatedTime": "Aguardando Atendimento",
+      "summary": "jur002- Pagamentos guias Civis/ projeto estorno",
+      "status": "Aguardando Atendimento",
+      "createdAt": "paulo.mart",
+      "priority": "3 - Moderada",
+      "assignee": null,
+      "type": "Nova Automação"
+    },
+    {
+      "category": "RPA",
+      "type": "Nova Automação",
+      "createdAt": "jonas.mene",
+      "managementArea": "00 | 602 - GERENCIA PROJETOS DE FRANQUIAS (60001014)",
+      "id": "RITM0244702",
+      "requester": "Sistema",
+      "status": "Aguardando Atendimento",
+      "estimatedTime": "Aguardando Atendimento",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "priority": "3 - Moderada",
+      "assignee": null,
+      "summary": "Pagamentos de taxas de licenciamento",
+      "description": "Pagamentos de taxas de licenciamento",
+      "subcategory": "Sugestão de nova automação"
+    },
+    {
+      "priority": "4 - Baixa",
+      "summary": "Incluir o fluxo de estornos do canal de compra Clique e Retire SBUX no RPA",
+      "createdAt": "andressa.c",
+      "assignee": "Paulo Henrique Rodrigues Martinio",
+      "requester": "Sistema",
+      "description": "Incluir o fluxo de estornos do canal de compra Clique e Retire SBUX no RPA",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "category": "RPA",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "estimatedTime": "Em Atendimento",
+      "boardPosition": 12,
+      "id": "RITM0246006",
+      "status": "Em Atendimento",
+      "managementArea": "00 | 501  GERENCIA DE PCP",
+      "type": "Melhoria"
+    },
+    {
+      "status": "Em Atendimento",
+      "createdAt": "paulo.mart",
+      "priority": "4 - Baixa",
+      "projectData": {
+        "phaseStatus": "Não Iniciado",
+        "completedActivities": [],
+        "currentPhaseId": "1"
+      },
+      "assignee": "Cristian Cruz",
+      "summary": "SGD006 - Reset de Senha - Candidato",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "id": "RITM0246071",
+      "category": "RPA",
+      "estimatedTime": "Em Atendimento",
+      "requester": "Sistema",
+      "history": [
+        {
+          "id": "t56np4nqi",
+          "date": "2026-10-05T15:16:39.218Z",
+          "user": "Paulo Martinio",
+          "action": "Alterou fase do projeto"
+        }
+      ],
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "description": "SGD006 - Reset de Senha - Candidato",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "boardPosition": 13,
+      "type": "Melhoria"
+    },
+    {
+      "description": "RPA com Erro ao processar Finalizar Estado",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "category": "RPA",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "history": [
+        {
+          "date": "2026-10-05T15:14:13.974Z",
+          "action": "Alterou Desenvolvedor para Arthur Faria Santos",
+          "id": "iwgq1ma4l",
+          "user": "Paulo Martinio"
+        }
+      ],
+      "createdAt": "paulo.mart",
+      "priority": "4 - Baixa",
+      "estimatedTime": "Aguardando Atendimento",
+      "summary": "RPA com Erro ao processar Finalizar Estado",
+      "type": "Melhoria",
+      "requester": "Sistema",
+      "status": "Aguardando Atendimento",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "id": "RITM0246084",
+      "assignee": "Arthur Faria Santos"
+    },
+    {
+      "assignee": "Daniel Freire da Costa",
+      "requester": "Sistema",
+      "boardPosition": 8,
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "description": "Liberar Chave de acessos API em PRD",
+      "managementArea": "00 | 454 GERENCIA DE TI OPERACIONAL",
+      "priority": "4 - Baixa",
+      "subcategory": "Melhorias ou Mudanças em Automações Existentes",
+      "summary": "Liberar Chave de acessos API em PRD",
+      "estimatedTime": "Em Atendimento",
+      "history": [
+        {
+          "user": "Paulo Martinio",
+          "date": "2026-10-05T15:21:56.339Z",
+          "id": "ttsl2xsmz",
+          "action": "Alterou status para Em Progresso"
+        }
+      ],
+      "type": "Melhoria",
+      "createdAt": "paulo.mart",
+      "category": "RPA",
+      "id": "RITM0246095",
+      "status": "Em Progresso"
+    },
+    {
+      "id": "RITM0246224",
+      "devopsFeatureId": "106287",
+      "status": "Novo",
+      "endDate": "",
+      "history": [
+        {
+          "user": "Paulo Martinio",
+          "id": "xfcw4j3oa",
+          "date": "2026-10-05T19:20:08.192Z",
+          "action": "Tarefa criada manualmente"
+        },
+        {
+          "action": "Sincronizou alterações de título, status (Novo), horas (0h est. / 0h real) e dev (Mayara Rocha de Jesus) no DevOps ID 106287",
+          "user": "Sistema (DevOps)",
+          "id": "pfczvomsm",
+          "date": "2026-10-05T19:20:39.308Z"
+        },
+        {
+          "date": "2026-10-06T15:02:58.406Z",
+          "action": "Prioridade ajustada para '2 - Alta' devido à posição na lista",
+          "id": "jfkwasyfb",
+          "user": "Sistema"
+        }
+      ],
+      "priority": "2 - Alta",
+      "devopsUserStoryId": "46502",
+      "assignee": "Mayara Rocha de Jesus",
+      "requester": "Johnny Talisson Andrade Basto",
+      "description": "",
+      "blocker": "",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "projectData": {
+        "phaseStatus": "Não Iniciado",
+        "currentPhaseId": "1",
+        "completedActivities": []
+      },
+      "boardPosition": 1,
+      "startDate": "",
+      "type": "Melhoria",
+      "actualTime": "",
+      "summary": "atribuições da empresa Café para os pagamentos na FBL1N",
+      "managementArea": "",
+      "estimatedTime": "",
+      "automationName": "",
+      "projectPath": "",
+      "createdAt": "2026-10-05T19:18:34.443Z"
+    },
+    {
+      "boardPosition": 2,
+      "projectPath": "",
+      "priority": "3 - Moderada",
+      "assignee": "Amanda Ribeiro de Oliveira",
+      "summary": "Melhoria Na leitura de dados",
+      "projectData": {
+        "currentPhaseId": "1",
+        "completedActivities": [],
+        "phaseStatus": "Não Iniciado"
+      },
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "estimatedTime": "",
+      "requester": "Paulo Martinio",
+      "endDate": "2026-10-06",
+      "history": [
+        {
+          "date": "2026-10-05T15:02:58.019Z",
+          "id": "x1mah59xt",
+          "user": "Paulo Martinio",
+          "action": "Tarefa criada manualmente"
+        },
+        {
+          "id": "zbk584ol3",
+          "date": "2026-10-06T14:58:25.778Z",
+          "action": "Alterou Responsável de 'Amanda Ribeiro de Oliveira' para ' Arthur Faria Santos'",
+          "user": "Paulo Martinio"
+        },
+        {
+          "user": "Paulo Martinio",
+          "action": "Alterou Status de 'Backlog' para 'Concluído'",
+          "date": "2026-10-06T15:05:24.581Z",
+          "id": "gbhsrl9zq"
+        },
+        {
+          "user": "Paulo Martinio",
+          "action": "Alterou Responsável de ' Arthur Faria Santos' para 'Amanda Ribeiro de Oliveira'",
+          "date": "2026-10-06T15:05:24.581Z",
+          "id": "qr0tv7dn5"
+        }
+      ],
+      "startDate": "",
+      "status": "Concluído",
+      "description": "",
+      "id": "RITM0246435",
+      "automationName": "",
+      "type": "Melhoria",
+      "createdAt": "2026-10-05T15:02:24.793Z",
+      "actualTime": "",
+      "blocker": "",
+      "managementArea": ""
+    },
+    {
+      "actualTime": "",
+      "priority": "4 - Baixa",
+      "id": "RITM0246436",
+      "projectPath": "",
+      "blocker": "",
+      "status": "Em Progresso",
+      "requester": "Paulo Martinio",
+      "automationName": "",
+      "managementArea": "",
+      "projectData": {
+        "currentPhaseId": "1",
+        "phaseStatus": "Não Iniciado",
+        "completedActivities": []
+      },
+      "assignee": "Amanda Ribeiro de Oliveira",
+      "history": [
+        {
+          "user": "Paulo Martinio",
+          "action": "Tarefa criada manualmente",
+          "id": "17tg1aamg",
+          "date": "2026-10-05T15:05:18.374Z"
+        },
+        {
+          "user": "Paulo Martinio",
+          "action": "Editou detalhes da tarefa",
+          "date": "2026-10-05T15:05:32.883Z",
+          "id": "7rgflgktj"
+        },
+        {
+          "action": "Alterou status para Em Progresso",
+          "id": "z5h9ujcfm",
+          "user": "Paulo Martinio",
+          "date": "2026-10-05T15:07:27.283Z"
+        },
+        {
+          "date": "2026-10-05T15:07:27.283Z",
+          "action": "Prioridade ajustada para '4 - Baixa' devido à posição na lista",
+          "user": "Sistema",
+          "id": "n0mahsd75"
+        }
+      ],
+      "endDate": "",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "startDate": "",
+      "summary": "QA Acompanhamento -Estorno de vendas \n",
+      "type": "Melhoria",
+      "description": "",
+      "boardPosition": 4,
+      "estimatedTime": "",
+      "createdAt": "2026-10-05T15:04:52.691Z"
+    },
+    {
+      "createdAt": "2026-10-05T15:18:39.904Z",
+      "actualTime": "",
+      "status": "Novo",
+      "priority": "4 - Baixa",
+      "estimatedTime": "",
+      "startDate": "",
+      "boardPosition": 3,
+      "summary": "Envio massa de comunicados FAQ",
+      "assignee": "Cristian Cruz",
+      "description": "",
+      "type": "Melhoria",
+      "requester": "Monica",
+      "managementArea": "",
+      "endDate": "",
+      "history": [
+        {
+          "action": "Tarefa criada manualmente",
+          "id": "9w5ykv98o",
+          "user": "Paulo Martinio",
+          "date": "2026-10-05T15:19:02.911Z"
+        },
+        {
+          "date": "2026-10-06T15:02:58.406Z",
+          "id": "qspk9pipb",
+          "action": "Prioridade ajustada para '4 - Baixa' devido à posição na lista",
+          "user": "Sistema"
+        }
+      ],
+      "automationName": "",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "projectData": {
+        "completedActivities": [],
+        "phaseStatus": "Não Iniciado",
+        "currentPhaseId": "1"
+      },
+      "projectPath": "",
+      "id": "RITM0246437",
+      "blocker": ""
+    },
+    {
+      "requester": "Paulo Martinio",
+      "description": "",
+      "status": "Novo",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "summary": "A RPA esta aprovando NFs de forma indevida.",
+      "estimatedTime": "24",
+      "type": "Melhoria",
+      "actualTime": "",
+      "endDate": "",
+      "history": [
+        {
+          "id": "6eiwu87s9",
+          "user": "Paulo Martinio",
+          "action": "Tarefa criada manualmente",
+          "date": "2026-10-06T15:09:40.292Z"
+        },
+        {
+          "date": "2026-10-06T20:03:54.340Z",
+          "id": "0zixep6jv",
+          "action": "Alterou Tipo para Melhoria",
+          "user": "Paulo Martinio"
+        }
+      ],
+      "createdAt": "2026-10-06T15:09:40.291Z",
+      "id": "RITM0246557",
+      "projectPath": "",
+      "priority": "3 - Moderada",
+      "devopsUserStoryId": "55679",
+      "projectData": {
+        "currentPhaseId": "1",
+        "completedActivities": [],
+        "phaseStatus": "Não Iniciado"
+      },
+      "assignee": "Mayara Rocha de Jesus",
+      "startDate": "",
+      "automationName": "",
+      "managementArea": "00 | 202 GERENCIA LOGISTICA",
+      "blocker": ""
+    },
+    {
+      "projectData": {
+        "completedActivities": [],
+        "phaseStatus": "Não Iniciado",
+        "currentPhaseId": "1"
+      },
+      "createdAt": "2026-10-06T18:33:24.267Z",
+      "managementArea": "",
+      "summary": "Envio Composições de Pagamento SAF",
+      "id": "RITM0246611",
+      "projectPath": "",
+      "startDate": "",
+      "automationName": "",
+      "estimatedTime": "",
+      "assignee": "Mayara Rocha de Jesus",
+      "type": "Melhoria",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "status": "Novo",
+      "endDate": "",
+      "history": [
+        {
+          "id": "iwxxty0a0",
+          "user": "Paulo Martinio",
+          "date": "2026-10-06T18:33:24.267Z",
+          "action": "Tarefa criada manualmente"
+        },
+        {
+          "action": "Alterou Tipo para Melhoria",
+          "user": "Paulo Martinio",
+          "id": "lkrltoj4p",
+          "date": "2026-10-06T20:03:43.844Z"
+        }
+      ],
+      "requester": "Rodrigo Silva Lauria Soriano",
+      "actualTime": "",
+      "description": "",
+      "blocker": "",
+      "priority": "3 - Moderada"
+    },
+    {
+      "status": "Novo",
+      "type": "Melhoria",
+      "description": "",
+      "priority": "3 - Moderada",
+      "estimatedTime": "",
+      "actualTime": "",
+      "blocker": "",
+      "id": "RITM0246685",
+      "devopsUserStoryId": "50125",
+      "managementArea": "",
+      "requester": "Graciane Santos Dias",
+      "assignee": "Daniel Freire da Costa",
+      "automationName": "",
+      "updatedAt": "2026-10-07T20:16:44.715Z",
+      "endDate": "",
+      "history": [
+        {
+          "user": "Paulo Martinio",
+          "action": "Tarefa criada manualmente",
+          "date": "2026-10-07T18:28:57.154Z",
+          "id": "rvte65i80"
+        }
+      ],
+      "projectPath": "",
+      "summary": "execução deverá considerar exclusivamente os casos enviados pelo time de Admissão",
+      "startDate": "",
+      "devopsFeatureId": "106566",
+      "createdAt": "2026-10-07T18:28:57.154Z",
+      "projectData": {
+        "phaseStatus": "Não Iniciado",
+        "currentPhaseId": "1",
+        "completedActivities": []
+      }
+    },
+    {
+      "id": "AG-5185",
+      "type": "Agendamento de Execução",
+      "summary": "Envio Diário de Relatório de Fechamento Operacional por E-mail",
+      "description": "Compilação de dados do ERP e disparo diário de e-mails para os supervisores de turno. Processamento sem custo de disparador externo.",
+      "automationName": "Robô Fechamento Diário ERP",
+      "category": "Controladoria",
+      "priority": "3 - Moderada",
+      "status": "Concluído",
+      "assignee": "Daniel Freire ",
+      "requester": "Supervisão de Turno",
+      "startDate": "2026-10-13",
+      "endDate": "2026-10-14",
+      "hasCost": false,
+      "dispatchCount": 850,
+      "costValue": 0,
+      "createdAt": "2026-10-14T19:57:13.188Z",
+      "projectData": {
+        "currentPhaseId": "4",
+        "phaseStatus": "Concluído",
+        "completedActivities": []
+      },
+      "history": [
+        {
+          "id": "1xw0fuedm",
+          "date": "2026-10-14T19:57:13.188Z",
+          "user": "Paulo Martinio",
+          "action": "Tarefa criada manualmente"
+        }
+      ]
     }
   ],
-  "devs": [],
+  "devs": [
+    {
+      "id": "dev-1790972772360",
+      "name": "Daniel Freire "
+    },
+    {
+      "id": "dev-1790972868074",
+      "name": "Daniel Freire da Costa"
+    },
+    {
+      "id": "dev-1790972873258",
+      "name": "Cristian Cruz"
+    },
+    {
+      "id": "dev-1790972880803",
+      "name": "Paulo Henrique Rodrigues Martinio"
+    },
+    {
+      "id": "dev-1790972932633",
+      "name": "Amanda Ribeiro de Oliveira"
+    },
+    {
+      "name": "Mayara Rocha de Jesus",
+      "id": "dev-1790972943132"
+    },
+    {
+      "id": "dev-1790973042404",
+      "name": " Arthur Faria Santos"
+    },
+    {
+      "name": "Arthur Faria Santos",
+      "id": "dev-1791043222514-p609oqefg"
+    },
+    {
+      "name": "Paulo César Pereira Da Luz",
+      "id": "dev-1791208739658-k891921ey"
+    }
+  ],
   "robots": [],
-  "lastSyncAt": "2026-10-16T21:51:53.665Z"
+  "lastSyncAt": "2026-10-19T22:23:30.117Z"
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { IconBot, IconKey, IconCopy, IconCode, IconCheck, IconX, IconAlertCircle } from './Icons';
 
 interface AIAgentApiModalProps {
@@ -201,9 +202,17 @@ print("Demanda criada:", response.json())`;
   }
 ]`;
 
-  return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-2 sm:p-4 animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700/80 max-w-4xl w-full rounded-2xl shadow-2xl shadow-black/80 flex flex-col max-h-[92vh] overflow-hidden">
+  if (!isOpen || typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div 
+      className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-[99999] p-2 sm:p-4 animate-fade-in"
+      onClick={onClose}
+    >
+      <div 
+        onClick={e => e.stopPropagation()}
+        className="bg-slate-900 border border-slate-700/80 max-w-4xl w-full rounded-2xl shadow-2xl shadow-black/80 flex flex-col max-h-[92vh] overflow-hidden"
+      >
         {/* Header */}
         <div className="p-4 sm:p-6 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -686,6 +695,7 @@ print("Demanda criada:", response.json())`;
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

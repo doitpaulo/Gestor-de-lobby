@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Task, User, AppNotification, formatCivilDate } from '../types';
 import { NotificationService } from '../services/notificationService';
 import { IconBell, IconCalendar, IconClock, IconAlertCircle, IconCheck, IconX } from './Icons';
@@ -87,6 +88,18 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     }
   };
 
+  // Close on Escape key press
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleItemClick = (task: Task) => {
     if (onEditTask) {
       onEditTask(task);
@@ -94,7 +107,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     onClose();
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
   const todayFormatted = new Intl.DateTimeFormat('pt-BR', {
     weekday: 'long',
@@ -103,17 +116,21 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
     year: 'numeric'
   }).format(new Date());
 
-  return (
-    <div className="fixed inset-0 z-[120] flex items-start justify-end p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+  return createPortal(
+    <div 
+      className="fixed inset-0 z-[99999] flex items-start justify-end p-2 sm:p-4 md:p-6 pt-16 sm:pt-20 bg-black/75 backdrop-blur-md animate-fade-in"
+      onClick={onClose}
+    >
       <div 
-        className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col max-h-[94vh] overflow-hidden animate-slide-in relative"
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl shadow-black/80 flex flex-col max-h-[calc(100vh-5.5rem)] overflow-hidden animate-slide-in relative"
         role="dialog"
         aria-label="Central de Notificações"
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between shrink-0">
+        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center relative">
+            <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 flex items-center justify-center relative shrink-0">
               <IconBell className="w-5 h-5" />
               {stats.unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-rose-500 text-white font-bold text-[10px] rounded-full flex items-center justify-center shadow-lg border-2 border-slate-900 animate-pulse">
@@ -123,9 +140,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base sm:text-lg font-bold text-white">Central de Notificações & Prazos</h3>
+                <h3 className="text-base sm:text-lg font-bold text-white leading-tight">Central de Notificações & Prazos</h3>
                 {stats.unreadCount > 0 && (
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-600/40 font-semibold">
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-600/40 font-semibold shrink-0">
                     {stats.unreadCount} não lida{stats.unreadCount === 1 ? '' : 's'}
                   </span>
                 )}
@@ -136,14 +153,16 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              title="Fechar notificações"
+              className="px-3 py-1.5 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600/80 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+              title="Fechar notificações (Esc)"
+              aria-label="Fechar notificações"
             >
-              <IconX className="w-5 h-5" />
+              <IconX className="w-4 h-4" />
+              <span>Fechar</span>
             </button>
           </div>
         </div>
@@ -477,11 +496,21 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             )}
           </div>
 
-          <div className="text-[11px] text-slate-400">
-            Total de <strong className="text-slate-200">{stats.total}</strong> alerta{stats.total === 1 ? '' : 's'} monitorados
+          <div className="flex items-center gap-3">
+            <div className="text-[11px] text-slate-400">
+              Total de <strong className="text-slate-200">{stats.total}</strong> alerta{stats.total === 1 ? '' : 's'} monitorados
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer active:scale-95 shadow-sm"
+            >
+              Fechar
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
