@@ -9324,6 +9324,7 @@ export default function App() {
   const [sprints, setSprints] = useState<Sprint[]>(() => StorageService.getSprints());
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(DEFAULT_WORKFLOW);
   const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(DEFAULT_DOCS);
+  const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
 
   const syncTaskWithSprints = (task: Task, currentSprints: Sprint[]) => {
     const phaseId = task.projectData?.currentPhaseId || '1';
@@ -9533,18 +9534,29 @@ export default function App() {
 
     // Subscribe to Firestore collections in real time
     const unsubTasks = FirebaseService.subscribeTasks((remoteTasks) => {
-      const cleanTasks = remoteTasks || [];
-      if (cleanTasks.length > 0) {
-        setTasks(cleanTasks);
-        StorageService.setTasksInMemory(cleanTasks);
+      // 1. Filter out deleted tasks
+      const activeRemoteTasks = (remoteTasks || []).filter(t => !StorageService.isTaskDeleted(t.id));
+
+      // 2. Proactively delete any lingering remote tasks that are marked as deleted
+      (remoteTasks || []).forEach(t => {
+        if (StorageService.isTaskDeleted(t.id)) {
+          FirebaseService.deleteTask(t.id, user.id).catch(() => {});
+        }
+      });
+
+      if (activeRemoteTasks.length > 0) {
+        setTasks(activeRemoteTasks);
+        StorageService.setTasksInMemory(activeRemoteTasks);
       } else {
         const localTasks = StorageService.getTasks();
         if (localTasks.length > 0) {
-          FirebaseService.saveTasksBatch(localTasks, user.id).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
+          FirebaseService.saveTasksBatch(localTasks, user.id, true).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
+          setTasks(localTasks);
         } else {
           setTasks([]);
         }
       }
+      setIsInitialDataLoaded(true);
     }, user.id);
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
@@ -9598,33 +9610,52 @@ export default function App() {
     return NotificationService.getReadNotificationIds(user?.id);
   });
 
-  // Sync client state with server AI Agent store
+  // Sync client state with server AI Agent store (includes deletedTaskIds)
   useEffect(() => {
-    if (tasks.length > 0 || devs.length > 0 || robots.length > 0) {
+    if (isInitialDataLoaded) {
       fetch('/api/ai/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tasks, devs, robots })
+        body: JSON.stringify({ 
+          tasks, 
+          devs, 
+          robots,
+          deletedTaskIds: Array.from(StorageService.getDeletedTaskIds())
+        })
       }).catch(() => {});
     }
-  }, [tasks.length, devs.length, robots.length]);
+  }, [tasks, devs, robots, isInitialDataLoaded]);
 
   // Pull tasks created or modified by external AI Agents
   const syncFromAIAgentStore = useCallback(async () => {
+    if (!user || !user.id || !isInitialDataLoaded) return;
     try {
       const res = await fetch('/api/ai/sync');
       if (res.ok) {
         const data = await res.json();
         if (data.tasks && data.tasks.length > 0) {
-          const currentMap = new Map(tasks.map(t => [t.id.toLowerCase(), t]));
+          const currentMap = new Map(tasks.map(t => [String(t.id).trim().toLowerCase(), t]));
           let hasNewTasks = false;
           const merged = [...tasks];
           data.tasks.forEach((serverTask: Task) => {
-            if (!currentMap.has(serverTask.id.toLowerCase())) {
+            const cleanServerId = String(serverTask.id || '').trim().toLowerCase();
+            
+            // If task was deleted by the user, prune it from server disk and NEVER re-add
+            if (StorageService.isTaskDeleted(serverTask.id)) {
+              fetch(`/client/tasks/${encodeURIComponent(serverTask.id)}`, { method: 'DELETE' }).catch(() => {});
+              return;
+            }
+
+            // Only merge if genuinely created by an AI agent and not already present
+            const isAiAgentTask = serverTask.requester === 'Agente de IA' || 
+              (serverTask.history && serverTask.history.some((h: any) => h.user === 'Agente de IA'));
+
+            if (!currentMap.has(cleanServerId) && isAiAgentTask) {
               merged.unshift(serverTask);
               hasNewTasks = true;
             }
           });
+
           if (hasNewTasks) {
             setTasks(merged);
             StorageService.saveTasks(merged);
@@ -9636,11 +9667,13 @@ export default function App() {
         }
       }
     } catch {}
-  }, [tasks, user?.id]);
+  }, [tasks, user?.id, isInitialDataLoaded]);
 
   useEffect(() => {
-    syncFromAIAgentStore();
-  }, []);
+    if (isInitialDataLoaded) {
+      syncFromAIAgentStore();
+    }
+  }, [isInitialDataLoaded]);
 
   // Keep readNotificationIds in sync when user changes
   useEffect(() => {
@@ -9708,6 +9741,7 @@ export default function App() {
     setDevs([]);
     setRobots([]);
     setSprints([]);
+    setIsInitialDataLoaded(false);
     StorageService.updateUser(loggedInUser);
     setUser(loggedInUser);
   };
@@ -10164,22 +10198,60 @@ export default function App() {
 
     setEditingTask(null); 
   };
-  const handleTaskDelete = (id: string) => { 
-    if (window.confirm("Tem certeza?")) { 
-        const newTasks = tasks.filter(t => t.id !== id); 
+  const handleTaskDelete = async (id: string) => { 
+    if (window.confirm("Tem certeza que deseja excluir esta demanda definitivamente?")) { 
+        const cleanId = String(id || '').trim();
+        const cleanLower = cleanId.toLowerCase();
+
+        // 1. Permanently delete from StorageService (records tombstone in deletedTaskIds, updates localStorage and memory)
+        StorageService.deleteTask(cleanId, user?.id);
+
+        // 2. Update React tasks state
+        const newTasks = tasks.filter(t => String(t.id).trim().toLowerCase() !== cleanLower); 
         setTasks(newTasks); 
-        StorageService.saveTasks(newTasks); 
-        FirebaseService.deleteTask(id).catch(err => console.warn('Firebase deleteTask warning:', err));
-        
-        // Remove from sprints
+
+        // 3. Remove from sprints
         const newSprints = sprints.map(s => ({
             ...s,
-            tasks: s.tasks.filter(st => st.taskId !== id)
+            tasks: s.tasks.filter(st => String(st.taskId).trim().toLowerCase() !== cleanLower)
         }));
         setSprints(newSprints);
         StorageService.saveSprints(newSprints);
         
+        // 4. Close modal
         setEditingTask(null); 
+
+        // 5. Delete directly and thoroughly from Firestore (both user-scoped and global collections)
+        try {
+          await FirebaseService.deleteTask(cleanId, user?.id);
+        } catch (err) {
+          console.warn('Firebase deleteTask warning:', err);
+        }
+
+        // 6. Delete from server AI Agent disk store (nexus-store.json)
+        try {
+          await fetch(`/client/tasks/${encodeURIComponent(cleanId)}`, { method: 'DELETE' });
+        } catch (e) {
+          console.warn('Backend client deleteTask warning:', e);
+        }
+
+        // 7. Push updated task list and tombstones to /api/ai/sync
+        try {
+          await fetch('/api/ai/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              tasks: newTasks, 
+              devs, 
+              robots,
+              deletedTaskIds: Array.from(StorageService.getDeletedTaskIds())
+            })
+          });
+        } catch (e) {
+          console.warn('Sync post-delete warning:', e);
+        }
+
+        showToast('success', `Demanda "${cleanId}" excluída permanentemente.`);
     } 
   };
   const handleResetData = async () => {
@@ -10249,17 +10321,6 @@ export default function App() {
         title="Gerenciar lista de desenvolvedores da equipe"
       >
         <IconUsers className="w-3.5 h-3.5 text-indigo-400" /> Devs
-      </Button>
-
-      <Button 
-        onClick={() => setIsAIAgentApiModalOpen(true)} 
-        variant="ghost" 
-        className="h-9 px-2.5 text-xs font-semibold gap-1.5 text-sky-300 hover:text-white hover:bg-sky-950/50 border border-sky-500/40 shadow-sm"
-        title="API para Agentes de Inteligência Artificial (REST & Tools)"
-      >
-        <IconBot className="w-3.5 h-3.5 text-sky-400" />
-        <span className="hidden sm:inline">API IA</span>
-        <span className="sm:hidden">IA</span>
       </Button>
     </div>
   );

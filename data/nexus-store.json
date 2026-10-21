@@ -1,38 +1,6 @@
 {
   "tasks": [
     {
-      "id": "DEM-0001",
-      "summary": "Teste de Demanda via Agente de IA com Iteration Path",
-      "type": "Nova Automação",
-      "priority": "Alta",
-      "status": "Em Atendimento",
-      "assignee": "Paulo Dev",
-      "requester": "Agente de IA",
-      "createdAt": "2026-10-16T21:51:45.715Z",
-      "startDate": "2026-10-16",
-      "endDate": "",
-      "estimatedTime": "8h",
-      "actualTime": "0h",
-      "fteValue": 0,
-      "managementArea": "",
-      "iterationPath": "Hyperautomation\\Sprint 2",
-      "subTasks": [],
-      "history": [
-        {
-          "id": "hist_1792187505715",
-          "date": "2026-10-16T21:51:45.715Z",
-          "user": "Agente de IA",
-          "action": "Demanda criada automaticamente via API de Agentes (tipo: Nova Automação, prioridade: Alta)"
-        },
-        {
-          "id": "hist_1792187513665",
-          "date": "2026-10-16T21:51:53.665Z",
-          "user": "Agente de IA",
-          "action": "Atualizado pelo Agente de IA: status: Novo -> Em Atendimento, assignee: vazio -> Paulo Dev, iterationPath: Hyperautomation\\Sprint 1 -> Hyperautomation\\Sprint 2. Nota: Iniciada análise técnica da demanda via agente autônomo"
-        }
-      ]
-    },
-    {
       "automationName": "",
       "description": "",
       "id": "1233",
@@ -966,5 +934,5 @@
     }
   ],
   "robots": [],
-  "lastSyncAt": "2026-10-19T22:23:30.117Z"
+  "lastSyncAt": "2026-10-21T21:47:03.650Z"
 }

@@ -20,7 +20,9 @@ import {
   setDoc, 
   deleteDoc, 
   writeBatch, 
-  onSnapshot
+  onSnapshot,
+  arrayUnion,
+  updateDoc
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { Task, Developer, Robot, Sprint, WorkflowPhase, DocumentConfig, DevOpsConfig, User } from '../types';
@@ -281,9 +283,35 @@ export const FirebaseService = {
   },
 
   // Batch save multiple tasks directly in Firestore
-  saveTasksBatch: async (tasks: Task[], userId?: string) => {
+  saveTasksBatch: async (tasks: Task[], userId?: string, reconcileDeletes: boolean = false) => {
     if (isGuestUserId(userId)) return;
     try {
+      const colRef = FirebaseService.getTargetCol('tasks', userId);
+      
+      // If reconciliation is requested, remove docs from Firestore that are not in tasks array
+      if (reconcileDeletes) {
+        try {
+          const existingSnap = await getDocs(colRef);
+          const activeIds = new Set(tasks.map(t => String(t.id || '').trim().toLowerCase()));
+          const deleteBatch = writeBatch(db);
+          let deletedCount = 0;
+          existingSnap.forEach(docSnap => {
+            const data = docSnap.data() as any;
+            const matchesId = activeIds.has(docSnap.id.toLowerCase()) || 
+              (data.id && activeIds.has(String(data.id).trim().toLowerCase()));
+            if (!matchesId) {
+              deleteBatch.delete(docSnap.ref);
+              deletedCount++;
+            }
+          });
+          if (deletedCount > 0) {
+            await deleteBatch.commit();
+          }
+        } catch (e) {
+          console.warn('Reconciliation delete error in saveTasksBatch:', e);
+        }
+      }
+
       const batchSize = 400;
       for (let i = 0; i < tasks.length; i += batchSize) {
         const slice = tasks.slice(i, i + batchSize);
@@ -303,12 +331,107 @@ export const FirebaseService = {
     }
   },
 
-  // Delete a task directly from Firestore
-  deleteTask: async (taskId: string, userId?: string) => {
-    if (isGuestUserId(userId)) return;
+  // Record deleted task ID to persistent Firestore deleted registry
+  recordDeletedTaskId: async (taskId: string, userId?: string) => {
+    if (isGuestUserId(userId) || !taskId) return;
     try {
-      const docRef = FirebaseService.getTargetDoc('tasks', taskId, userId);
-      await deleteDoc(docRef);
+      const cleanId = String(taskId).trim();
+      const docRef = FirebaseService.getTargetDoc('settings', 'deleted_tasks', userId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        await updateDoc(docRef, {
+          ids: arrayUnion(cleanId),
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        await setDoc(docRef, {
+          ids: [cleanId],
+          updatedAt: new Date().toISOString()
+        });
+      }
+    } catch (e) {
+      console.warn('Error recording deletedTaskId in Firestore:', e);
+    }
+  },
+
+  // Fetch list of deleted task IDs from Firestore
+  getDeletedTaskIds: async (userId?: string): Promise<string[]> => {
+    if (isGuestUserId(userId)) return [];
+    try {
+      const docRef = FirebaseService.getTargetDoc('settings', 'deleted_tasks', userId);
+      const snap = await getDoc(docRef);
+      if (snap.exists() && Array.isArray(snap.data()?.ids)) {
+        return snap.data().ids as string[];
+      }
+    } catch (e) {
+      console.warn('Error fetching deleted task IDs:', e);
+    }
+    return [];
+  },
+
+  // Delete a task directly and completely from Firestore (both user-scoped and global collections)
+  deleteTask: async (taskId: string, userId?: string) => {
+    if (isGuestUserId(userId) || !taskId) return;
+    const cleanId = String(taskId).trim();
+    const cleanLower = cleanId.toLowerCase();
+    const safeDocId = cleanId.replace(/\//g, '_');
+    const uid = userId || auth.currentUser?.uid || StorageService.getCurrentUserId();
+
+    try {
+      // 1. Delete from user-scoped collection if uid is available
+      if (uid) {
+        await deleteDoc(doc(db, 'users', uid, 'tasks', safeDocId)).catch(() => {});
+        // Also check if document was stored under a lowercase/original variant
+        if (safeDocId !== cleanId) {
+          await deleteDoc(doc(db, 'users', uid, 'tasks', cleanId)).catch(() => {});
+        }
+        
+        // Scan collection to ensure no docs with data.id == taskId remain
+        try {
+          const userTasksCol = collection(db, 'users', uid, 'tasks');
+          const snap = await getDocs(userTasksCol);
+          const batch = writeBatch(db);
+          let found = 0;
+          snap.forEach(d => {
+            const data = d.data() as any;
+            if (d.id.toLowerCase() === cleanLower || String(data.id || '').trim().toLowerCase() === cleanLower) {
+              batch.delete(d.ref);
+              found++;
+            }
+          });
+          if (found > 0) {
+            await batch.commit();
+          }
+        } catch (scanErr) {
+          console.warn('Scan delete in user tasks notice:', scanErr);
+        }
+      }
+
+      // 2. Delete from top-level /tasks/ collection to prevent legacy migration re-importing it
+      await deleteDoc(doc(db, 'tasks', safeDocId)).catch(() => {});
+      if (safeDocId !== cleanId) {
+        await deleteDoc(doc(db, 'tasks', cleanId)).catch(() => {});
+      }
+      try {
+        const topSnap = await getDocs(collection(db, 'tasks'));
+        const topBatch = writeBatch(db);
+        let topFound = 0;
+        topSnap.forEach(d => {
+          const data = d.data() as any;
+          if (d.id.toLowerCase() === cleanLower || String(data.id || '').trim().toLowerCase() === cleanLower) {
+            topBatch.delete(d.ref);
+            topFound++;
+          }
+        });
+        if (topFound > 0) {
+          await topBatch.commit();
+        }
+      } catch (topErr) {
+        console.warn('Scan delete in top tasks notice:', topErr);
+      }
+
+      // 3. Record in Firestore deleted registry
+      await FirebaseService.recordDeletedTaskId(cleanId, uid || undefined);
     } catch (error) {
       console.warn('Error deleting task from Firestore:', error);
     }

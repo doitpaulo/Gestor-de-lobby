@@ -869,9 +869,29 @@ router.post("/ai/config", (req: express.Request, res: express.Response) => {
 // Sync endpoint for the Nexus web client to push state to server disk
 router.post("/ai/sync", (req: express.Request, res: express.Response) => {
   try {
-    const { tasks, devs, robots } = req.body;
-    const updated = writeServerStore({ tasks, devs, robots });
+    const { tasks, devs, robots, deletedTaskIds } = req.body;
+    let cleanTasks = tasks;
+    if (Array.isArray(deletedTaskIds) && deletedTaskIds.length > 0) {
+      const delSet = new Set(deletedTaskIds.map((id: string) => String(id).trim().toLowerCase()));
+      if (Array.isArray(cleanTasks)) {
+        cleanTasks = cleanTasks.filter((t: any) => !delSet.has(String(t.id).trim().toLowerCase()));
+      }
+    }
+    const updated = writeServerStore({ tasks: cleanTasks, devs, robots });
     res.json({ success: true, count: updated.tasks.length, syncedAt: updated.lastSyncAt });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Direct task deletion endpoint for the web client (prunes instantly from server store)
+router.delete("/client/tasks/:id", (req: express.Request, res: express.Response) => {
+  try {
+    const taskId = String(req.params.id).trim().toLowerCase();
+    const store = readServerStore();
+    const filtered = store.tasks.filter(t => String(t.id).trim().toLowerCase() !== taskId);
+    writeServerStore({ tasks: filtered });
+    res.json({ success: true, message: `Demanda ${req.params.id} removida do servidor com sucesso.` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

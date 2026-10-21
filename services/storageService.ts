@@ -95,6 +95,38 @@ const getSavedDevOpsConfig = (): DevOpsConfig => {
   return initialCache?.devops || { organization: '', project: '', pat: '', isActive: false, defaultIterationPath: '' };
 };
 
+const DELETED_TASKS_KEY = 'nexus_deleted_task_ids_v2';
+
+const getStoredDeletedTaskIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(DELETED_TASKS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return new Set(arr.map(id => String(id).trim().toLowerCase()));
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading deleted task IDs:', e);
+  }
+  return new Set();
+};
+
+let inMemoryDeletedTaskIds: Set<string> = getStoredDeletedTaskIds();
+
+const saveDeletedTaskIds = () => {
+  try {
+    localStorage.setItem(DELETED_TASKS_KEY, JSON.stringify(Array.from(inMemoryDeletedTaskIds)));
+  } catch (e) {
+    console.warn('Error saving deleted task IDs:', e);
+  }
+};
+
+// Filter out deleted tasks from cache
+if (inMemoryTasks.length > 0 && inMemoryDeletedTaskIds.size > 0) {
+  inMemoryTasks = inMemoryTasks.filter(t => !inMemoryDeletedTaskIds.has(String(t.id).trim().toLowerCase()));
+}
+
 let inMemoryRobots: Robot[] = initialCache?.robots || [];
 let inMemorySprints: Sprint[] = initialCache?.sprints || [];
 let inMemoryWorkflow: WorkflowPhase[] = initialCache?.workflow || [];
@@ -110,6 +142,23 @@ export const StorageService = {
 
   getCurrentUserId: () => currentUserId,
 
+  // --- Deleted Tasks Tombstones ---
+  getDeletedTaskIds: (): Set<string> => {
+    return inMemoryDeletedTaskIds;
+  },
+
+  isTaskDeleted: (id: string): boolean => {
+    if (!id) return false;
+    return inMemoryDeletedTaskIds.has(String(id).trim().toLowerCase());
+  },
+
+  addDeletedTaskId: (id: string) => {
+    if (!id) return;
+    const clean = String(id).trim().toLowerCase();
+    inMemoryDeletedTaskIds.add(clean);
+    saveDeletedTaskIds();
+  },
+
   // Reset user session state in memory (keeps persistent tool credentials like DevOps safe)
   clearAllMemory: () => {
     currentUserId = null;
@@ -120,6 +169,7 @@ export const StorageService = {
     inMemoryWorkflow = [];
     inMemoryDocs = [];
     // Do NOT wipe inMemoryDevOps - it must survive logins, logouts, and reloads!
+    // Do NOT wipe inMemoryDeletedTaskIds - deleted tasks must stay deleted across logins!
     inMemoryUser = null;
     inMemoryApiKey = null;
     try {
@@ -129,31 +179,65 @@ export const StorageService = {
 
   // --- Tasks ---
   getTasks: (): Task[] => {
-    return inMemoryTasks;
+    return inMemoryTasks.filter(t => !inMemoryDeletedTaskIds.has(String(t.id).trim().toLowerCase()));
   },
 
   setTasksInMemory: (tasks: Task[]) => {
-    inMemoryTasks = tasks.map(t => ({
-      ...t,
-      status: normalizeStatus(t.status),
-      type: normalizeTaskType(t.type)
-    }));
+    inMemoryTasks = tasks
+      .filter(t => !inMemoryDeletedTaskIds.has(String(t.id).trim().toLowerCase()))
+      .map(t => ({
+        ...t,
+        status: normalizeStatus(t.status),
+        type: normalizeTaskType(t.type)
+      }));
     saveLocalCache();
   },
 
-  saveTasks: (tasks: Task[]) => {
-    const sanitized = tasks.map(t => ({
-      ...t,
-      status: normalizeStatus(t.status),
-      type: normalizeTaskType(t.type)
-    }));
+  saveTasks: (tasks: Task[], reconcileWithFirestore: boolean = false) => {
+    const sanitized = tasks
+      .filter(t => !inMemoryDeletedTaskIds.has(String(t.id).trim().toLowerCase()))
+      .map(t => ({
+        ...t,
+        status: normalizeStatus(t.status),
+        type: normalizeTaskType(t.type)
+      }));
     inMemoryTasks = sanitized;
     saveLocalCache();
     BackupService.triggerAutoBackup("Alteração em Demandas / Tarefas");
-    FirebaseService.saveTasksBatch(sanitized, currentUserId || undefined).catch(e => console.warn('Firebase saveTasksBatch error:', e));
+    FirebaseService.saveTasksBatch(sanitized, currentUserId || undefined, reconcileWithFirestore).catch(e => console.warn('Firebase saveTasksBatch error:', e));
+  },
+
+  deleteTask: (id: string, userId?: string): Task[] => {
+    const cleanId = String(id || '').trim();
+    const cleanLower = cleanId.toLowerCase();
+    if (!cleanId) return inMemoryTasks;
+
+    // 1. Mark permanently in deleted set
+    inMemoryDeletedTaskIds.add(cleanLower);
+    saveDeletedTaskIds();
+
+    // 2. Remove from in-memory tasks
+    inMemoryTasks = inMemoryTasks.filter(t => String(t.id).trim().toLowerCase() !== cleanLower);
+    
+    // 3. Remove from in-memory sprints
+    inMemorySprints = inMemorySprints.map(s => ({
+      ...s,
+      tasks: s.tasks.filter(st => String(st.taskId).trim().toLowerCase() !== cleanLower)
+    }));
+    
+    saveLocalCache();
+    BackupService.triggerAutoBackup(`Exclusão da Demanda ${cleanId}`);
+
+    // 4. Trigger Firestore deletion across all collections
+    const uid = userId || currentUserId || undefined;
+    FirebaseService.deleteTask(cleanId, uid).catch(e => console.warn('Firebase deleteTask error:', e));
+
+    return inMemoryTasks;
   },
   
   clearTasks: () => {
+    inMemoryTasks.forEach(t => inMemoryDeletedTaskIds.add(String(t.id).trim().toLowerCase()));
+    saveDeletedTaskIds();
     inMemoryTasks = [];
     inMemoryRobots = [];
     saveLocalCache();
