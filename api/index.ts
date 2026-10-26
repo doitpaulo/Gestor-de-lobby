@@ -1,6 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import { PowerBIService } from "../services/powerbiService";
 
 const app = express();
 
@@ -1438,35 +1439,84 @@ router.post("/ai/execute-tool", validateAIAgentKey, async (req: express.Request,
   }
 });
 
-// API Route: Power BI & External RPA JSON Integration Endpoint (HTTP REST)
-router.get("/powerbi-data", (req: express.Request, res: express.Response) => {
-  const apiKey = req.query.key as string || req.headers["x-api-key"] as string || "";
-  const store = readServerStore();
+// -------------------------------------------------------------
+// Power BI & External RPA Integration Endpoints (Live Firestore)
+// -------------------------------------------------------------
 
-  const payload = {
-    generatedAt: new Date().toISOString(),
-    metadata: {
-      app: "Nexus Project",
-      version: "2.5.0",
-      endpoint: "/api/powerbi-data",
-      status: "online",
-      auth: apiKey ? "authenticated" : "public-read"
-    },
-    schema: {
-      tasks: ["id", "type", "summary", "status", "priority", "assignee", "startDate", "endDate", "fteValue", "estimatedTime", "actualTime", "iterationPath"],
-      robots: ["id", "name", "status", "area", "developer", "folder", "fte", "ticketNumber"],
-      developers: ["id", "name"]
-    },
-    data: {
-      tasks: store.tasks,
-      robots: store.robots,
-      developers: store.devs
-    },
-    message: "Endpoint REST oficial do Nexus Project para consumo de dados no Power BI e robôs RPA."
-  };
-
+// 1. Live Data Endpoint for Power BI (Read-only, strictly authenticated)
+router.get("/powerbi-data", async (req: express.Request, res: express.Response) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.setHeader("Content-Type", "application/json");
-  res.json(payload);
+
+  // Support query param 'key' (Power Query ApiKeyName), 'x-api-key' header, or 'Authorization: Bearer <key>'
+  const queryKey = (req.query.key || req.query.api_key || "") as string;
+  const headerKey = (req.headers["x-api-key"] || req.headers["x-nexus-api-key"] || "") as string;
+  const authHeader = (req.headers["authorization"] || "") as string;
+  const bearerKey = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  const providedKey = queryKey || headerKey || bearerKey;
+
+  try {
+    const payload = await PowerBIService.getLivePowerBIData(providedKey);
+    res.json(payload);
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({
+      error: err.message || "Erro ao consultar dados para o Power BI.",
+      code: err.code || (status === 401 ? "UNAUTHORIZED" : status === 503 ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR")
+    });
+  }
+});
+
+// 2. Session Bridge Endpoint: Connects authenticated web session to Power BI
+router.post("/powerbi/session-bridge", async (req: express.Request, res: express.Response) => {
+  res.setHeader("Cache-Control", "no-store");
+
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  if (!token) {
+    res.status(401).json({
+      error: "Token de sessão Firebase ausente. Forneça o token no cabeçalho 'Authorization: Bearer <token>'."
+    });
+    return;
+  }
+
+  const { ownerUid } = PowerBIService.getConfig();
+  if (!ownerUid) {
+    res.status(503).json({
+      error: "O servidor ainda não possui POWERBI_OWNER_UID configurado. Configure o UID do proprietário nas configurações do sistema."
+    });
+    return;
+  }
+
+  try {
+    const verified = await PowerBIService.verifyFirebaseIdToken(token, ownerUid);
+    const now = Math.floor(Date.now() / 1000);
+    const ttlSeconds = Math.max(0, verified.expiresAt - now);
+
+    PowerBIService.setActiveSession(token, verified.uid, verified.email, verified.expiresAt);
+
+    res.json({
+      success: true,
+      message: "Sessão conectada ao Power BI com sucesso.",
+      expiresInSeconds: ttlSeconds,
+      connectedAt: new Date().toISOString()
+    });
+  } catch (err: any) {
+    res.status(401).json({
+      error: err.message || "Falha na validação do token de autenticação Firebase."
+    });
+  }
+});
+
+// 3. Status Endpoint: Check if server is configured and session is active
+router.get("/powerbi/session-status", (req: express.Request, res: express.Response) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  const status = PowerBIService.getActiveSessionStatus();
+  res.json(status);
 });
 
 // Mount the router on /api and / to handle both direct and rewritten requests seamlessly
