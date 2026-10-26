@@ -8280,6 +8280,25 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         );
     }, [formData.id, allTasks, isNewTask, task?.id]);
 
+    const rpaSuggestions = useMemo(() => {
+        const set = new Set<string>();
+        (allTasks || []).forEach((t: Task) => {
+            if (t.automationName && t.automationName.trim()) {
+                set.add(t.automationName.trim());
+            }
+        });
+        try {
+            StorageService.getRobots().forEach((r: Robot) => {
+                if (r.name && r.name.trim()) {
+                    set.add(r.name.trim());
+                }
+            });
+        } catch (e) {
+            // ignore if robots not accessible
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [allTasks]);
+
     const validateTaskForm = (): boolean => {
         const errs: { [key: string]: string } = {};
         const cleanId = (formData.id || '').trim();
@@ -8554,6 +8573,37 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                                 }`} 
                             />
                             {formErrors.summary && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.summary}</p>}
+                        </div>
+
+                        <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                                <label htmlFor="task-automationName" className="text-xs text-slate-400 font-medium uppercase tracking-wider flex items-center gap-1.5">
+                                    <IconRobot className="w-3.5 h-3.5 text-indigo-400" />
+                                    Nome do RPA / Projeto
+                                </label>
+                                <span className="text-[11px] text-slate-500 font-normal">
+                                    Identificador nos Relatórios & BI
+                                </span>
+                            </div>
+                            <div className="relative">
+                                <input 
+                                    id="task-automationName"
+                                    name="automationName" 
+                                    list="rpa-project-suggestions-list"
+                                    value={formData.automationName || ''} 
+                                    onChange={handleChange} 
+                                    placeholder="Ex: Robô Faturamento, RPA Pagamentos SAP, Automação Conciliação..." 
+                                    className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all text-sm placeholder:text-slate-600 font-medium" 
+                                />
+                                <datalist id="rpa-project-suggestions-list">
+                                    {rpaSuggestions.map((name: string) => (
+                                        <option key={name} value={name} />
+                                    ))}
+                                </datalist>
+                            </div>
+                            <p className="text-[11px] text-slate-400/90 mt-1">
+                                Informe o robô, processo ou projeto RPA correspondente. Essencial para que os gráficos, relatórios executivos e BI saibam exatamente a qual robô/projeto a demanda se refere.
+                            </p>
                         </div>
                     </div>
 
@@ -8853,29 +8903,16 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                        <div>
-                            <label htmlFor="task-automationName" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Nome da Automação / Sistema</label>
-                            <input 
-                                id="task-automationName"
-                                name="automationName" 
-                                value={formData.automationName || ''} 
-                                onChange={handleChange} 
-                                placeholder="Ex: Robô Financeiro, SAP..." 
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="task-projectPath" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta (Drive/Rede)</label>
-                            <input 
-                                id="task-projectPath"
-                                name="projectPath" 
-                                value={formData.projectPath || ''} 
-                                onChange={handleChange} 
-                                placeholder="Ex: G:\Projetos\ClienteX..." 
-                                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
-                            />
-                        </div>
+                    <div>
+                        <label htmlFor="task-projectPath" className="block text-xs text-slate-400 mb-1.5 font-medium uppercase tracking-wider">Caminho da Pasta / Repositório (Drive / Rede / Git)</label>
+                        <input 
+                            id="task-projectPath"
+                            name="projectPath" 
+                            value={formData.projectPath || ''} 
+                            onChange={handleChange} 
+                            placeholder="Ex: G:\Projetos\RPA_Financeiro ou https://github.com/empresa/rpa..." 
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 outline-none transition-all font-mono text-xs" 
+                        />
                     </div>
 
         {/* Azure DevOps Integration Card */}
