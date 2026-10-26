@@ -11,7 +11,7 @@ import pptxgen from 'pptxgenjs';
 import { StorageService } from './services/storageService';
 import { ExcelService } from './services/excelService';
 import { BackupService } from './services/backupService';
-import { FirebaseService } from './services/firebase';
+import { FirebaseService, auth } from './services/firebase';
 import { BackupManagementSection } from './components/BackupManagementSection';
 import { DeveloperManagementModal } from './components/DeveloperManagementModal';
 import { NotificationCenter } from './components/NotificationCenter';
@@ -9207,75 +9207,139 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
 }
 
 const PowerBIDataView = () => {
-    const [searchParams] = useSearchParams();
-    const key = searchParams.get('key');
-    const storedKey = StorageService.getApiKey();
     const loggedUser = StorageService.getUser();
-    const [activeTab, setActiveTab] = useState<'docs' | 'json'>('docs');
+    const [activeTab, setActiveTab] = useState<'guide' | 'query' | 'setup'>('guide');
+    const [sessionStatus, setSessionStatus] = useState<any>(null);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [connectionFeedback, setConnectionFeedback] = useState<string | null>(null);
+    const [copiedUid, setCopiedUid] = useState(false);
 
-    // Auto-save key if provided in URL and not yet stored
-    useEffect(() => {
-        if (key && !storedKey) {
-            StorageService.saveApiKey(key);
+    const currentUid = auth.currentUser?.uid || loggedUser?.id || '';
+    const currentEmail = auth.currentUser?.email || loggedUser?.email || '';
+
+    const fetchStatus = async () => {
+        try {
+            const res = await fetch('/api/powerbi/session-status');
+            if (res.ok) {
+                const data = await res.json();
+                setSessionStatus(data);
+            }
+        } catch (e) {
+            console.warn("Could not check Power BI session status:", e);
         }
-    }, [key, storedKey]);
-
-    const activeKey = key || storedKey || 'NEXUS-PUBLIC-API-KEY';
-    const isAuthorized = !!loggedUser || !key || (storedKey && key === storedKey) || (!!key && key.startsWith('NEXUS-'));
-
-    const data = { 
-        generatedAt: new Date().toISOString(), 
-        metadata: { 
-            app: "Nexus Project", 
-            version: "1.0", 
-            endpoint: "powerbi-integration",
-            authType: "API Key (query parameter ?key=...)"
-        }, 
-        tasks: StorageService.getTasks(), 
-        robots: StorageService.getRobots(), 
-        developers: StorageService.getDevs() 
     };
+
+    useEffect(() => {
+        fetchStatus();
+    }, []);
+
+    const handleConnectSession = async () => {
+        if (!auth.currentUser) {
+            alert("É necessário estar autenticado com a conta do proprietário para conectar a sessão ao Power BI.");
+            return;
+        }
+
+        setIsConnecting(true);
+        setConnectionFeedback(null);
+        try {
+            const idToken = await auth.currentUser.getIdToken(true);
+            const res = await fetch('/api/powerbi/session-bridge', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${idToken}`
+                }
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || "Falha ao conectar sessão ao Power BI.");
+            }
+
+            setConnectionFeedback("✔ Sessão do Power BI conectada e ativa no servidor!");
+            fetchStatus();
+            setTimeout(() => setConnectionFeedback(null), 6000);
+        } catch (err: any) {
+            setConnectionFeedback(`❌ ${err.message}`);
+        } finally {
+            setIsConnecting(false);
+        }
+    };
+
+    const handleCopyUid = () => {
+        if (!currentUid) {
+            alert("Nenhum usuário logado para obter o UID.");
+            return;
+        }
+        navigator.clipboard.writeText(currentUid);
+        setCopiedUid(true);
+        setTimeout(() => setCopiedUid(false), 3000);
+    };
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://seu-dominio.com';
+
+    const powerQueryMCode = `let
+    // Configuração oficial segura do Nexus Project para Microsoft Power BI
+    // A chave de API é inserida diretamente na tela de Credenciais da Web API do Power BI
+    Fonte = Json.Document(Web.Contents("${origin}", [
+        RelativePath = "api/powerbi-data",
+        ApiKeyName = "key"
+    ])),
+    Dados = Fonte[data],
+    Tarefas = Table.FromList(Dados[tasks], Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    TarefasExpandidas = Table.ExpandRecordColumn(Tarefas, "Column1", 
+        {"id", "type", "summary", "status", "priority", "assignee", "startDate", "endDate", "automationName", "managementArea", "fteValue"}, 
+        {"ID", "Tipo", "Descricao", "Status", "Prioridade", "Responsavel", "DataInicio", "DataFim", "NomeRPA", "Gerencia", "FTE"}
+    )
+in
+    TarefasExpandidas`;
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col font-sans">
+            {/* Top Navigation */}
             <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                    <div className="p-2 bg-indigo-600/20 border border-indigo-500/30 rounded-xl text-indigo-400">
-                        <IconTerminal className="w-5 h-5" />
+                    <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                        <IconChartBar className="w-5 h-5" />
                     </div>
                     <div>
-                        <h2 className="text-base font-bold text-white">Documentação de Dados & Integração (Power BI / RPA)</h2>
-                        <p className="text-xs text-slate-400 font-mono">Guia de Conexão • {data.tasks.length} demandas • {data.robots.length} robôs</p>
+                        <h2 className="text-base font-bold text-white flex items-center gap-2">
+                            Integração Microsoft Power BI & Relatórios Externos
+                            <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono font-medium">
+                                REST API v2.6
+                            </span>
+                        </h2>
+                        <p className="text-xs text-slate-400">Leitura em tempo real do banco Firestore isolado sob as regras do proprietário</p>
                     </div>
                 </div>
+
                 <div className="flex items-center gap-2">
                     <div className="bg-slate-950 border border-slate-800 rounded-lg p-0.5 flex">
                         <button 
-                            onClick={() => setActiveTab('docs')}
+                            onClick={() => setActiveTab('guide')}
                             className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
-                                activeTab === 'docs' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                                activeTab === 'guide' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                             }`}
                         >
-                            Guia & Documentação
+                            Guia & Conexão
                         </button>
                         <button 
-                            onClick={() => setActiveTab('json')}
+                            onClick={() => setActiveTab('query')}
                             className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
-                                activeTab === 'json' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                                activeTab === 'query' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                             }`}
                         >
-                            Payload JSON ({data.tasks.length})
+                            Power Query (Código M)
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('setup')}
+                            className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                                activeTab === 'setup' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                            }`}
+                        >
+                            Status & Configuração
                         </button>
                     </div>
-                    <button 
-                        onClick={() => {
-                            navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-                            alert('JSON de dados copiado para a área de transferência!');
-                        }}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition-colors"
-                    >
-                        Copiar JSON
-                    </button>
+
                     <a 
                         href="#/totem" 
                         className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors"
@@ -9285,70 +9349,249 @@ const PowerBIDataView = () => {
                 </div>
             </div>
 
-            {activeTab === 'docs' ? (
-                <div className="p-6 max-w-5xl mx-auto w-full space-y-6 flex-1 overflow-auto custom-scrollbar">
+            <div className="p-6 max-w-5xl mx-auto w-full space-y-6 flex-1 overflow-auto custom-scrollbar">
+                {/* Session Bridge Status Card */}
+                <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-3.5 h-3.5 rounded-full ${
+                                sessionStatus?.sessionActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                            }`} />
+                            <div>
+                                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                    Estado da Conexão Power BI:
+                                    <span className={sessionStatus?.sessionActive ? 'text-emerald-400' : sessionStatus?.mode === 'ready-to-test' ? 'text-sky-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                                        {sessionStatus?.sessionActive 
+                                            ? `Conexão Validada (Expira em ~${Math.round((sessionStatus.expiresInSeconds || 0) / 60)} min)` 
+                                            : sessionStatus?.mode === 'ready-to-test'
+                                            ? 'Secret Configurada (Pronto para 1ª Consulta / Validação)'
+                                            : 'Sessão Não Conectada / Expirada'}
+                                    </span>
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    {sessionStatus?.sessionActive 
+                                        ? (sessionStatus.authStrategy === 'refresh-token' ? 'Modo autônomo validado via FIREBASE_REFRESH_TOKEN.' : 'Ponte de sessão ativa em memória (QA / Sandbox).')
+                                        : sessionStatus?.mode === 'ready-to-test'
+                                        ? 'A Secret de autenticação está presente no servidor; a conexão será ativada e validada na primeira requisição do Power BI.'
+                                        : 'A leitura do Firestore pelo Power BI exige que o administrador conecte sua sessão ativa do Nexus ou configure a Secret autônoma.'}
+                                </p>
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={handleConnectSession}
+                            disabled={isConnecting || !auth.currentUser}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 ${
+                                isConnecting 
+                                    ? 'bg-slate-800 text-slate-400 cursor-wait'
+                                    : sessionStatus?.sessionActive
+                                    ? 'bg-indigo-600/80 hover:bg-indigo-600 text-white'
+                                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40 animate-bounce'
+                            }`}
+                        >
+                            <span>⚡</span>
+                            {isConnecting 
+                                ? 'Validando Token...' 
+                                : sessionStatus?.sessionActive 
+                                ? 'Renovar Conexão do BI' 
+                                : 'Conectar Sessão ao Power BI'}
+                        </button>
+                    </div>
+
+                    {connectionFeedback && (
+                        <div className={`p-3 rounded-xl text-xs font-semibold border ${
+                            connectionFeedback.startsWith('✔') 
+                                ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-200' 
+                                : 'bg-rose-950/70 border-rose-500/40 text-rose-200'
+                        }`}>
+                            {connectionFeedback}
+                        </div>
+                    )}
+                </div>
+
+                {activeTab === 'guide' && (
+                    <div className="space-y-6">
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                📊 Como Conectar no Microsoft Power BI Desktop
+                            </h3>
+                            <p className="text-xs text-slate-300 leading-relaxed">
+                                A API do Nexus Project adota o padrão de segurança oficial da Microsoft para conectores Web no Power BI, utilizando parâmetros estáticos com <code className="text-indigo-300 font-mono">RelativePath</code> e autenticação isolada via <code className="text-indigo-300 font-mono">ApiKeyName</code>.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                    <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                                        <span>1️⃣</span> URL Base do Servidor
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                                        <code className="text-xs font-mono text-slate-200 truncate">{origin}</code>
+                                        <button 
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(origin);
+                                                alert("URL copiada!");
+                                            }}
+                                            className="text-xs text-indigo-400 hover:text-white px-2 py-1 rounded bg-slate-800"
+                                        >
+                                            Copiar
+                                        </button>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                        URL estática da aplicação. O Power BI armazena o nível de privacidade nesta URL base.
+                                    </p>
+                                </div>
+
+                                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                    <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                        <span>2️⃣</span> Rota Relativa (RelativePath)
+                                    </div>
+                                    <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                                        <code className="text-xs font-mono text-emerald-300">api/powerbi-data</code>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">
+                                        Endpoint exclusivo de somente leitura que entrega <code className="text-slate-200">tasks</code>, <code className="text-slate-200">robots</code> e <code className="text-slate-200">developers</code>.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="pt-2">
+                                <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Passo a Passo no Power BI Desktop:</h4>
+                                <ol className="text-xs text-slate-300 space-y-2.5 list-decimal list-inside leading-relaxed bg-slate-950 p-4 rounded-xl border border-slate-800">
+                                    <li>Abra o <strong>Power BI Desktop</strong>.</li>
+                                    <li>Clique em <strong>Obter Dados</strong> &gt; <strong>Consulta em Branco</strong>.</li>
+                                    <li>Na faixa de opções, clique em <strong>Editor Avançado</strong>.</li>
+                                    <li>Vá na aba <strong>Power Query (Código M)</strong> nesta tela, copie o código e cole no Editor Avançado.</li>
+                                    <li>Ao confirmar, o Power BI solicitará as <strong>Credenciais de Acesso à Web</strong>.</li>
+                                    <li>Selecione o tipo <strong>Chave de API (Web API)</strong> e insira a chave secreta cadastrada no servidor.</li>
+                                    <li>O Power BI carregará os dados em tempo real diretamente do banco Firestore.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'query' && (
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                                Conexão Externa para Power BI / RPA
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                💻 Código Power Query M (Editor Avançado)
                             </h3>
-                            <span className="text-xs bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 px-3 py-1 rounded-full font-mono font-medium">
-                                REST JSON Endpoint
-                            </span>
+                            <button 
+                                onClick={() => {
+                                    navigator.clipboard.writeText(powerQueryMCode);
+                                    alert("Código M copiado para a área de transferência!");
+                                }}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
+                            >
+                                📋 Copiar Código M
+                            </button>
                         </div>
-                        <p className="text-sm text-slate-300 leading-relaxed">
-                            Este endpoint expõe os dados consolidados do Nexus Project (demandas, robôs cadastrados e equipe de desenvolvedores) para consumo automatizado via Microsoft Power BI, automações RPA (UiPath, Power Automate, Python) e ferramentas corporativas.
+                        <p className="text-xs text-slate-400">
+                            Este script utiliza o conector otimizado com <code className="text-indigo-300 font-mono">RelativePath</code> e <code className="text-indigo-300 font-mono">ApiKeyName</code>. A chave de API nunca fica gravada no código, garantindo total conformidade com boas práticas de segurança corporativa.
                         </p>
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                            <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Chave de Acesso (API Key Ativa):</span>
-                            <div className="flex items-center justify-between gap-3 bg-slate-900 px-3 py-2 rounded-lg border border-slate-800">
-                                <code className="text-sm text-indigo-300 font-mono select-all truncate">{activeKey}</code>
+                        <pre className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs overflow-x-auto custom-scrollbar leading-relaxed">
+                            {powerQueryMCode}
+                        </pre>
+                    </div>
+                )}
+
+                {activeTab === 'setup' && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                        <div>
+                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                                ⚙️ Parâmetros do Servidor & Identificação do Proprietário
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-1">
+                                Para proteger contra invasão de escopo e garantir isolamento, o servidor exige a definição de <code className="text-sky-300">POWERBI_OWNER_UID</code> e <code className="text-sky-300">POWERBI_API_KEY</code>.
+                            </p>
+                        </div>
+
+                        {/* Current User UID Copy Box */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Seu UID de Usuário Atual (Firebase):</span>
+                                <span className="text-[11px] text-slate-500">{currentEmail || 'Usuário Autenticado'}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 bg-slate-900 px-3 py-2.5 rounded-lg border border-slate-800">
+                                <code className="text-xs text-sky-300 font-mono select-all truncate">
+                                    {currentUid || 'Não autenticado no momento'}
+                                </code>
                                 <button 
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(activeKey);
-                                        alert('Chave de API copiada!');
-                                    }}
-                                    className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                                    onClick={handleCopyUid}
+                                    disabled={!currentUid}
+                                    className="px-3 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-800 rounded text-xs font-semibold transition-colors shrink-0"
                                 >
-                                    Copiar
+                                    {copiedUid ? '✔ Copiado!' : 'Copiar UID'}
                                 </button>
                             </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
-                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                📊 Como Conectar no Microsoft Power BI
-                            </h4>
-                            <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
-                                <li>Abra o <strong>Power BI Desktop</strong>.</li>
-                                <li>Clique em <strong>Obter Dados</strong> &gt; <strong>Web</strong>.</li>
-                                <li>Selecione <strong>Básico</strong> e insira a URL da aplicação com o parâmetro <code className="text-indigo-400">#/powerbi-data?key={activeKey}</code>.</li>
-                                <li>No Power Query, expanda as tabelas <code className="text-emerald-400">tasks</code>, <code className="text-emerald-400">robots</code> e <code className="text-emerald-400">developers</code>.</li>
-                                <li>Aplique as transformações e clique em <strong>Fechar e Aplicar</strong>.</li>
-                            </ol>
+                            <p className="text-[11px] text-slate-400">
+                                Configure a variável de ambiente <code className="text-sky-300 font-mono">POWERBI_OWNER_UID={currentUid}</code> no servidor ou nas configurações para vincular o Power BI à sua conta de dados.
+                            </p>
                         </div>
 
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3">
-                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                🤖 Como Conectar via Robôs RPA (Python / cURL)
-                            </h4>
-                            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-400 space-y-2">
-                                <p className="text-slate-400"># Exemplo de requisição Python:</p>
-                                <p className="text-slate-200">import requests</p>
-                                <p className="text-slate-200">payload = requests.get(url, params=&#123;&quot;key&quot;: &quot;{activeKey}&quot;&#125;).json()</p>
-                                <p className="text-slate-200">print(f&quot;Demandas ativas: &#123;len(payload['tasks'])&#125;&quot;)</p>
+                        {/* Status Diagnostics */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                                <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Configuração do Servidor:</span>
+                                <div className="flex items-center gap-2">
+                                    <span className={`w-2 h-2 rounded-full ${sessionStatus?.configured ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                                    <span className="text-xs font-semibold text-white">
+                                        {sessionStatus?.configured ? 'Servidor Configurado (Variáveis Ativas)' : 'Servidor Incompleto (Defina POWERBI_OWNER_UID e POWERBI_API_KEY)'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                                <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Estratégia de Autenticação & Modo:</span>
+                                <div className="flex items-center gap-2">
+                                    <span className={`w-2 h-2 rounded-full ${sessionStatus?.sessionActive ? 'bg-emerald-400' : sessionStatus?.mode === 'ready-to-test' ? 'bg-sky-400' : 'bg-amber-400'}`} />
+                                    <span className="text-xs font-mono text-slate-300 truncate">
+                                        {sessionStatus?.authStrategy === 'refresh-token'
+                                            ? (sessionStatus.sessionActive ? 'Autônomo Validado (Vercel PRD)' : 'Secret Configurada / Pronto para Teste (Vercel PRD)')
+                                            : sessionStatus?.sessionActive
+                                            ? 'Sessão Volátil em RAM (QA / Sandbox)'
+                                            : 'Aguardando Sessão ou Secret'}
+                                    </span>
+                                </div>
                             </div>
                         </div>
+
+                        {/* Vercel PRD Secrets Checklist */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                            <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                                🚀 Secrets Necessárias no Painel Vercel (Produção - PRD)
+                            </h4>
+                            <p className="text-xs text-slate-400">
+                                Para que as Serverless Functions da Vercel atendam o Power BI 24/7 sem exigir aba do navegador aberta, configure as variáveis de ambiente no dashboard da Vercel:
+                            </p>
+                            <div className="space-y-2 text-xs font-mono">
+                                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 flex items-center justify-between">
+                                    <span className="text-indigo-300 font-bold">POWERBI_OWNER_UID</span>
+                                    <span className="text-slate-400 font-sans text-[11px]">UID da conta do proprietário no Firebase</span>
+                                </div>
+                                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 flex items-center justify-between">
+                                    <span className="text-indigo-300 font-bold">POWERBI_API_KEY</span>
+                                    <span className="text-slate-400 font-sans text-[11px]">Chave secreta de no mínimo 32 caracteres</span>
+                                </div>
+                                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 flex items-center justify-between">
+                                    <span className="text-amber-300 font-bold">FIREBASE_REFRESH_TOKEN</span>
+                                    <span className="text-slate-400 font-sans text-[11px]">Refresh token persistente do proprietário para renovação autônoma</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-indigo-950/20 border border-indigo-500/20 rounded-xl space-y-2">
+                            <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                                ℹ️ Arquitetura de Ambientes (QA vs PRD):
+                            </h4>
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                                • <strong>Produção (Vercel):</strong> Utiliza a Secret <code>FIREBASE_REFRESH_TOKEN</code> no servidor para trocar autonomamente por ID Tokens de curta duração via endpoint oficial do Google, sem necessidade de sessão ativa no navegador.<br />
+                                • <strong>Homologação (AI Studio / QA):</strong> Permite validar o fluxo através da ponte de sessão ativa em RAM caso o refresh token ainda não tenha sido configurado no servidor.
+                            </p>
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <pre className="p-6 bg-slate-950 text-emerald-400 font-mono text-xs whitespace-pre-wrap flex-1 overflow-auto custom-scrollbar">
-                    {JSON.stringify(data, null, 2)}
-                </pre>
-            )}
+                )}
+            </div>
         </div>
     );
 };

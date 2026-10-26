@@ -9,8 +9,8 @@ const hostFlagIndex = args.indexOf("--host");
 const cliPort = portFlagIndex !== -1 && args[portFlagIndex + 1] ? parseInt(args[portFlagIndex + 1], 10) : undefined;
 const HOST = hostFlagIndex !== -1 && args[hostFlagIndex + 1] ? args[hostFlagIndex + 1] : "0.0.0.0";
 
-// Dev server must always run on port 3000 per environment constraints unless explicitly overridden by CLI
-const PORT = cliPort || (process.env.NODE_ENV === "production" && process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
+// Support PORT environment variable in all environments (essential for Cloud Run publication)
+const PORT = cliPort || (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
 
 const initStandAlone = async () => {
   // Serve Vite in development environment
@@ -25,8 +25,13 @@ const initStandAlone = async () => {
     // Serve static files in production env
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+
+    // Express 5 compatible SPA fallback (avoids invalid route path wildcard error)
+    app.use((req, res, next) => {
+      if (req.method === "GET" && !req.path.startsWith("/api")) {
+        return res.sendFile(path.join(distPath, "index.html"));
+      }
+      next();
     });
   }
 
