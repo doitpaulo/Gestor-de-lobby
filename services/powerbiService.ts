@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import firebaseConfig from "../firebase-applet-config.json";
+import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
 
 // ---------------------------------------------------------------------------
 // Configuration & Secrets (Server-Side Only - Never Exposed to Frontend)
