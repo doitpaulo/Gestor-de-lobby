@@ -697,6 +697,19 @@ export const PowerBIService = {
         signal: AbortSignal.timeout(8000)
       });
 
+      if (!res.ok && res.status === 403) {
+        const parent = `projects/${projectId}/databases/${databaseId}/documents/users/${ownerUid}`;
+        const probe = await fetchFn(`https://firestore.googleapis.com/v1/${parent}:runQuery`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ structuredQuery: { from: [{ collectionId: collectionName }], limit: 1 } }),
+          signal: AbortSignal.timeout(8000)
+        });
+        const probeError: any = new Error(`Firestore listDocuments negado; runQuery ${probe.status}; coleção ${collectionName}.`);
+        probeError.status = 503;
+        probeError.code = probe.ok ? "FIRESTORE_QUERY_COMPATIBILITY_CONFIRMED" : "FIRESTORE_QUERY_DENIED";
+        throw probeError;
+      }
       if (!res.ok) {
         // Report only allowlisted diagnostics; never return Google's raw response.
         const failure: any = await res.json().catch(() => ({}));
