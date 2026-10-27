@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {PowerBIService as service} from './services/powerbiService.ts';
+const parent='projects/atomic-chess-2kpr3/databases/ai-studio-nexusproject-4dcf951c-17f1-4c17-b326-8e7464cce3c8/documents/users/owner';
+const doc=(n)=>({name:parent+'/tasks/'+String(n).padStart(3,'0'),fields:{id:{stringValue:String(n)},summary:{stringValue:'Task'},password:{stringValue:'private'}}});
+let calls=[];
+service.__setMockFirestoreFetch(async(url,init)=>{const q=JSON.parse(init.body).structuredQuery;calls.push(q);assert.equal(init.method,'POST');assert.equal(url,'https://firestore.googleapis.com/v1/'+parent+':runQuery');assert.deepEqual(q.from,[{collectionId:'tasks'}]);return {ok:true,json:async()=>q.startAt?[{document:doc(101)}]:Array.from({length:100},(_,i)=>({document:doc(i+1)}))};});
+const rows=await service.fetchCollectionLive('tasks','owner','test-token');
+assert.equal(rows.length,101);assert.equal(calls.length,2);assert.equal(calls[1].startAt.before,false);assert.equal(calls[1].startAt.values[0].referenceValue,doc(100).name);assert.ok(rows.every(r=>!('password' in r)));
+service.__setMockFirestoreFetch(async()=>({ok:true,json:async()=>[{readTime:'2026-10-27T00:00:00Z'}]}));
+assert.deepEqual(await service.fetchCollectionLive('devs','owner','test-token'),[]);
+service.__setMockFirestoreFetch(async()=>({ok:true,json:async()=>[{document:{...doc(1),name:parent.replace('/owner','/other')+'/tasks/1'}}]}));
+await assert.rejects(service.fetchCollectionLive('tasks','owner','test-token'),/fora do escopo/);
+service.__setMockFirestoreFetch(async()=>({ok:true,json:async()=>[{document:doc(1)},{document:doc(1)}]}));
+await assert.rejects(service.fetchCollectionLive('tasks','owner','test-token'),/Ciclo/);
+service.__setMockFirestoreFetch(async()=>({ok:false,status:403}));
+await assert.rejects(service.fetchCollectionLive('tasks','owner','test-token'),e=>e.code==='FIRESTORE_PERMISSION_DENIED'&&e.status===503);
+service.__setMockFirestoreFetch(async()=>({ok:true,json:async()=>({documents:[]})}));
+await assert.rejects(service.fetchCollectionLive('tasks','owner','test-token'),/Resposta inválida/);
+console.log('PASS: paginated 101 docs, fixed scope, exclusive cursor, sanitization, empty database, scope rejection, duplicate rejection, 403 and malformed-response handling');
+

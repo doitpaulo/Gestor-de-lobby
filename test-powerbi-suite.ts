@@ -370,13 +370,13 @@ async function runTests() {
     // -------------------------------------------------------------------------
     console.log("\n👉 Bloco 6: Mock Firestore REST, Proteção de Paginação & Fallback");
 
-    PowerBIService.__setMockFirestoreFetch(async (url: string) => {
-      if (url.includes("/tasks")) {
+    PowerBIService.__setMockFirestoreFetch(async (url: string, init: any) => {
+      if (JSON.parse(init.body).structuredQuery.from[0].collectionId === "tasks") {
         return {
           ok: true,
           status: 200,
-          json: async () => ({
-            documents: [
+          json: async () => [
+              { document:
               {
                 name: `projects/${expectedProject}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${OWNER_UID}/tasks/TASK-LIVE-01`,
                 fields: {
@@ -388,11 +388,11 @@ async function runTests() {
                   azureDevOpsPat: { stringValue: "secret_leak_attempt" }
                 }
               }
+              }
             ]
-          })
         };
       }
-      return { ok: true, status: 200, json: async () => ({ documents: [] }) };
+      return { ok: true, status: 200, json: async () => [] };
     });
 
     const liveData = await PowerBIService.getLivePowerBIData(TEST_VALID_KEY);
@@ -407,7 +407,7 @@ async function runTests() {
     PowerBIService.__setMockFirestoreFetch(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ documents: [], nextPageToken: "stuck_token_loop" })
+      json: async () => Array.from({ length: 100 }, (_, i) => ({ document: { name: `projects/${expectedProject}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${OWNER_UID}/tasks/${String(i).padStart(3, "0")}`, fields: {} } }))
     }));
 
     let cycleErrorCaught = false;
@@ -478,13 +478,13 @@ async function runTests() {
       };
     });
 
-    PowerBIService.__setMockFirestoreFetch(async (url: string) => {
-      if (url.includes("/tasks")) {
+    PowerBIService.__setMockFirestoreFetch(async (url: string, init: any) => {
+      if (JSON.parse(init.body).structuredQuery.from[0].collectionId === "tasks") {
         return {
           ok: true,
           status: 200,
-          json: async () => ({
-            documents: [
+          json: async () => [
+              { document:
               {
                 name: `projects/${expectedProject}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${OWNER_UID}/tasks/TASK-PRD-01`,
                 fields: {
@@ -497,11 +497,11 @@ async function runTests() {
                   iterationPath: { stringValue: "Sprint 43\\PRD" }
                 }
               }
+              }
             ]
-          })
         };
       }
-      return { ok: true, status: 200, json: async () => ({ documents: [] }) };
+      return { ok: true, status: 200, json: async () => [] };
     });
 
     const resHttpInstance1 = await makeRequest(server, "/api/powerbi-data", "GET", {

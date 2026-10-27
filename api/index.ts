@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
-import { PowerBIService } from "../services/powerbiService";
+import { PowerBIService } from "../services/powerbiService.js";
 
 const app = express();
 
