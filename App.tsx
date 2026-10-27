@@ -6988,6 +6988,7 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
     const [avatar, setAvatar] = useState(user.avatar || ''); 
     const [password, setPassword] = useState(user.password || '');
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
+    const [isSavingDevops, setIsSavingDevops] = useState(false);
     const [devopsSavedFeedback, setDevopsSavedFeedback] = useState(false);
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
@@ -6999,28 +7000,15 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
       };
       window.addEventListener('nexus-devops-config-updated', handleUpdate);
 
-      // Also ensure backend config is synced if local storage was freshly opened
-      fetch('/api/devops/config')
-        .then(res => res.json())
-        .then(cfg => {
-          if (cfg && (cfg.organization || cfg.pat)) {
-            setDevopsConfig(prev => {
-              const merged: DevOpsConfig = {
-                organization: prev.organization || cfg.organization || '',
-                project: prev.project || cfg.project || '',
-                pat: prev.pat || cfg.pat || '',
-                isActive: prev.isActive ?? cfg.isActive ?? false,
-                defaultIterationPath: prev.defaultIterationPath || cfg.defaultIterationPath || ''
-              };
-              StorageService.setDevOpsConfigInMemory(merged);
-              return merged;
-            });
-          }
-        })
-        .catch(() => {});
+      // Active synchronization from Firestore cloud & backend
+      StorageService.syncDevOpsFromCloud(user?.id).then(cfg => {
+        if (cfg && (cfg.organization || cfg.pat || cfg.project)) {
+          setDevopsConfig(cfg);
+        }
+      }).catch(() => {});
 
       return () => window.removeEventListener('nexus-devops-config-updated', handleUpdate);
-    }, []);
+    }, [user?.id]);
 
     const handleSave = () => { const updated = { ...user, name, avatar, password }; setUser(updated); StorageService.updateUser(updated); alert('Perfil atualizado com sucesso!'); }
     const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { if(ev.target?.result) setAvatar(ev.target.result as string); }; reader.readAsDataURL(file); } }
@@ -7190,18 +7178,30 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
             {devopsSavedFeedback && (
               <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
                 <IconCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>As configurações do Azure DevOps foram armazenadas com sucesso no navegador e na nuvem. Você não precisará preenchê-las novamente!</span>
+                <span>Configurações do Azure DevOps salvas e sincronizadas na sua conta Firestore! Mesmo ao fazer login em outro computador ou navegador, seus dados de integração serão carregados automaticamente.</span>
               </div>
             )}
 
-            <div className="flex justify-end pt-4 border-t border-slate-700">
-              <Button onClick={() => { 
-                StorageService.saveDevOpsConfig(devopsConfig); 
-                setDevopsSavedFeedback(true);
-                setTimeout(() => setDevopsSavedFeedback(false), 5000);
-                alert('Credenciais e preferências do Azure DevOps salvas e persistidas com sucesso!'); 
-              }}>
-                Salvar Configurações DevOps
+            <div className="flex items-center justify-between pt-4 border-t border-slate-700">
+              <span className="text-[11px] text-slate-400">
+                {devopsConfig.organization ? `Conectado à organização: ${devopsConfig.organization}` : "Nenhuma organização configurada"}
+              </span>
+              <Button 
+                disabled={isSavingDevops}
+                onClick={async () => { 
+                  setIsSavingDevops(true);
+                  try {
+                    await StorageService.saveDevOpsConfig(devopsConfig, user?.id); 
+                    setDevopsSavedFeedback(true);
+                    setTimeout(() => setDevopsSavedFeedback(false), 6000);
+                  } catch (e: any) {
+                    alert('Erro ao salvar configurações do Azure DevOps: ' + (e?.message || e));
+                  } finally {
+                    setIsSavingDevops(false);
+                  }
+                }}
+              >
+                {isSavingDevops ? "Salvando na Nuvem..." : "Salvar Configurações DevOps"}
               </Button>
             </div>
           </Card>
@@ -9214,6 +9214,12 @@ const PowerBIDataView = () => {
     const [connectionFeedback, setConnectionFeedback] = useState<string | null>(null);
     const [copiedUid, setCopiedUid] = useState(false);
 
+    // QA-only manual Firebase credential copy state
+    const [isOwnerVerified, setIsOwnerVerified] = useState<boolean>(false);
+    const [isSecretModalOpen, setIsSecretModalOpen] = useState(false);
+    const [hasConfirmedSecretCopy, setHasConfirmedSecretCopy] = useState(false);
+    const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
     const currentUid = auth.currentUser?.uid || loggedUser?.id || '';
     const currentEmail = auth.currentUser?.email || loggedUser?.email || '';
 
@@ -9231,7 +9237,65 @@ const PowerBIDataView = () => {
 
     useEffect(() => {
         fetchStatus();
-    }, []);
+        const checkOwner = async () => {
+            if (!auth.currentUser) {
+                setIsOwnerVerified(false);
+                return;
+            }
+            try {
+                const idToken = await auth.currentUser.getIdToken();
+                const res = await fetch('/api/powerbi/session-bridge', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${idToken}` }
+                });
+                if (res.ok) {
+                    setIsOwnerVerified(true);
+                    fetchStatus();
+                } else {
+                    setIsOwnerVerified(false);
+                }
+            } catch {
+                setIsOwnerVerified(false);
+            }
+        };
+        checkOwner();
+    }, [auth.currentUser]);
+
+    const handleCopyFirebaseCredential = async () => {
+        if (!hasConfirmedSecretCopy) {
+            alert("É necessário marcar a confirmação explícita de segurança antes de copiar.");
+            return;
+        }
+
+        const user = auth.currentUser;
+        if (!user) {
+            setCopyFeedback("Usuário não autenticado.");
+            return;
+        }
+
+        try {
+            // Access public official Firebase Auth currentUser.refreshToken strictly on manual user action
+            const token = (user as any).refreshToken;
+            if (!token || typeof token !== 'string') {
+                throw new Error("Não foi possível obter o refresh token da sessão ativa do Firebase Auth.");
+            }
+
+            if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                setCopyFeedback("A API de área de transferência não está disponível neste navegador/contexto.");
+                return;
+            }
+
+            await navigator.clipboard.writeText(token);
+            setCopyFeedback("Copiado");
+            setIsSecretModalOpen(false);
+            setHasConfirmedSecretCopy(false);
+            setTimeout(() => setCopyFeedback(null), 5000);
+        } catch (err: any) {
+            setCopyFeedback(
+                "A permissão de área de transferência (clipboard) foi bloqueada pelo navegador/iframe. Para permitir a cópia segura, abra a aplicação em aba independente ou autorize o acesso à área de transferência nas permissões do navegador."
+            );
+        }
+    };
 
     const handleConnectSession = async () => {
         if (!auth.currentUser) {
@@ -9578,7 +9642,115 @@ in
                                     <span className="text-slate-400 font-sans text-[11px]">Refresh token persistente do proprietário para renovação autônoma</span>
                                 </div>
                             </div>
+
+                            {/* QA-Only Manual Firebase Credential Copy (Never rendered in PRD) */}
+                            {Boolean(import.meta.env.DEV && !import.meta.env.PROD && auth.currentUser && isOwnerVerified) && (
+                                <div className="mt-3 p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl space-y-2">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                        <div>
+                                            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 block">
+                                                🛠️ Configuração Manual de Produção (Apenas Ambiente QA)
+                                            </span>
+                                            <p className="text-[11px] text-slate-300">
+                                                Opção restrita ao proprietário verificado para copiar a credencial diretamente para o Secret da Vercel.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIsSecretModalOpen(true);
+                                                setHasConfirmedSecretCopy(false);
+                                            }}
+                                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-all shrink-0 shadow-sm cursor-pointer"
+                                        >
+                                            Copiar credencial Firebase para Vercel
+                                        </button>
+                                    </div>
+                                    {copyFeedback && (
+                                        <div className={`p-2.5 rounded-lg text-xs font-semibold ${
+                                            copyFeedback === "Copiado"
+                                                ? "bg-emerald-950/80 border border-emerald-500/50 text-emerald-200"
+                                                : "bg-rose-950/80 border border-rose-500/50 text-rose-200"
+                                        }`}>
+                                            {copyFeedback === "Copiado" ? "✔ Copiado" : `⚠️ ${copyFeedback}`}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
+
+                        {/* Modal de Confirmação Explícita para Cópia Segura (Apenas QA) */}
+                        {Boolean(import.meta.env.DEV && !import.meta.env.PROD && isSecretModalOpen) && (
+                            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                                <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+                                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                                        <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl text-xl">
+                                            ⚠️
+                                        </div>
+                                        <div>
+                                            <h3 className="text-sm font-bold text-white">
+                                                Confirmação de Cópia de Credencial Sensível
+                                            </h3>
+                                            <p className="text-xs text-slate-400">
+                                                Projeto gestor-de-lobby na Vercel
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="text-xs text-slate-300 space-y-3 leading-relaxed">
+                                        <p className="p-3 bg-rose-950/40 border border-rose-500/30 rounded-xl text-rose-200 font-medium">
+                                            <strong>Atenção de Segurança:</strong> Esta é uma credencial altamente sensível com as permissões Firebase da sua conta de proprietário.
+                                        </p>
+                                        <p>
+                                            Ela é destinada <strong>exclusivamente</strong> para configurar o Secret <code className="text-amber-300 font-mono font-bold">FIREBASE_REFRESH_TOKEN</code> do projeto <strong className="text-white">gestor-de-lobby</strong> no painel de Environment Variables da <strong className="text-white">Vercel</strong>.
+                                        </p>
+                                        <p className="text-slate-400">
+                                            • Jamais compartilhe este valor, não envie por e-mail ou canais de chat, e não o insira em repositórios públicos.<br />
+                                            • O token será transferido diretamente para a sua área de transferência local apenas após a sua confirmação manual, sem ser renderizado na tela ou trafegado pelo servidor.
+                                        </p>
+                                    </div>
+
+                                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={hasConfirmedSecretCopy}
+                                                onChange={(e) => setHasConfirmedSecretCopy(e.target.checked)}
+                                                className="mt-0.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                                            />
+                                            <span className="text-xs text-slate-200 font-medium select-none">
+                                                Confirmo que sou o administrador proprietário e que utilizarei esta credencial exclusivamente para o Secret FIREBASE_REFRESH_TOKEN do projeto gestor-de-lobby na Vercel.
+                                            </span>
+                                        </label>
+                                    </div>
+
+                                    <div className="flex items-center justify-end gap-3 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIsSecretModalOpen(false);
+                                                setHasConfirmedSecretCopy(false);
+                                            }}
+                                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyFirebaseCredential}
+                                            disabled={!hasConfirmedSecretCopy}
+                                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md ${
+                                                hasConfirmedSecretCopy
+                                                    ? "bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-950/40 cursor-pointer"
+                                                    : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                                            }`}
+                                        >
+                                            Confirmar e Copiar Credencial
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="p-4 bg-indigo-950/20 border border-indigo-500/20 rounded-xl space-y-2">
                             <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
@@ -9808,8 +9980,8 @@ export default function App() {
       StorageService.setDocumentsConfigInMemory(cfg);
     });
 
-    FirebaseService.getSetting<DevOpsConfig>('devops', { organization: '', project: '', pat: '', isActive: false }, user.id).then(cfg => {
-      StorageService.setDevOpsConfigInMemory(cfg);
+    StorageService.syncDevOpsFromCloud(user.id).catch(e => {
+      console.warn('DevOps cloud sync notice:', e);
     });
 
     // Subscribe to Firestore collections in real time

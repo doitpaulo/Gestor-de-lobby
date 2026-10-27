@@ -353,31 +353,117 @@ export const StorageService = {
   },
 
   setDevOpsConfigInMemory: (config: DevOpsConfig) => {
-    inMemoryDevOps = config;
+    if (!config) return;
+    inMemoryDevOps = {
+      organization: String(config.organization || '').trim(),
+      project: String(config.project || '').trim(),
+      pat: String(config.pat || '').trim(),
+      isActive: Boolean(config.isActive),
+      defaultIterationPath: String(config.defaultIterationPath || '').trim()
+    };
     try {
-      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(config));
+      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(inMemoryDevOps));
     } catch {}
     saveLocalCache();
-    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: config }));
+    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: inMemoryDevOps }));
   },
 
-  saveDevOpsConfig: (config: DevOpsConfig) => {
-    inMemoryDevOps = config;
+  saveDevOpsConfig: async (config: DevOpsConfig, userId?: string): Promise<{ success: boolean; error?: string }> => {
+    inMemoryDevOps = {
+      organization: String(config.organization || '').trim(),
+      project: String(config.project || '').trim(),
+      pat: String(config.pat || '').trim(),
+      isActive: Boolean(config.isActive),
+      defaultIterationPath: String(config.defaultIterationPath || '').trim()
+    };
+
+    // 1. Save locally for instantaneous offline availability
     try {
-      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(config));
+      localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(inMemoryDevOps));
     } catch (e) {
-      console.warn('Error saving persistent DevOps config:', e);
+      console.warn('Error saving persistent DevOps config to localStorage:', e);
     }
     saveLocalCache();
-    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: config }));
+    window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: inMemoryDevOps }));
     BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
-    FirebaseService.saveSetting('devops', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting devops error:', e));
-    // Persist to backend store for complete resilience
-    fetch('/api/devops/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    }).catch(() => {});
+
+    // 2. Persist to Firestore cloud database so any device/browser loads it
+    const targetUid = userId || currentUserId || undefined;
+    try {
+      await FirebaseService.saveDevOpsConfig(inMemoryDevOps, targetUid);
+      await FirebaseService.saveSetting('devops', inMemoryDevOps, targetUid);
+    } catch (e: any) {
+      console.warn('Firebase saveDevOpsConfig notice:', e);
+    }
+
+    // 3. Persist to backend server store for complete node resilience
+    try {
+      await fetch('/api/devops/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inMemoryDevOps)
+      });
+    } catch {}
+
+    return { success: true };
+  },
+
+  // Synchronizes Azure DevOps config from Firestore cloud storage across devices
+  syncDevOpsFromCloud: async (userId?: string): Promise<DevOpsConfig | null> => {
+    const targetUid = userId || currentUserId || undefined;
+    if (!targetUid) return inMemoryDevOps;
+
+    try {
+      // 1. Query Firestore cloud storage
+      const remote = await FirebaseService.getDevOpsConfig(targetUid);
+      if (remote && (remote.organization || remote.pat || remote.project)) {
+        inMemoryDevOps = remote;
+        try {
+          localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(remote));
+        } catch {}
+        saveLocalCache();
+        window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: remote }));
+        // Keep backend in sync
+        fetch('/api/devops/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(remote)
+        }).catch(() => {});
+        return remote;
+      }
+
+      // 2. If remote is not yet populated, but local session has credentials, upload to Firestore!
+      if (inMemoryDevOps && (inMemoryDevOps.organization || inMemoryDevOps.pat)) {
+        await FirebaseService.saveDevOpsConfig(inMemoryDevOps, targetUid);
+        return inMemoryDevOps;
+      }
+
+      // 3. Fallback: check backend server endpoint
+      const res = await fetch('/api/devops/config').catch(() => null);
+      if (res && res.ok) {
+        const srv = await res.json().catch(() => null);
+        if (srv && (srv.organization || srv.pat)) {
+          const cfg: DevOpsConfig = {
+            organization: srv.organization || '',
+            project: srv.project || '',
+            pat: srv.pat || '',
+            isActive: Boolean(srv.isActive),
+            defaultIterationPath: srv.defaultIterationPath || ''
+          };
+          inMemoryDevOps = cfg;
+          try {
+            localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(cfg));
+          } catch {}
+          saveLocalCache();
+          window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: cfg }));
+          await FirebaseService.saveDevOpsConfig(cfg, targetUid);
+          return cfg;
+        }
+      }
+    } catch (e) {
+      console.warn('Error during syncDevOpsFromCloud:', e);
+    }
+    return inMemoryDevOps;
   },
 
   // --- API Key / Power BI ---

@@ -674,13 +674,126 @@ export const FirebaseService = {
     try {
       const docRef = FirebaseService.getTargetDoc('settings', key, userId);
       const snap = await getDoc(docRef);
-      if (snap.exists() && snap.data()?.value !== undefined) {
-        return snap.data().value as T;
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.value !== undefined) {
+          return data.value as T;
+        }
+        return data as unknown as T;
       }
     } catch (e) {
       console.warn(`Error getting setting ${key}:`, e);
     }
     return fallback;
+  },
+
+  // Dedicated Azure DevOps Cloud Configuration Persistence
+  saveDevOpsConfig: async (config: DevOpsConfig, userId?: string): Promise<boolean> => {
+    const uid = userId || auth.currentUser?.uid;
+    if (!uid || isGuestUserId(uid)) return false;
+    try {
+      const cleanConfig = {
+        organization: String(config.organization || '').trim(),
+        project: String(config.project || '').trim(),
+        pat: String(config.pat || '').trim(),
+        isActive: Boolean(config.isActive),
+        defaultIterationPath: String(config.defaultIterationPath || '').trim()
+      };
+      const payload = {
+        value: cleanConfig,
+        ...cleanConfig,
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. Save in user settings subcollection
+      const userSettingsDocRef = doc(db, 'users', uid, 'settings', 'devops');
+      await setDoc(userSettingsDocRef, cleanForFirestore(payload));
+
+      // 2. Also save in user root document for redundancy
+      try {
+        const userDocRef = doc(db, 'users', uid);
+        await setDoc(userDocRef, cleanForFirestore({ devopsConfig: cleanConfig, devops: cleanConfig }), { merge: true });
+      } catch (e) {
+        console.warn('Could not merge devops into user doc:', e);
+      }
+
+      // 3. Attempt to save to global settings document (if rules permit)
+      try {
+        const globalDocRef = doc(db, 'settings', 'devops');
+        await setDoc(globalDocRef, cleanForFirestore(payload), { merge: true });
+      } catch {
+        // Ignored if permissions are strictly user-scoped
+      }
+
+      return true;
+    } catch (e) {
+      console.warn('Error saving devops config to Firestore:', e);
+      return false;
+    }
+  },
+
+  getDevOpsConfig: async (userId?: string): Promise<DevOpsConfig | null> => {
+    const uid = userId || auth.currentUser?.uid;
+    if (!uid || isGuestUserId(uid)) return null;
+
+    const parseDevOps = (raw: any): DevOpsConfig | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const target = raw.value && typeof raw.value === 'object' ? raw.value : raw;
+      const org = String(target.organization || raw.organization || '').trim();
+      const proj = String(target.project || raw.project || '').trim();
+      const pat = String(target.pat || raw.pat || '').trim();
+      const path = String(target.defaultIterationPath || raw.defaultIterationPath || '').trim();
+      const active = target.isActive !== undefined ? Boolean(target.isActive) : (raw.isActive !== undefined ? Boolean(raw.isActive) : false);
+      if (org || pat || proj) {
+        return {
+          organization: org,
+          project: proj,
+          pat,
+          isActive: active,
+          defaultIterationPath: path
+        };
+      }
+      return null;
+    };
+
+    // 1. Try user settings subcollection
+    try {
+      const userSettingsDocRef = doc(db, 'users', uid, 'settings', 'devops');
+      const snap = await getDoc(userSettingsDocRef);
+      if (snap.exists()) {
+        const parsed = parseDevOps(snap.data());
+        if (parsed) return parsed;
+      }
+    } catch (e) {
+      console.warn('Could not read user devops setting:', e);
+    }
+
+    // 2. Try user profile doc
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const snap = await getDoc(userDocRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const parsed = parseDevOps(data?.devopsConfig || data?.devops);
+        if (parsed) return parsed;
+      }
+    } catch (e) {
+      console.warn('Could not read user profile devops:', e);
+    }
+
+    // 3. Try global settings doc
+    try {
+      const globalDocRef = doc(db, 'settings', 'devops');
+      const snap = await getDoc(globalDocRef);
+      if (snap.exists()) {
+        const parsed = parseDevOps(snap.data());
+        if (parsed) return parsed;
+      }
+    } catch (e) {
+      console.warn('Could not read global devops setting:', e);
+    }
+
+    return null;
   },
 
   // Cloud Backups stored directly in Firestore
