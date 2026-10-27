@@ -698,7 +698,16 @@ export const PowerBIService = {
       });
 
       if (!res.ok) {
-        throw new Error(`Falha de comunicação com o Firestore (${res.status}).`);
+        // Report only allowlisted diagnostics; never return Google's raw response.
+        const failure: any = await res.json().catch(() => ({}));
+        const allowedReasons = new Set(["SERVICE_DISABLED", "BILLING_DISABLED", "CONSUMER_INVALID", "API_KEY_SERVICE_BLOCKED", "API_KEY_HTTP_REFERRER_BLOCKED", "IAM_PERMISSION_DENIED", "SECURITY_RULES_VIOLATED"]);
+        const reason = (failure.error?.details || []).map((detail: any) => detail?.reason).find((value: any) => allowedReasons.has(value));
+        const deniedByRules = /missing or insufficient permissions/i.test(failure.error?.message || "");
+        const diagnosis = reason || (deniedByRules ? "SECURITY_RULES_DENIED" : (failure.error?.status === "PERMISSION_DENIED" ? "PERMISSION_DENIED" : "UPSTREAM_ERROR"));
+        const err: any = new Error(`Falha Firestore (${res.status}): ${diagnosis}; coleção ${collectionName}.`);
+        err.status = 503;
+        err.code = "FIRESTORE_" + diagnosis;
+        throw err;
       }
 
       const body: any = await res.json();
