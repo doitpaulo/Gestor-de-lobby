@@ -661,92 +661,58 @@ export const PowerBIService = {
    * Handles full pagination with loop protection and 8-second timeout.
    */
   fetchCollectionLive: async (
-    collectionName: "tasks" | "devs" | "robots",
-    ownerUid: string,
-    authToken: string
+    collectionName: "tasks" | "devs" | "robots", ownerUid: string, authToken: string
   ): Promise<any[]> => {
     const projectId = firebaseConfig.projectId;
     const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
+    const parent = `projects/${projectId}/databases/${databaseId}/documents/users/${ownerUid}`;
+    const prefix = parent + "/" + collectionName + "/";
     const items: any[] = [];
-    let pageToken: string | null = null;
-    const seenTokens = new Set<string>();
-    let pageCount = 0;
-
-    do {
-      pageCount++;
-      if (pageCount > 50) {
-        throw new Error("Limite de paginação atingido ao consultar o Firestore.");
-      }
-
-      let url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/users/${encodeURIComponent(ownerUid)}/${collectionName}?pageSize=100`;
-      if (pageToken) {
-        if (seenTokens.has(pageToken)) {
-          throw new Error("Ciclo de paginação detectado na API do Firestore.");
-        }
-        seenTokens.add(pageToken);
-        url += `&pageToken=${encodeURIComponent(pageToken)}`;
-      }
-
-      const fetchFn = mockFirestoreFetch || fetch;
-      const res = await fetchFn(url, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          Accept: "application/json"
-        },
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    for (let page = 0; page < 50; page++) {
+      const query: any = {
+        from: [{ collectionId: collectionName }],
+        orderBy: [{ field: { fieldPath: "__name__" }, direction: "ASCENDING" }],
+        limit: 100
+      };
+      if (cursor) query.startAt = { values: [{ referenceValue: cursor }], before: false };
+      const res = await (mockFirestoreFetch || fetch)(`https://firestore.googleapis.com/v1/${parent}:runQuery`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}`, Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ structuredQuery: query }),
         signal: AbortSignal.timeout(8000)
       });
-
-      if (!res.ok && res.status === 403) {
-        const parent = `projects/${projectId}/databases/${databaseId}/documents/users/${ownerUid}`;
-        const probe = await fetchFn(`https://firestore.googleapis.com/v1/${parent}:runQuery`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ structuredQuery: { from: [{ collectionId: collectionName }], limit: 1 } }),
-          signal: AbortSignal.timeout(8000)
-        });
-        const probeError: any = new Error(`Firestore listDocuments negado; runQuery ${probe.status}; coleção ${collectionName}.`);
-        probeError.status = 503;
-        probeError.code = probe.ok ? "FIRESTORE_QUERY_COMPATIBILITY_CONFIRMED" : "FIRESTORE_QUERY_DENIED";
-        throw probeError;
-      }
       if (!res.ok) {
-        // Report only allowlisted diagnostics; never return Google's raw response.
-        const failure: any = await res.json().catch(() => ({}));
-        const allowedReasons = new Set(["SERVICE_DISABLED", "BILLING_DISABLED", "CONSUMER_INVALID", "API_KEY_SERVICE_BLOCKED", "API_KEY_HTTP_REFERRER_BLOCKED", "IAM_PERMISSION_DENIED", "SECURITY_RULES_VIOLATED"]);
-        const reason = (failure.error?.details || []).map((detail: any) => detail?.reason).find((value: any) => allowedReasons.has(value));
-        const deniedByRules = /missing or insufficient permissions/i.test(failure.error?.message || "");
-        const diagnosis = reason || (deniedByRules ? "SECURITY_RULES_DENIED" : (failure.error?.status === "PERMISSION_DENIED" ? "PERMISSION_DENIED" : "UPSTREAM_ERROR"));
-        const err: any = new Error(`Falha Firestore (${res.status}): ${diagnosis}; coleção ${collectionName}.`);
-        err.status = 503;
-        err.code = "FIRESTORE_" + diagnosis;
-        throw err;
+        autonomousTokenCache = null;
+        const error: any = new Error(`Falha de consulta ao Firestore (${res.status}); coleção ${collectionName}.`);
+        error.status = 503;
+        error.code = res.status === 403 ? "FIRESTORE_PERMISSION_DENIED" : "FIRESTORE_UPSTREAM_ERROR";
+        throw error;
       }
-
       const body: any = await res.json();
-      const docs = body.documents || [];
-      for (const d of docs) {
-        const decoded = PowerBIService.decodeFirestoreDocument(d);
+      if (!Array.isArray(body) || body.some(row => !row || row.error)) {
+        throw new Error("Resposta inválida da consulta Firestore.");
+      }
+      const docs = body.filter(row => row.document).map(row => row.document);
+      if (docs.length > 100) throw new Error("Página Firestore excedeu o limite solicitado.");
+      for (const doc of docs) {
+        if (typeof doc.name !== "string" || !doc.name.startsWith(prefix) || !doc.name.slice(prefix.length) || doc.name.slice(prefix.length).includes("/")) {
+          throw new Error("Documento Firestore fora do escopo permitido.");
+        }
+        if (seen.has(doc.name) || (cursor && doc.name <= cursor)) throw new Error("Ciclo de paginação detectado na API do Firestore.");
+        seen.add(doc.name);
+        const decoded = PowerBIService.decodeFirestoreDocument(doc);
         if (decoded) items.push(decoded);
       }
-
-      pageToken = body.nextPageToken || null;
-    } while (pageToken);
-
-    // Apply strict entity allowlist
-    if (collectionName === "tasks") {
-      return items.map(sanitizeTask).filter(Boolean);
+      if (docs.length < 100) {
+        const sanitize = collectionName === "tasks" ? sanitizeTask : collectionName === "robots" ? sanitizeRobot : sanitizeDeveloper;
+        return items.map(sanitize).filter(Boolean);
+      }
+      cursor = docs[docs.length - 1].name;
     }
-    if (collectionName === "robots") {
-      return items.map(sanitizeRobot).filter(Boolean);
-    }
-    if (collectionName === "devs") {
-      return items.map(sanitizeDeveloper).filter(Boolean);
-    }
-
-    return items;
+    throw new Error("Limite de paginação atingido ao consultar o Firestore.");
   },
-
   /**
    * Attempts ADC (Application Default Credentials) read testing the specific owner tasks subcollection.
    */
