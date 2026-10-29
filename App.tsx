@@ -9343,11 +9343,8 @@ const PowerBIDataView = () => {
 
     const powerQueryMCode = `let
     // Configuração oficial segura do Nexus Project para Microsoft Power BI
-    // A chave de API é inserida diretamente na tela de Credenciais da Web API do Power BI
-    Fonte = Json.Document(Web.Contents("${origin}", [
-        RelativePath = "api/powerbi-data",
-        ApiKeyName = "key"
-    ])),
+    // Use autenticação Básica: usuário powerbi; senha = chave da API do servidor
+    Fonte = Json.Document(Web.Contents("${origin}/api/powerbi-data", [Timeout = #duration(0, 0, 2, 0)])),
     Dados = Fonte[data],
     Tarefas = Table.FromList(Dados[tasks], Splitter.SplitByNothing(), null, null, ExtraValues.Error),
     TarefasExpandidas = Table.ExpandRecordColumn(Tarefas, "Column1", 
@@ -9480,7 +9477,7 @@ in
                                 📊 Como Conectar no Microsoft Power BI Desktop
                             </h3>
                             <p className="text-xs text-slate-300 leading-relaxed">
-                                A API do Nexus Project adota o padrão de segurança oficial da Microsoft para conectores Web no Power BI, utilizando parâmetros estáticos com <code className="text-indigo-300 font-mono">RelativePath</code> e autenticação isolada via <code className="text-indigo-300 font-mono">ApiKeyName</code>.
+                                Use a URL estática do endpoint e autenticação Básica, disponível no Power BI Desktop e no Service. Informe o usuário powerbi e use a chave da API como senha nas credenciais da fonte.
                             </p>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
@@ -9507,7 +9504,7 @@ in
 
                                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                                     <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                                        <span>2️⃣</span> Rota Relativa (RelativePath)
+                                        <span>2️⃣</span> Endpoint autenticado
                                     </div>
                                     <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800">
                                         <code className="text-xs font-mono text-emerald-300">api/powerbi-data</code>
@@ -9526,7 +9523,7 @@ in
                                     <li>Na faixa de opções, clique em <strong>Editor Avançado</strong>.</li>
                                     <li>Vá na aba <strong>Power Query (Código M)</strong> nesta tela, copie o código e cole no Editor Avançado.</li>
                                     <li>Ao confirmar, o Power BI solicitará as <strong>Credenciais de Acesso à Web</strong>.</li>
-                                    <li>Selecione o tipo <strong>Chave de API (Web API)</strong> e insira a chave secreta cadastrada no servidor.</li>
+                                    <li>Selecione <strong>Básico</strong>, informe o usuário <strong>powerbi</strong> e use a chave secreta cadastrada no servidor como senha. No Service, configure novamente as credenciais dessa fonte e o nível de privacidade Organizacional.</li>
                                     <li>O Power BI carregará os dados em tempo real diretamente do banco Firestore.</li>
                                 </ol>
                             </div>
@@ -9551,7 +9548,7 @@ in
                             </button>
                         </div>
                         <p className="text-xs text-slate-400">
-                            Este script utiliza o conector otimizado com <code className="text-indigo-300 font-mono">RelativePath</code> e <code className="text-indigo-300 font-mono">ApiKeyName</code>. A chave de API nunca fica gravada no código, garantindo total conformidade com boas práticas de segurança corporativa.
+                            Este script usa uma URL estática e autenticação Básica. Configure o usuário powerbi e a chave da API como senha nas credenciais do Power BI; não inclua a chave no código M.
                         </p>
                         <pre className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs overflow-x-auto custom-scrollbar leading-relaxed">
                             {powerQueryMCode}

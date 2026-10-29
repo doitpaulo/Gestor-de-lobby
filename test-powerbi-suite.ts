@@ -216,6 +216,22 @@ async function runTests() {
       "GET /api/powerbi-data aceita cabeçalho Authorization: Bearer <key>"
     );
 
+    const basicHeader = (user: string, password: string) =>
+      `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
+    const basicValid = await makeRequest(server, "/api/powerbi-data", "GET", {
+      Authorization: basicHeader("powerbi", TEST_VALID_KEY)
+    });
+    assert(basicValid.status === 503 && basicValid.data.code === "POWERBI_SESSION_EXPIRED",
+      "Basic aceita a chave existente e continua exigindo sessão Firestore válida");
+    for (const authorization of [
+      basicHeader("powerbi", "incorrect-key"), basicHeader("other", TEST_VALID_KEY),
+      basicHeader("powerbi", ""), "Basic !!!", "Bearer invalid"
+    ]) {
+      const denied = await makeRequest(server, "/api/powerbi-data", "GET", { Authorization: authorization });
+      assert(denied.status === 401 && String(denied.headers["www-authenticate"]).startsWith("Basic "),
+        "Credencial Basic inválida continua negada e recebe desafio HTTP");
+    }
+
     // -------------------------------------------------------------------------
     // BLOCO 3: Allowlists Estritas e Projeção de Segredos Aninhados
     // -------------------------------------------------------------------------
