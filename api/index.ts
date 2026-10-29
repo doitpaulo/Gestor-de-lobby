@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { PowerBIService } from "../services/powerbiService.js";
+import { powerBiBasicKey } from "../services/powerbiAuth.js";
 
 const app = express();
 
@@ -1450,19 +1451,23 @@ router.get("/powerbi-data", async (req: express.Request, res: express.Response) 
   res.setHeader("Expires", "0");
   res.setHeader("Content-Type", "application/json");
 
-  // Support query param 'key' (Power Query ApiKeyName), 'x-api-key' header, or 'Authorization: Bearer <key>'
+  // Basic auth is supported by Power BI Service; keep existing clients compatible.
   const queryKey = (req.query.key || req.query.api_key || "") as string;
   const headerKey = (req.headers["x-api-key"] || req.headers["x-nexus-api-key"] || "") as string;
   const authHeader = (req.headers["authorization"] || "") as string;
-  const bearerKey = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const bearerKey = /^Bearer\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\s+/i, "").trim() : "";
+  const basicKey = powerBiBasicKey(authHeader);
 
-  const providedKey = queryKey || headerKey || bearerKey;
+  const providedKey = queryKey || headerKey || bearerKey || basicKey;
 
   try {
     const payload = await PowerBIService.getLivePowerBIData(providedKey);
     res.json(payload);
   } catch (err: any) {
     const status = err.status || 500;
+    if (status === 401) {
+      res.setHeader("WWW-Authenticate", 'Basic realm="Power BI", charset="UTF-8"');
+    }
     res.status(status).json({
       error: err.message || "Erro ao consultar dados para o Power BI.",
       code: err.code || (status === 401 ? "UNAUTHORIZED" : status === 503 ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR")
