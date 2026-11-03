@@ -25,7 +25,19 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { Task, Developer, Robot, Sprint, WorkflowPhase, DocumentConfig, DevOpsConfig, User } from '../types';
+import { 
+  Task, 
+  Developer, 
+  Robot, 
+  Sprint, 
+  WorkflowPhase, 
+  DocumentConfig, 
+  DevOpsConfig, 
+  User, 
+  WorkspaceMember,
+  AccountRecoveryRequest,
+  NEXUS_OWNER_UID
+} from '../types';
 import { StorageService } from './storageService';
 
 // Initialize Firebase App
@@ -223,10 +235,10 @@ export const FirebaseService = {
   // Migrate legacy top-level tasks to user collection if existing admin
   migrateLegacyDataIfNeeded: async (user: User) => {
     try {
-      if (!user || !user.id || isGuestUserId(user.id) || user.email !== 'pauloo201113@gmail.com') return;
+      if (!user || !user.id || isGuestUserId(user.id) || user.id !== NEXUS_OWNER_UID) return;
       const userTasksCol = collection(db, 'users', user.id, 'tasks');
       const userSnap = await getDocs(userTasksCol);
-      if (userSnap.empty && user.email === 'pauloo201113@gmail.com') {
+      if (userSnap.empty && user.id === NEXUS_OWNER_UID) {
         const topSnap = await getDocs(collection(db, 'tasks'));
         if (!topSnap.empty) {
           const batch = writeBatch(db);
@@ -658,6 +670,46 @@ export const FirebaseService = {
     }
   },
 
+  // Atomic batch update for mass sprint modification (patches exclusively sprintId & history)
+  updateTasksSprintBatch: async (
+    workspaceOwnerUid: string,
+    taskPatches: Array<{
+      id: string;
+      sprintId: string | null;
+      historyEntry: any;
+    }>,
+    targetSprintPatch?: {
+      id: string;
+      tasks: any[];
+    } | null
+  ): Promise<void> => {
+    if (isGuestUserId(workspaceOwnerUid)) return;
+    const nowIso = new Date().toISOString();
+    const batch = writeBatch(db);
+
+    taskPatches.forEach(patch => {
+      const taskRef = FirebaseService.getTargetDoc('tasks', patch.id, workspaceOwnerUid);
+      const payload: Record<string, any> = {
+        sprintId: patch.sprintId,
+        updatedAt: nowIso
+      };
+      if (patch.historyEntry) {
+        payload.history = arrayUnion(cleanForFirestore(patch.historyEntry));
+      }
+      batch.set(taskRef, cleanForFirestore(payload), { merge: true });
+    });
+
+    if (targetSprintPatch && targetSprintPatch.id) {
+      const sprintRef = FirebaseService.getTargetDoc('sprints', targetSprintPatch.id, workspaceOwnerUid);
+      batch.set(sprintRef, cleanForFirestore({
+        tasks: targetSprintPatch.tasks,
+        updatedAt: nowIso
+      }), { merge: true });
+    }
+
+    await batch.commit();
+  },
+
   // Workflow & Pipeline Settings directly in Firestore
   saveSetting: async (key: string, value: any, userId?: string) => {
     if (isGuestUserId(userId)) return;
@@ -717,7 +769,17 @@ export const FirebaseService = {
         console.warn('Could not merge devops into user doc:', e);
       }
 
-      // 3. Attempt to save to global settings document (if rules permit)
+      // 3. For owner account, ensure synced under NEXUS_OWNER_UID workspace path
+      if (uid === NEXUS_OWNER_UID || auth.currentUser?.uid === NEXUS_OWNER_UID) {
+        try {
+          const ownerDocRef = doc(db, 'users', NEXUS_OWNER_UID, 'settings', 'devops');
+          await setDoc(ownerDocRef, cleanForFirestore(payload));
+          const ownerRootRef = doc(db, 'users', NEXUS_OWNER_UID);
+          await setDoc(ownerRootRef, cleanForFirestore({ devopsConfig: cleanConfig, devops: cleanConfig }), { merge: true });
+        } catch {}
+      }
+
+      // 4. Attempt to save to global settings document (if rules permit)
       try {
         const globalDocRef = doc(db, 'settings', 'devops');
         await setDoc(globalDocRef, cleanForFirestore(payload), { merge: true });
@@ -756,7 +818,17 @@ export const FirebaseService = {
       return null;
     };
 
-    // 1. Try user settings subcollection
+    // 1. Try canonical NEXUS_OWNER_UID workspace path first
+    try {
+      const ownerRef = doc(db, 'users', NEXUS_OWNER_UID, 'settings', 'devops');
+      const snap = await getDoc(ownerRef);
+      if (snap.exists()) {
+        const parsed = parseDevOps(snap.data());
+        if (parsed) return parsed;
+      }
+    } catch {}
+
+    // 2. Try user settings subcollection
     try {
       const userSettingsDocRef = doc(db, 'users', uid, 'settings', 'devops');
       const snap = await getDoc(userSettingsDocRef);
@@ -768,7 +840,7 @@ export const FirebaseService = {
       console.warn('Could not read user devops setting:', e);
     }
 
-    // 2. Try user profile doc
+    // 3. Try user profile doc
     try {
       const userDocRef = doc(db, 'users', uid);
       const snap = await getDoc(userDocRef);
@@ -781,7 +853,7 @@ export const FirebaseService = {
       console.warn('Could not read user profile devops:', e);
     }
 
-    // 3. Try global settings doc
+    // 4. Try global settings doc
     try {
       const globalDocRef = doc(db, 'settings', 'devops');
       const snap = await getDoc(globalDocRef);
@@ -844,6 +916,104 @@ export const FirebaseService = {
     return null;
   },
 
+  // --- Workspace Members Management (Firestore Real-time & CRUD) ---
+  subscribeMembers: (ownerUid: string, onMembers: (members: WorkspaceMember[]) => void) => {
+    if (isGuestUserId(ownerUid)) {
+      setTimeout(() => {
+        try {
+          onMembers(StorageService.getMembers());
+        } catch {}
+      }, 0);
+      return () => {};
+    }
+    const colRef = collection(db, 'users', ownerUid, 'members');
+    return onSnapshot(colRef, (snapshot) => {
+      const list: WorkspaceMember[] = [];
+      snapshot.forEach(docSnap => {
+        list.push(docSnap.data() as WorkspaceMember);
+      });
+      onMembers(list);
+    }, (error) => {
+      console.warn('Firestore members subscription notice:', error);
+    });
+  },
+
+  saveMember: async (ownerUid: string, member: WorkspaceMember) => {
+    if (isGuestUserId(ownerUid) || !member) return;
+    try {
+      const safeId = String(member.id || member.email).replace(/[/\\?%*:|"<>]/g, '_').trim();
+      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
+      const data = cleanForFirestore({
+        ...member,
+        workspaceOwnerUid: ownerUid,
+        updatedAt: new Date().toISOString()
+      });
+      await setDoc(docRef, data, { merge: true });
+    } catch (e) {
+      console.warn('Error saving member to Firestore:', e);
+    }
+  },
+
+  deleteMember: async (ownerUid: string, memberId: string) => {
+    if (isGuestUserId(ownerUid) || !memberId) return;
+    try {
+      const safeId = String(memberId).replace(/[/\\?%*:|"<>]/g, '_').trim();
+      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
+      await deleteDoc(docRef);
+    } catch (e) {
+      console.warn('Error deleting member from Firestore:', e);
+    }
+  },
+
+  fetchMember: async (ownerUid: string, identifier: string): Promise<WorkspaceMember | null> => {
+    if (isGuestUserId(ownerUid) || !identifier) return null;
+    try {
+      const safeId = String(identifier).replace(/[/\\?%*:|"<>]/g, '_').trim();
+      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        return snap.data() as WorkspaceMember;
+      }
+    } catch (e) {
+      console.warn('Error fetching member from Firestore:', e);
+    }
+    return null;
+  },
+
+  // --- Account Recovery Requests (Persistent queue in Firestore) ---
+  subscribeRecoveryRequests: (ownerUid: string, callback: (requests: AccountRecoveryRequest[]) => void) => {
+    if (isGuestUserId(ownerUid)) {
+      callback([]);
+      return () => {};
+    }
+    try {
+      const colRef = collection(db, 'users', ownerUid, 'recoveryRequests');
+      return onSnapshot(colRef, (snapshot) => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AccountRecoveryRequest));
+        list.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
+        callback(list);
+      }, (err) => {
+        console.warn('[Firebase] subscribeRecoveryRequests notice:', err);
+        callback([]);
+      });
+    } catch (e) {
+      console.warn('[Firebase] subscribeRecoveryRequests error:', e);
+      callback([]);
+      return () => {};
+    }
+  },
+
+  saveRecoveryRequest: async (ownerUid: string, req: AccountRecoveryRequest) => {
+    if (isGuestUserId(ownerUid) || !req || !req.id) return;
+    try {
+      const safeId = String(req.id).replace(/[/\\?%*:|"<>]/g, '_').trim();
+      const docRef = doc(db, 'users', ownerUid, 'recoveryRequests', safeId);
+      await setDoc(docRef, cleanForFirestore(req), { merge: true });
+    } catch (e) {
+      console.warn('[Firebase] saveRecoveryRequest error:', e);
+    }
+  },
+
   // Completely wipe all user data in Firestore
   resetAllUserData: async (userId?: string) => {
     try {
@@ -860,17 +1030,13 @@ export const FirebaseService = {
 
       // Also clean up top-level collections if admin user
       const currentUid = userId || auth.currentUser?.uid;
-      if (currentUid) {
-        const userDoc = await getDoc(doc(db, 'users', currentUid));
-        const email = userDoc.exists() ? userDoc.data().email : '';
-        if (email === 'pauloo201113@gmail.com') {
-          for (const colName of ['tasks', 'devs', 'robots', 'sprints']) {
-            const topSnap = await getDocs(collection(db, colName));
-            if (!topSnap.empty) {
-              const batch = writeBatch(db);
-              topSnap.forEach(d => batch.delete(d.ref));
-              await batch.commit();
-            }
+      if (currentUid === NEXUS_OWNER_UID) {
+        for (const colName of ['tasks', 'devs', 'robots', 'sprints']) {
+          const topSnap = await getDocs(collection(db, colName));
+          if (!topSnap.empty) {
+            const batch = writeBatch(db);
+            topSnap.forEach(d => batch.delete(d.ref));
+            await batch.commit();
           }
         }
       }

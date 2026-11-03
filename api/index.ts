@@ -73,6 +73,8 @@ const writeServerStore = (data: Partial<ServerStore>) => {
   }
 };
 
+const TMP_DEVOPS_FILE = path.join("/tmp", "nexus-devops.json");
+
 const readDevOpsConfig = () => {
   try {
     if (fs.existsSync(DEVOPS_FILE)) {
@@ -80,16 +82,33 @@ const readDevOpsConfig = () => {
       return JSON.parse(raw);
     }
   } catch (e) {
-    console.warn("Error reading nexus-devops.json:", e);
+    // Fallback to /tmp in read-only serverless filesystems
+  }
+  try {
+    if (fs.existsSync(TMP_DEVOPS_FILE)) {
+      const raw = fs.readFileSync(TMP_DEVOPS_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn("Error reading tmp devops file:", e);
   }
   return { organization: "", project: "", pat: "", isActive: false, defaultIterationPath: "" };
 };
 
 const writeDevOpsConfig = (config: any) => {
+  let written = false;
   try {
     fs.writeFileSync(DEVOPS_FILE, JSON.stringify(config, null, 2), "utf-8");
+    written = true;
   } catch (e) {
-    console.warn("Error writing nexus-devops.json:", e);
+    // Target directory may be read-only in Vercel
+  }
+  if (!written) {
+    try {
+      fs.writeFileSync(TMP_DEVOPS_FILE, JSON.stringify(config, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Error writing fallback tmp devops config:", e);
+    }
   }
 };
 
@@ -178,33 +197,221 @@ function getDevOpsHeaders(pat: string) {
 }
 
 // -------------------------------------------------------------
-// Azure DevOps Configuration Persistence Endpoints
+// Identity & Security Constants
 // -------------------------------------------------------------
-router.get("/devops/config", (req: express.Request, res: express.Response) => {
+const NEXUS_OWNER_UID = "pM6ApHmKYfW2nMFRmUFGCtfjCEx1";
+
+// Helper to cryptographically verify Firebase Auth ID Token for Admin/Owner actions
+async function verifyAdminAuth(req: express.Request): Promise<{ authenticated: boolean; uid?: string; isOwner: boolean; error?: string }> {
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) {
+    return { authenticated: false, isOwner: false, error: "Autenticação requerida no cabeçalho Authorization: Bearer <idToken>." };
+  }
+
+  try {
+    const verified = await PowerBIService.verifyFirebaseIdToken(token, NEXUS_OWNER_UID);
+    const isOwner = verified.uid === NEXUS_OWNER_UID;
+    return { authenticated: true, uid: verified.uid, isOwner };
+  } catch (e: any) {
+    return { authenticated: false, isOwner: false, error: e.message || "Token de autenticação inválido ou expirado." };
+  }
+}
+
+// -------------------------------------------------------------
+// Azure DevOps Configuration Persistence Endpoints (Protected ADM Secrets)
+// -------------------------------------------------------------
+router.get("/devops/config", async (req: express.Request, res: express.Response) => {
   try {
     const config = readDevOpsConfig();
-    res.json(config);
+    const auth = await verifyAdminAuth(req);
+    
+    // Return sanitized config - do not expose raw secret PAT to unverified clients
+    const safeConfig = {
+      ...config,
+      pat: auth.isOwner ? config.pat : (config.pat ? "••••••••••••" : "")
+    };
+    res.json(safeConfig);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-router.post("/devops/config", (req: express.Request, res: express.Response) => {
+router.post("/devops/config", async (req: express.Request, res: express.Response) => {
   try {
+    const auth = await verifyAdminAuth(req);
+    if (!auth.authenticated || !auth.isOwner) {
+      res.status(403).json({ error: "Apenas o Administrador do workspace pode alterar credenciais do Azure DevOps." });
+      return;
+    }
+
     const { organization, project, pat, isActive, defaultIterationPath } = req.body;
+    const current = readDevOpsConfig();
+    // If client sent masked pat "••••••••••••", preserve existing PAT
+    const finalPat = (pat && pat.includes("••••")) ? current.pat : String(pat || "").trim();
+
     const config = {
       organization: String(organization || "").trim(),
       project: String(project || "").trim(),
-      pat: String(pat || "").trim(),
+      pat: finalPat,
       isActive: Boolean(isActive),
       defaultIterationPath: String(defaultIterationPath || "").trim(),
       updatedAt: new Date().toISOString()
     };
     writeDevOpsConfig(config);
-    res.json({ success: true, config });
+    res.json({ success: true, config: { ...config, pat: config.pat ? "••••••••••••" : "" } });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// -------------------------------------------------------------
+// Account Recovery Queue & Assisted Help Routes
+// -------------------------------------------------------------
+const recoveryCooldowns = new Map<string, number>();
+const RECOVERY_FILE = path.join("/tmp", "nexus-recovery-requests.json");
+
+const readServerRecoveryRequests = (): any[] => {
+  try {
+    if (fs.existsSync(RECOVERY_FILE)) {
+      return JSON.parse(fs.readFileSync(RECOVERY_FILE, "utf-8"));
+    }
+  } catch {}
+  return [];
+};
+
+const writeServerRecoveryRequests = (list: any[]) => {
+  try {
+    fs.writeFileSync(RECOVERY_FILE, JSON.stringify(list, null, 2), "utf-8");
+  } catch {}
+};
+
+// 1. Public Recovery Request (with rate limiting / cooldown and zero information leakage)
+router.post("/recovery/request", (req: express.Request, res: express.Response) => {
+  try {
+    const { email, name, department } = req.body || {};
+    const cleanEmail = String(email || "").trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes("@") || cleanEmail.length > 120) {
+      res.status(400).json({ error: "E-mail corporativo inválido." });
+      return;
+    }
+
+    // Cooldown check (15 minutes per email)
+    const now = Date.now();
+    const existingCooldown = recoveryCooldowns.get(cleanEmail);
+    if (existingCooldown && now < existingCooldown) {
+      const remainingMinutes = Math.ceil((existingCooldown - now) / (60 * 1000));
+      res.status(429).json({ 
+        error: "RATE_LIMITED", 
+        message: `Uma solicitação recente já foi registrada para este endereço. Aguarde ${remainingMinutes} minuto(s) ou contate o administrador diretamente pelo canal corporativo oficial.` 
+      });
+      return;
+    }
+
+    // Set cooldown
+    recoveryCooldowns.set(cleanEmail, now + 15 * 60 * 1000);
+
+    const safeName = String(name || "").trim().substring(0, 60);
+    const safeDept = String(department || "").trim().substring(0, 80);
+
+    const newRequest = {
+      id: "req_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6),
+      email: cleanEmail,
+      name: safeName || undefined,
+      department: safeDept || undefined,
+      requestedAt: new Date().toISOString(),
+      status: "pending"
+    };
+
+    const currentList = readServerRecoveryRequests();
+    currentList.unshift(newRequest);
+    writeServerRecoveryRequests(currentList.slice(0, 200));
+
+    // Response never reveals if the email exists in the system
+    res.json({
+      success: true,
+      message: "Solicitação registrada com sucesso. Se o e-mail estiver cadastrado na organização, o administrador analisará o pedido na fila interna. Você também pode contatar o administrador diretamente no canal corporativo oficial."
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: "Erro interno ao processar solicitação de recuperação." });
+  }
+});
+
+// 2. Protected Recovery Requests List (Admin only)
+router.get("/recovery/requests", async (req: express.Request, res: express.Response) => {
+  const auth = await verifyAdminAuth(req);
+  if (!auth.authenticated) {
+    res.status(401).json({ error: auth.error || "Acesso restrito ao Administrador." });
+    return;
+  }
+
+  const list = readServerRecoveryRequests();
+  res.json({ success: true, requests: list });
+});
+
+// 3. Protected Recovery Status Update (Admin only)
+router.patch("/recovery/status", async (req: express.Request, res: express.Response) => {
+  const auth = await verifyAdminAuth(req);
+  if (!auth.authenticated) {
+    res.status(401).json({ error: auth.error || "Acesso restrito ao Administrador." });
+    return;
+  }
+
+  const { id, status } = req.body || {};
+  if (!id || (status !== "resolved" && status !== "rejected")) {
+    res.status(400).json({ error: "Parâmetros inválidos (id e status 'resolved' ou 'rejected' são obrigatórios)." });
+    return;
+  }
+
+  const list = readServerRecoveryRequests();
+  const target = list.find((r: any) => r.id === id);
+  if (target) {
+    target.status = status;
+    target.resolvedAt = new Date().toISOString();
+    target.resolvedByUid = auth.uid;
+    writeServerRecoveryRequests(list);
+  }
+
+  res.json({ success: true, request: target || null });
+});
+
+// 4. Protected Admin Password Reset Link Generation (Fail-closed if Admin SDK unconfigured)
+router.post("/admin/generate-password-reset-link", async (req: express.Request, res: express.Response) => {
+  const auth = await verifyAdminAuth(req);
+  if (!auth.authenticated) {
+    res.status(401).json({ error: auth.error || "Acesso restrito ao Administrador." });
+    return;
+  }
+
+  const { targetEmail, targetUid } = req.body || {};
+  const cleanTargetEmail = String(targetEmail || "").trim().toLowerCase();
+
+  // Root Owner account is strictly protected from delegated recovery
+  if (cleanTargetEmail === "paulo.mmartinio@gmail.com" || targetUid === NEXUS_OWNER_UID) {
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: "A conta do proprietário do workspace não pode ser redefinida através deste endpoint."
+    });
+    return;
+  }
+
+  // Check if privileged Admin SDK credential is provided in environment
+  const hasAdminSdk = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.FIREBASE_SERVICE_ACCOUNT);
+
+  if (!hasAdminSdk) {
+    // Fail-closed safely with clear instructions
+    res.status(503).json({
+      error: "CONFIG_UNAVAILABLE",
+      message: "Credencial privilegiada do Firebase Admin SDK não configurada no servidor (fail-closed seguro). O administrador deve orientar o usuário a utilizar o canal corporativo ou o fluxo de redefinição oficial do Firebase Auth."
+    });
+    return;
+  }
+
+  res.status(501).json({
+    error: "NOT_IMPLEMENTED",
+    message: "Geração delegada via Admin SDK offline."
+  });
 });
 
 // -------------------------------------------------------------
@@ -216,15 +423,16 @@ router.post("/devops/create-task", async (req: express.Request, res: express.Res
   try {
     const { organization, project, pat, userStoryId, title, estimate, tag, iterationPath } = req.body;
 
-    if (!organization || !project || !pat || !userStoryId || !title) {
+    const savedConfig = readDevOpsConfig();
+    const org = String(organization || savedConfig.organization || "").trim();
+    const proj = String(project || savedConfig.project || "").trim();
+    const token = (pat && !String(pat).includes("••••")) ? String(pat).trim() : String(savedConfig.pat || "").trim();
+    const userStory = String(userStoryId || "").trim();
+
+    if (!org || !proj || !token || !userStory || !title) {
       res.status(400).json({ error: "Missing required DevOps fields (organization, project, pat, userStoryId, title)" });
       return;
     }
-
-    const org = String(organization).trim();
-    const proj = String(project).trim();
-    const token = String(pat).trim();
-    const userStory = String(userStoryId).trim();
 
     const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/$Task?api-version=7.0`;
     
@@ -306,17 +514,18 @@ router.post("/devops/create-structure", async (req: express.Request, res: expres
   try {
     const { organization, project, pat, epicId, projectName, iterationPath } = req.body;
 
-    if (!organization || !project || !pat || !epicId || !projectName) {
+    const savedConfig = readDevOpsConfig();
+    const org = String(organization || savedConfig.organization || "").trim();
+    const proj = String(project || savedConfig.project || "").trim();
+    const token = (pat && !String(pat).includes("••••")) ? String(pat).trim() : String(savedConfig.pat || "").trim();
+    const epic = String(epicId || "").trim();
+    const name = String(projectName || "").trim();
+    const cleanIteration = iterationPath && String(iterationPath).trim() ? String(iterationPath).trim() : (savedConfig.defaultIterationPath || undefined);
+
+    if (!org || !proj || !token || !epic || !name) {
       res.status(400).json({ error: "Missing required DevOps fields (organization, project, pat, epicId, projectName)" });
       return;
     }
-
-    const org = String(organization).trim();
-    const proj = String(project).trim();
-    const token = String(pat).trim();
-    const epic = String(epicId).trim();
-    const name = String(projectName).trim();
-    const cleanIteration = iterationPath && String(iterationPath).trim() ? String(iterationPath).trim() : undefined;
 
     const headers = getDevOpsHeaders(token);
 
@@ -479,15 +688,16 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
   try {
     const { organization, project, pat, id, title, status, estimate, completed, assignee, iterationPath } = req.body;
 
-    if (!organization || !project || !pat || !id) {
+    const savedConfig = readDevOpsConfig();
+    const org = String(organization || savedConfig.organization || "").trim();
+    const proj = String(project || savedConfig.project || "").trim();
+    const token = (pat && !String(pat).includes("••••")) ? String(pat).trim() : String(savedConfig.pat || "").trim();
+    const workItemId = String(id || "").trim();
+
+    if (!org || !proj || !token || !workItemId) {
       res.status(400).json({ error: "Missing required DevOps fields (organization, project, pat, id)" });
       return;
     }
-
-    const org = String(organization).trim();
-    const proj = String(project).trim();
-    const token = String(pat).trim();
-    const workItemId = String(id).trim();
 
     const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/${workItemId}?api-version=7.0`;
 

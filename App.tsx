@@ -17,8 +17,12 @@ import { DeveloperManagementModal } from './components/DeveloperManagementModal'
 import { NotificationCenter } from './components/NotificationCenter';
 import { TodayNotificationBanner } from './components/TodayNotificationBanner';
 import { AIAgentApiModal } from './components/AIAgentApiModal';
+import { AdminUserManagementView } from './components/AdminUserManagementView';
+import { PendingAccessScreen } from './components/PendingAccessScreen';
+import { AccountHelpModal } from './components/AccountHelpModal';
 import { NotificationService } from './services/notificationService';
-import { Task, SubTask, Developer, User, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration } from './types';
+import { OWNER_EMAIL, isUserAdmin, isOwnerUser, isTaskAuthorized, getUserPermissions } from './services/storageService';
+import { NEXUS_OWNER_UID, Task, SubTask, Developer, User, WorkspaceMember, UserRole, UserStatus, UserPermissions, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration, getTaskSprintId, getTaskSprint } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle, IconBot, IconCode, IconKey } from './components/Icons';
 
 // --- Constants ---
@@ -612,7 +616,7 @@ const MultiSelect = ({ label, options, selected, onChange, placeholder, alignRig
     );
 };
 
-const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: { filters: any, setFilters: any, devs?: Developer[], extraActions?: React.ReactNode, className?: string }) => {
+const FilterBar = ({ filters, setFilters, devs, sprints, extraActions, className = '' }: { filters: any, setFilters: any, devs?: Developer[], sprints?: Sprint[], extraActions?: React.ReactNode, className?: string }) => {
   const handleChange = (key: string, value: any) => {
     setFilters((prev: any) => ({ ...prev, [key]: value }));
   };
@@ -666,6 +670,15 @@ const FilterBar = ({ filters, setFilters, devs, extraActions, className = '' }: 
                    options={['Não Atribuído', ...devs.map(d => d.name)]}
                    selected={filters.assignee}
                    onChange={(val) => handleChange('assignee', val)}
+               />
+           )}
+
+           {sprints && filters.sprint !== undefined && (
+               <MultiSelect 
+                   placeholder="Sprints"
+                   options={['Sem sprint', ...sprints.map(s => s.name)]}
+                   selected={filters.sprint}
+                   onChange={(val) => handleChange('sprint', val)}
                />
            )}
 
@@ -2075,15 +2088,41 @@ const KanbanView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[]
   );
 };
 
-const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], setTasks: any, devs: Developer[], onEditTask: (task: Task) => void, user: User }) => {
+const ListView = ({ 
+  tasks, 
+  setTasks, 
+  devs, 
+  onEditTask, 
+  user, 
+  sprints = [], 
+  setSprints, 
+  showToast 
+}: { 
+  tasks: Task[]; 
+  setTasks: any; 
+  devs: Developer[]; 
+  onEditTask: (task: Task) => void; 
+  user: User; 
+  sprints?: Sprint[]; 
+  setSprints?: any; 
+  showToast?: (type: 'error' | 'success' | 'info', message: string, title?: string) => void; 
+}) => {
   const [searchParams] = useSearchParams();
   const initialType = searchParams.get('type');
-  const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>(() => ({
+  const [filters, setFilters] = useState<{
+    search: string;
+    type: string[];
+    priority: string[];
+    status: string[];
+    assignee: string[];
+    sprint: string[];
+  }>(() => ({
     search: '',
     type: initialType ? [initialType] : [],
     priority: [],
     status: [],
-    assignee: []
+    assignee: [],
+    sprint: []
   }));
 
   useEffect(() => {
@@ -2094,38 +2133,108 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
   }, [searchParams]);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const filtered = tasks.filter(t => {
-      const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase()) || (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
+  const [isBulkSprintModalOpen, setIsBulkSprintModalOpen] = useState(false);
+  const [targetSprintChoice, setTargetSprintChoice] = useState<string>('');
+  const [allowConcludedSprint, setAllowConcludedSprint] = useState<boolean>(false);
+  const [isSubmittingSprint, setIsSubmittingSprint] = useState<boolean>(false);
+  const [sprintModalError, setSprintModalError] = useState<string | null>(null);
+
+  const userPerms = getUserPermissions(user);
+  const canBulkSprint = isUserAdmin(user) || (Boolean(userPerms?.canManageSprints) && Boolean(userPerms?.actions?.edit));
+  const canBulkEdit = isUserAdmin(user) || Boolean(userPerms?.actions?.edit);
+
+  const filtered = useMemo(() => {
+    return tasks.filter(t => {
+      const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || 
+                            t.id.toLowerCase().includes(filters.search.toLowerCase()) || 
+                            (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase()));
       const matchesType = filters.type.length === 0 || filters.type.includes(t.type);
       const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority);
       const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status);
       let matchesAssignee = true;
       if (filters.assignee.length > 0) {
-          const hasUnassigned = filters.assignee.includes('Não Atribuído');
-          if (hasUnassigned) { matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee); } 
-          else { matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee); }
+        const hasUnassigned = filters.assignee.includes('Não Atribuído');
+        if (hasUnassigned) { 
+          matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee); 
+        } else { 
+          matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee); 
+        }
       }
-      return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
-  });
+      let matchesSprint = true;
+      if (filters.sprint && filters.sprint.length > 0) {
+        const taskSprint = getTaskSprint(t, sprints);
+        const hasNoSprintFilter = filters.sprint.includes('Sem sprint');
+        if (hasNoSprintFilter && !taskSprint) {
+          matchesSprint = true;
+        } else if (taskSprint && (filters.sprint.includes(taskSprint.name) || filters.sprint.includes(taskSprint.id))) {
+          matchesSprint = true;
+        } else {
+          matchesSprint = false;
+        }
+      }
+      return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee && matchesSprint;
+    });
+  }, [tasks, filters, sprints]);
 
-  const toggleSelect = (id: string) => { const newSelected = new Set(selected); if (newSelected.has(id)) newSelected.delete(id); else newSelected.add(id); setSelected(newSelected); };
+  // Only tasks that current user has explicit permission to edit/manage
+  const filteredAuthorized = useMemo(() => {
+    return filtered.filter(t => isTaskAuthorized(t, user));
+  }, [filtered, user]);
+
+  // Clear selection whenever filters, user or workspace change
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filters, user?.id]);
+
+  // Indeterminate state on select-all checkbox
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      const authIds = filteredAuthorized.map(t => t.id);
+      const selectedAuthCount = authIds.filter(id => selected.has(id)).length;
+      selectAllRef.current.indeterminate = selectedAuthCount > 0 && selectedAuthCount < authIds.length;
+    }
+  }, [selected, filteredAuthorized]);
+
+  const toggleSelect = (id: string) => { 
+    const task = tasks.find(t => t.id === id);
+    if (!task || !isTaskAuthorized(task, user)) return;
+    const newSelected = new Set(selected); 
+    if (newSelected.has(id)) newSelected.delete(id); 
+    else newSelected.add(id); 
+    setSelected(newSelected); 
+  };
+
   const handleBulkAction = (action: string, payload?: any) => {
-      if (selected.size === 0) return;
-      if (action === 'assign' && payload) { const currentHours = getDevWorkload(payload, tasks); if (currentHours > 40) { if (!window.confirm(`ALERTA DE SOBRECARGA: ${payload} já possui ${formatDuration(currentHours)} em tarefas pendentes. \n\nDeseja atribuir mais ${selected.size} tarefas mesmo assim?`)) { return; } } }
-      const updated = tasks.map(t => {
-          if (selected.has(t.id)) {
-              if (action === 'delete') return null;
-              let updatedTask = { ...t }; let actionName = '';
-              if (action === 'status') { updatedTask.status = payload; actionName = `Alterou Status (Em massa) para ${payload}`; }
-              if (action === 'type') { updatedTask.type = payload as TaskType; actionName = `Alterou Tipo (Em massa) para ${payload}`; }
-              if (action === 'priority') { updatedTask.priority = payload; actionName = `Alterou Prioridade (Em massa) para ${payload}`; }
-              if (action === 'assign') { updatedTask.assignee = payload; actionName = `Atribuiu (Em massa) para ${payload}`; }
-              if (actionName) { const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: actionName }; updatedTask.history = [...(t.history || []), entry]; }
-              return updatedTask;
-          }
-          return t;
-      }).filter(Boolean) as Task[];
-      setTasks(updated); StorageService.saveTasks(updated); setSelected(new Set());
+    if (selected.size === 0) return;
+    if (action === 'assign' && payload) { 
+      const currentHours = getDevWorkload(payload, tasks); 
+      if (currentHours > 40) { 
+        if (!window.confirm(`ALERTA DE SOBRECARGA: ${payload} já possui ${formatDuration(currentHours)} em tarefas pendentes. \n\nDeseja atribuir mais ${selected.size} tarefas mesmo assim?`)) { 
+          return; 
+        } 
+      } 
+    }
+    const updated = tasks.map(t => {
+      if (selected.has(t.id) && isTaskAuthorized(t, user)) {
+        if (action === 'delete') return null;
+        let updatedTask = { ...t }; 
+        let actionName = '';
+        if (action === 'status') { updatedTask.status = payload; actionName = `Alterou Status (Em massa) para ${payload}`; }
+        if (action === 'type') { updatedTask.type = payload as TaskType; actionName = `Alterou Tipo (Em massa) para ${payload}`; }
+        if (action === 'priority') { updatedTask.priority = payload; actionName = `Alterou Prioridade (Em massa) para ${payload}`; }
+        if (action === 'assign') { updatedTask.assignee = payload; actionName = `Atribuiu (Em massa) para ${payload}`; }
+        if (actionName) { 
+          const entry: HistoryEntry = { id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: actionName }; 
+          updatedTask.history = [...(t.history || []), entry]; 
+        }
+        return updatedTask;
+      }
+      return t;
+    }).filter(Boolean) as Task[];
+    setTasks(updated); 
+    StorageService.saveTasks(updated); 
+    setSelected(new Set());
   };
 
   const handleDirectTypeChange = (taskId: string, newType: TaskType) => {
@@ -2165,6 +2274,65 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
       StorageService.saveTasks(updated);
   };
 
+  // Selected tasks for mass sprint modal
+  const selectedTasks = useMemo(() => {
+    return tasks.filter(t => selected.has(t.id));
+  }, [tasks, selected]);
+
+  const selectedSprintObj = useMemo(() => {
+    if (!targetSprintChoice || targetSprintChoice === '__none__') return null;
+    return sprints.find(s => s.id === targetSprintChoice) || null;
+  }, [targetSprintChoice, sprints]);
+
+  const isDestinationConcluded = selectedSprintObj?.status === 'Concluída';
+
+  const canConfirmSprintChange = useMemo(() => {
+    if (selected.size === 0) return false;
+    if (!targetSprintChoice) return false;
+    if (isDestinationConcluded && !allowConcludedSprint) return false;
+    if (isSubmittingSprint) return false;
+    return true;
+  }, [selected.size, targetSprintChoice, isDestinationConcluded, allowConcludedSprint, isSubmittingSprint]);
+
+  const handleConfirmSprintChange = async () => {
+    if (!canConfirmSprintChange) return;
+    setIsSubmittingSprint(true);
+    setSprintModalError(null);
+
+    try {
+      const targetSprintId = targetSprintChoice === '__none__' ? null : targetSprintChoice;
+      const targetIds = Array.from(selected) as string[];
+      const { updatedTasks, updatedSprints } = await StorageService.updateTasksSprint(
+        targetIds,
+        targetSprintId,
+        user,
+        { allowConcludedSprint }
+      );
+
+      setTasks(updatedTasks);
+      if (setSprints) {
+        setSprints(updatedSprints);
+      }
+
+      const destLabel = targetSprintChoice === '__none__' 
+        ? 'Sem sprint' 
+        : (selectedSprintObj ? selectedSprintObj.name : 'Sprint de destino');
+
+      if (showToast) {
+        showToast('success', `Sprint atualizada para "${destLabel}" em ${targetIds.length} demanda(s).`, 'Sprint Atualizada');
+      }
+
+      setSelected(new Set());
+      setIsBulkSprintModalOpen(false);
+      setTargetSprintChoice('');
+      setAllowConcludedSprint(false);
+    } catch (err: any) {
+      setSprintModalError(err.message || 'Erro inesperado ao atualizar a sprint em massa.');
+    } finally {
+      setIsSubmittingSprint(false);
+    }
+  };
+
   const exportToExcel = () => { const ws = XLSX.utils.json_to_sheet(filtered); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Demandas"); XLSX.writeFile(wb, "Nexus_Demandas.xlsx"); };
 
   const completedCount = filtered.filter(t => isCompletedStatus(t.status)).length;
@@ -2176,7 +2344,7 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
 
   return (
     <div className="space-y-4 h-full flex flex-col">
-      <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
+      <FilterBar filters={filters} setFilters={setFilters} devs={devs} sprints={sprints} />
       
       {/* Visual Counters matching Dashboard */}
       <div className="flex flex-wrap items-center gap-2 bg-dark-850/80 backdrop-blur-md p-2.5 px-4 rounded-2xl border border-slate-800/90 text-xs shadow-md shadow-black/15">
@@ -2203,46 +2371,77 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
         <div className="flex flex-wrap gap-2.5 items-center w-full">
              {selected.size > 0 ? (
                  <>
-                    <span className="text-xs font-semibold text-indigo-300 mr-1 bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-500/40 font-mono">{selected.size} selecionados</span>
-                    <select 
-                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
-                      onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                    >
-                        <option value="" disabled>Mudar Tipo...</option>
-                        <option value="Nova Automação">Nova Automação</option>
-                        <option value="Melhoria">Melhoria</option>
-                        <option value="Incidente">Incidente</option>
-                        <option value="Agendamento de Execução">Agendamento de Execução</option>
-                    </select>
-                    <select 
-                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
-                      onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                    >
-                        <option value="" disabled>Mudar Status...</option>
-                        <option value="Novo">Novo</option>
-                        <option value="Backlog">Backlog</option>
-                        <option value="Pendente">Pendente</option>
-                        <option value="Em Atendimento">Em Atendimento</option>
-                        <option value="Em Progresso">Em Progresso</option>
-                        <option value="Aguardando">Aguardando</option>
-                        <option value="Resolvido">Resolvido</option>
-                        <option value="Concluído">Concluído</option>
-                        <option value="Fechado">Fechado</option>
-                        <option value="Cancelado">Cancelado</option>
-                    </select>
-                    <select 
-                      className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
-                      onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}
-                      defaultValue=""
-                    >
-                        <option value="" disabled>Atribuir Dev...</option>
-                        {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
-                    </select>
-                    <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-1.5 px-3">Excluir</Button>
+                    <span className="text-xs font-semibold text-indigo-300 mr-1 bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-500/40 font-mono">
+                      {selected.size} selecionado(s)
+                    </span>
+
+                    {/* Mass Sprint Action Button */}
+                    {canBulkSprint && (
+                      <Button 
+                        variant="primary" 
+                        onClick={() => {
+                          setSprintModalError(null);
+                          setTargetSprintChoice('');
+                          setAllowConcludedSprint(false);
+                          setIsBulkSprintModalOpen(true);
+                        }} 
+                        className="text-xs py-1.5 px-3 flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 shadow-md shadow-indigo-950/40 font-semibold cursor-pointer"
+                        title="Alterar Sprint das demandas selecionadas em massa"
+                      >
+                        <IconSprint className="w-3.5 h-3.5 text-white" />
+                        Alterar sprint ({selected.size})
+                      </Button>
+                    )}
+
+                    {canBulkEdit && (
+                      <>
+                        <select 
+                          className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                          onChange={(e) => { if (e.target.value) { handleBulkAction('type', e.target.value); e.target.value = ''; } }}
+                          defaultValue=""
+                        >
+                            <option value="" disabled>Mudar Tipo...</option>
+                            <option value="Nova Automação">Nova Automação</option>
+                            <option value="Melhoria">Melhoria</option>
+                            <option value="Incidente">Incidente</option>
+                            <option value="Agendamento de Execução">Agendamento de Execução</option>
+                        </select>
+                        <select 
+                          className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                          onChange={(e) => { if (e.target.value) { handleBulkAction('status', e.target.value); e.target.value = ''; } }}
+                          defaultValue=""
+                        >
+                            <option value="" disabled>Mudar Status...</option>
+                            <option value="Novo">Novo</option>
+                            <option value="Backlog">Backlog</option>
+                            <option value="Pendente">Pendente</option>
+                            <option value="Em Atendimento">Em Atendimento</option>
+                            <option value="Em Progresso">Em Progresso</option>
+                            <option value="Aguardando">Aguardando</option>
+                            <option value="Resolvido">Resolvido</option>
+                            <option value="Concluído">Concluído</option>
+                            <option value="Fechado">Fechado</option>
+                            <option value="Cancelado">Cancelado</option>
+                        </select>
+                        <select 
+                          className="bg-slate-900 text-xs font-semibold rounded-xl px-3 py-1.5 outline-none text-slate-100 border border-slate-600 hover:border-indigo-400 transition-colors shadow-sm cursor-pointer" 
+                          onChange={(e) => { if (e.target.value) { handleBulkAction('assign', e.target.value); e.target.value = ''; } }}
+                          defaultValue=""
+                        >
+                            <option value="" disabled>Atribuir Dev...</option>
+                            {devs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                        </select>
+                        {isUserAdmin(user) && (
+                          <Button variant="danger" onClick={() => handleBulkAction('delete')} className="text-xs py-1.5 px-3">Excluir</Button>
+                        )}
+                      </>
+                    )}
                  </>
-             ) : <div className="text-xs text-slate-400">Selecione checkboxes na tabela para ações em massa (Mudar Tipo, Status ou Desenvolvedor)</div>}
+             ) : (
+               <div className="text-xs text-slate-400">
+                 Selecione checkboxes na tabela para ações em massa (Alterar Sprint, Tipo, Status ou Desenvolvedor).
+               </div>
+             )}
              <div className="flex-1"></div>
              <Button onClick={exportToExcel} variant="success" className="text-xs py-1.5 px-3"><IconDownload className="w-3.5 h-3.5" /> Exportar Excel</Button>
         </div>
@@ -2252,97 +2451,361 @@ const ListView = ({ tasks, setTasks, devs, onEditTask, user }: { tasks: Task[], 
             <table className="w-full text-left text-sm">
             <thead className="bg-dark-950/90 backdrop-blur-md text-slate-400 font-semibold text-xs uppercase tracking-wider sticky top-0 z-10 border-b border-slate-800/80">
               <tr>
-                <th className="p-3.5 w-10 bg-dark-950/90"><input id="select-all-tasks" type="checkbox" aria-label="Selecionar todas as demandas filtradas" title="Selecionar todas as demandas filtradas" className="rounded accent-indigo-600 cursor-pointer" checked={filtered.length > 0 && selected.size === filtered.length} onChange={(e) => setSelected(e.target.checked ? new Set(filtered.map(t => t.id)) : new Set())} /></th>
+                <th className="p-3.5 w-10 bg-dark-950/90">
+                  <input 
+                    ref={selectAllRef}
+                    id="select-all-tasks" 
+                    type="checkbox" 
+                    aria-label="Selecionar todas as demandas autorizadas e filtradas" 
+                    title="Selecionar todas as demandas filtradas com permissão de edição" 
+                    className="rounded accent-indigo-600 cursor-pointer" 
+                    checked={filteredAuthorized.length > 0 && selected.size === filteredAuthorized.length} 
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelected(new Set(filteredAuthorized.map(t => t.id)));
+                      } else {
+                        setSelected(new Set());
+                      }
+                    }} 
+                  />
+                </th>
                 <th className="p-3.5 bg-dark-950/90">ID</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[150px]">Tipo</th>
                 <th className="p-3.5 w-1/3 bg-dark-950/90">Título</th>
                 <th className="p-3.5 bg-dark-950/90">Prioridade</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Status</th>
+                <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Sprint</th>
                 <th className="p-3.5 bg-dark-950/90 min-w-[140px]">Atribuído</th>
                 <th className="p-3.5 text-right bg-dark-950/90">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/70">
-                {filtered.map(task => (
-                <tr key={task.id} className="hover:bg-dark-800/60 transition-colors group">
-                    <td className="p-3.5"><input id={`select-task-${task.id}`} type="checkbox" aria-label={`Selecionar demanda ${task.id} - ${task.summary}`} title={`Selecionar demanda ${task.id}`} className="rounded accent-indigo-600 cursor-pointer" checked={selected.has(task.id)} onChange={() => toggleSelect(task.id)} /></td>
-                    <td className="p-3.5 font-mono text-slate-400 group-hover:text-indigo-300 font-medium text-xs">{task.id}</td>
-                    <td className="p-3.5">
-                      <select 
-                        className={`text-xs font-bold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border font-mono ${
-                          task.type === 'Incidente' ? 'bg-rose-950/70 text-rose-200 border-rose-700/70 hover:border-rose-400' :
-                          task.type === 'Melhoria' ? 'bg-emerald-950/70 text-emerald-200 border-emerald-700/70 hover:border-emerald-400' :
-                          task.type === 'Agendamento de Execução' ? 'bg-amber-950/70 text-amber-200 border-amber-700/70 hover:border-amber-400' :
-                          'bg-indigo-950/70 text-indigo-200 border-indigo-700/70 hover:border-indigo-400'
-                        }`}
-                        value={task.type}
-                        title="Clique para alterar a classificação diretamente"
-                        onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
-                      >
-                        <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
-                        <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
-                        <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
-                        <option value="Agendamento de Execução" className="bg-slate-900 text-white">Agendamento de Execução</option>
-                      </select>
-                    </td>
-                    <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">
-                      <div>{task.summary}</div>
-                      {task.type === 'Agendamento de Execução' && (
-                        <div className="flex items-center gap-2 mt-1 text-[10px] font-mono">
-                          {task.hasCost ? (
-                            <>
-                              <span className="bg-amber-950/70 border border-amber-500/50 text-amber-300 px-1.5 py-0.5 rounded font-semibold">
-                                💰 R$ {Number(task.costValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              </span>
-                              {task.dispatchCount && (
-                                <span className="text-amber-200/80 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded">
-                                  🚀 {Number(task.dispatchCount).toLocaleString('pt-BR')} envios
-                                </span>
-                              )}
-                            </>
-                          ) : task.hasCost === false ? (
-                            <span className="text-slate-400 bg-slate-900/60 border border-slate-700/60 px-1.5 py-0.5 rounded text-[9px]">
-                              🚫 Sem custo
+                {filtered.map(task => {
+                  const authorized = isTaskAuthorized(task, user);
+                  return (
+                    <tr key={task.id} className="hover:bg-dark-800/60 transition-colors group">
+                        <td className="p-3.5">
+                          <input 
+                            id={`select-task-${task.id}`} 
+                            type="checkbox" 
+                            aria-label={`Selecionar demanda ${task.id} - ${task.summary}`} 
+                            title={authorized ? `Selecionar demanda ${task.id}` : 'Demanda não atribuída/autorizada para seu usuário'} 
+                            disabled={!authorized}
+                            className={`rounded accent-indigo-600 ${authorized ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`} 
+                            checked={selected.has(task.id)} 
+                            onChange={() => toggleSelect(task.id)} 
+                          />
+                        </td>
+                        <td className="p-3.5 font-mono text-slate-400 group-hover:text-indigo-300 font-medium text-xs">{task.id}</td>
+                        <td className="p-3.5">
+                          {authorized && canBulkEdit ? (
+                            <select 
+                              className={`text-xs font-bold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border font-mono ${
+                                task.type === 'Incidente' ? 'bg-rose-950/70 text-rose-200 border-rose-700/70 hover:border-rose-400' :
+                                task.type === 'Melhoria' ? 'bg-emerald-950/70 text-emerald-200 border-emerald-700/70 hover:border-emerald-400' :
+                                task.type === 'Agendamento de Execução' ? 'bg-amber-950/70 text-amber-200 border-amber-700/70 hover:border-amber-400' :
+                                'bg-indigo-950/70 text-indigo-200 border-indigo-700/70 hover:border-indigo-400'
+                              }`}
+                              value={task.type}
+                              title="Clique para alterar a classificação diretamente"
+                              onChange={(e) => handleDirectTypeChange(task.id, e.target.value as TaskType)}
+                            >
+                              <option value="Nova Automação" className="bg-slate-900 text-white">Nova Automação</option>
+                              <option value="Melhoria" className="bg-slate-900 text-white">Melhoria</option>
+                              <option value="Incidente" className="bg-slate-900 text-white">Incidente</option>
+                              <option value="Agendamento de Execução" className="bg-slate-900 text-white">Agendamento de Execução</option>
+                            </select>
+                          ) : (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-900/60 border border-slate-700/60 font-mono text-slate-300">
+                              {task.type}
                             </span>
-                          ) : null}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3.5"><Badge type={task.priority} /></td>
-                    <td className="p-3.5">
-                      <select 
-                        className={`text-xs font-semibold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border ${
-                          isCompletedStatus(task.status) 
-                            ? 'bg-emerald-950/80 text-emerald-200 border-emerald-600/70 hover:border-emerald-400' 
-                            : task.status === 'Aguardando' || task.status === 'Pendente'
-                              ? 'bg-amber-950/80 text-amber-200 border-amber-600/70 hover:border-amber-400'
-                              : 'bg-slate-900/90 text-slate-200 border-slate-700/90 hover:border-indigo-400'
-                        }`}
-                        value={task.status}
-                        title="Clique para alterar o status diretamente"
-                        onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
-                      >
-                        {STATUSES.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-3.5">
-                      <select 
-                        className="bg-slate-900/90 text-xs text-slate-200 hover:text-white border border-slate-700/90 hover:border-indigo-400 rounded-lg px-2 py-1 transition-all outline-none cursor-pointer shadow-sm max-w-[140px] truncate"
-                        value={task.assignee || ''}
-                        title="Alterar desenvolvedor responsável diretamente"
-                        onChange={(e) => handleDirectAssigneeChange(task.id, e.target.value)}
-                      >
-                        <option value="" className="bg-slate-900 text-slate-400">Não Atribuído</option>
-                        {devs.map(d => <option key={d.id} value={d.name} className="bg-slate-900 text-white">{d.name}</option>)}
-                      </select>
-                    </td>
-                    <td className="p-3.5 text-right"><button onClick={() => onEditTask(task)} className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2.5 py-1 rounded-lg border border-indigo-500/30 hover:bg-indigo-950/40 transition-colors cursor-pointer">Editar</button></td>
-                </tr>
-                ))}
+                          )}
+                        </td>
+                        <td className="p-3.5 font-medium text-slate-200 group-hover:text-white transition-colors">
+                          <div>{task.summary}</div>
+                          {task.type === 'Agendamento de Execução' && (
+                            <div className="flex items-center gap-2 mt-1 text-[10px] font-mono">
+                              {task.hasCost ? (
+                                <>
+                                  <span className="bg-amber-950/70 border border-amber-500/50 text-amber-300 px-1.5 py-0.5 rounded font-semibold">
+                                    💰 R$ {Number(task.costValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </span>
+                                  {task.dispatchCount && (
+                                    <span className="text-amber-200/80 bg-slate-900 border border-slate-700 px-1.5 py-0.5 rounded">
+                                      🚀 {Number(task.dispatchCount).toLocaleString('pt-BR')} envios
+                                    </span>
+                                  )}
+                                </>
+                              ) : task.hasCost === false ? (
+                                <span className="text-slate-400 bg-slate-900/60 border border-slate-700/60 px-1.5 py-0.5 rounded text-[9px]">
+                                  🚫 Sem custo
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3.5"><Badge type={task.priority} /></td>
+                        <td className="p-3.5">
+                          {authorized && canBulkEdit ? (
+                            <select 
+                              className={`text-xs font-semibold rounded-lg px-2.5 py-1 transition-all outline-none cursor-pointer shadow-sm border ${
+                                isCompletedStatus(task.status) 
+                                  ? 'bg-emerald-950/80 text-emerald-200 border-emerald-600/70 hover:border-emerald-400' 
+                                  : task.status === 'Aguardando' || task.status === 'Pendente'
+                                    ? 'bg-amber-950/80 text-amber-200 border-amber-600/70 hover:border-amber-400'
+                                    : 'bg-slate-900/90 text-slate-200 border-slate-700/90 hover:border-indigo-400'
+                              }`}
+                              value={task.status}
+                              title="Clique para alterar o status diretamente"
+                              onChange={(e) => handleDirectStatusChange(task.id, e.target.value)}
+                            >
+                              {STATUSES.map(s => <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>)}
+                            </select>
+                          ) : (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-900/60 border border-slate-700/60 text-slate-300">
+                              {task.status}
+                            </span>
+                          )}
+                        </td>
+                        {/* Sprint Column */}
+                        <td className="p-3.5">
+                          {(() => {
+                            const taskSprint = getTaskSprint(task, sprints);
+                            if (!taskSprint) {
+                              return (
+                                <span className="text-xs text-slate-500 italic px-2 py-0.5 rounded bg-slate-900/40 border border-slate-800/60 font-mono">
+                                  Sem sprint
+                                </span>
+                              );
+                            }
+                            const isConcluded = taskSprint.status === 'Concluída';
+                            const isRunning = taskSprint.status === 'Em Execução';
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                <span 
+                                  title={`Sprint: ${taskSprint.name} (${taskSprint.status})`}
+                                  className={`text-xs font-semibold px-2 py-0.5 rounded-lg border font-mono inline-flex items-center gap-1.5 w-fit max-w-[160px] truncate ${
+                                    isConcluded 
+                                      ? 'bg-slate-900/90 text-slate-400 border-slate-700/70' 
+                                      : isRunning 
+                                        ? 'bg-cyan-950/80 text-cyan-200 border-cyan-600/70 shadow-sm shadow-cyan-950/30' 
+                                        : 'bg-indigo-950/70 text-indigo-200 border-indigo-700/70'
+                                  }`}
+                                >
+                                  <span className="text-[11px]">{isConcluded ? '🏁' : isRunning ? '⚡' : '🎯'}</span>
+                                  <span className="truncate">{taskSprint.name}</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono pl-1">
+                                  {taskSprint.status}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="p-3.5">
+                          {authorized && canBulkEdit ? (
+                            <select 
+                              className="bg-slate-900/90 text-xs text-slate-200 hover:text-white border border-slate-700/90 hover:border-indigo-400 rounded-lg px-2 py-1 transition-all outline-none cursor-pointer shadow-sm max-w-[140px] truncate"
+                              value={task.assignee || ''}
+                              title="Alterar desenvolvedor responsável diretamente"
+                              onChange={(e) => handleDirectAssigneeChange(task.id, e.target.value)}
+                            >
+                              <option value="" className="bg-slate-900 text-slate-400">Não Atribuído</option>
+                              {devs.map(d => <option key={d.id} value={d.name} className="bg-slate-900 text-white">{d.name}</option>)}
+                            </select>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-mono">
+                              {task.assignee || 'Não Atribuído'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button 
+                            onClick={() => onEditTask(task)} 
+                            className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold px-2.5 py-1 rounded-lg border border-indigo-500/30 hover:bg-indigo-950/40 transition-colors cursor-pointer"
+                          >
+                            {authorized ? 'Editar' : 'Visualizar'}
+                          </button>
+                        </td>
+                    </tr>
+                  );
+                })}
             </tbody>
             </table>
         </div>
       </div>
+
+      {/* Review & Confirmation Modal for Mass Sprint Assignment */}
+      {isBulkSprintModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-dark-900 border border-slate-700/90 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-dark-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
+                  <IconSprint className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white leading-tight">
+                    Alterar Sprint em Massa
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Revise as demandas selecionadas e escolha a nova sprint de destino.
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => {
+                  if (!isSubmittingSprint) {
+                    setIsBulkSprintModalOpen(false);
+                    setTargetSprintChoice('');
+                    setAllowConcludedSprint(false);
+                    setSprintModalError(null);
+                  }
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                aria-label="Fechar modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+              {/* Notice / Rules */}
+              <div className="p-3 bg-indigo-950/20 border border-indigo-500/20 rounded-xl text-xs text-indigo-200/90 leading-relaxed">
+                ℹ️ <strong>Importante:</strong> Esta operação atualizará apenas a Sprint e registrará uma entrada no histórico de auditoria das demandas. Status, responsável, datas, horas estimadas e sub-tarefas <strong>não sofrerão alterações</strong>.
+              </div>
+
+              {/* Selected Demands Table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-slate-300">
+                    Demandas Selecionadas:
+                  </span>
+                  <span className="text-xs font-mono font-bold text-indigo-400 bg-indigo-950/70 border border-indigo-500/30 px-2 py-0.5 rounded-lg">
+                    {selectedTasks.length} demanda(s)
+                  </span>
+                </div>
+                <div className="max-h-48 overflow-y-auto custom-scrollbar border border-slate-800 rounded-xl divide-y divide-slate-800/80 bg-dark-950/50">
+                  {selectedTasks.map(task => {
+                    const currentSprint = getTaskSprint(task, sprints);
+                    return (
+                      <div key={task.id} className="p-2.5 px-3 flex items-center justify-between text-xs gap-3">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-mono text-indigo-300 font-bold mr-2">{task.id}</span>
+                          <span className="text-slate-200 font-medium truncate">{task.summary}</span>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-500 font-mono">Sprint atual:</span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-300">
+                            {currentSprint ? currentSprint.name : 'Sem sprint'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Destination Sprint Selection */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Sprint de Destino: <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  className="w-full bg-dark-950/90 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                  value={targetSprintChoice}
+                  onChange={(e) => {
+                    setTargetSprintChoice(e.target.value);
+                    setAllowConcludedSprint(false);
+                    setSprintModalError(null);
+                  }}
+                >
+                  <option value="" disabled>-- Selecione a Sprint de Destino --</option>
+                  <option value="__none__" className="text-amber-300 font-semibold">
+                    🚫 Remover da Sprint (Deixar sem sprint vinculada)
+                  </option>
+                  {sprints.map(sp => {
+                    const isConcluded = sp.status === 'Concluída';
+                    const isRunning = sp.status === 'Em Execução';
+                    const icon = isConcluded ? '🏁' : isRunning ? '⚡' : '🎯';
+                    return (
+                      <option key={sp.id} value={sp.id}>
+                        {icon} {sp.name} — Status: {sp.status} ({formatCivilDate(sp.startDate)} a {formatCivilDate(sp.endDate)})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Concluded Destination Sprint Warning & Admin Checkbox */}
+              {isDestinationConcluded && (
+                <div className="p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="text-base leading-none">⚠️</span>
+                    <p className="text-xs text-amber-200 leading-relaxed">
+                      A sprint <strong>{selectedSprintObj?.name}</strong> está com status <strong>Concluída</strong>. Inserir novas demandas em sprints já finalizadas pode impactar relatórios históricos e métricas de fechamento.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-amber-300 cursor-pointer pt-1 font-semibold select-none">
+                    <input 
+                      type="checkbox"
+                      className="rounded accent-amber-500 cursor-pointer"
+                      checked={allowConcludedSprint}
+                      onChange={(e) => setAllowConcludedSprint(e.target.checked)}
+                    />
+                    Estou ciente e confirmo adicionar demandas a uma sprint já concluída
+                  </label>
+                </div>
+              )}
+
+              {/* Error Banner */}
+              {sprintModalError && (
+                <div className="p-3 bg-rose-950/40 border border-rose-500/50 rounded-xl text-xs text-rose-200">
+                  ⚠️ {sprintModalError}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-dark-950/60 flex items-center justify-end gap-2.5">
+              <Button
+                variant="secondary"
+                disabled={isSubmittingSprint}
+                onClick={() => {
+                  setIsBulkSprintModalOpen(false);
+                  setTargetSprintChoice('');
+                  setAllowConcludedSprint(false);
+                  setSprintModalError(null);
+                }}
+                className="text-xs py-2 px-3.5"
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!canConfirmSprintChange}
+                onClick={handleConfirmSprintChange}
+                className="text-xs py-2 px-4 font-bold bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {isSubmittingSprint ? (
+                  <>
+                    <span className="animate-spin text-xs">⏳</span>
+                    Salvando Sprint...
+                  </>
+                ) : (
+                  <>
+                    <IconCheck className="w-4 h-4" />
+                    Confirmar Alteração ({selected.size})
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -7363,20 +7826,31 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
 
   if (location.pathname === '/powerbi-data') return <>{children}</>;
 
-  const menuItems = [ 
-    { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard' }, 
-    { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos' }, 
-    { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental' }, 
-    { path: '/sprints', icon: <IconSprint className="w-5 h-5" />, label: 'Sprints (CoE)' }, 
-    { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos' }, 
-    { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban' }, 
-    { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista' }, 
-    { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt' }, 
-    { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)' }, 
-    { path: '/totem', icon: <IconTerminal className="w-5 h-5" />, label: 'Totem RPA' },
-    { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios' },
-    { path: '/profile', icon: <IconUsers className="w-5 h-5" />, label: 'Meu Perfil' }
+  const isAdmin = isUserAdmin(user);
+  const userPerms = getUserPermissions(user);
+
+  const allMenuItems = [ 
+    { path: '/', icon: <IconHome className="w-5 h-5" />, label: 'Dashboard', moduleKey: 'dashboard' }, 
+    { path: '/projects', icon: <IconProject className="w-5 h-5" />, label: 'Projetos', moduleKey: 'projects' }, 
+    { path: '/esteira', icon: <IconDocument className="w-5 h-5" />, label: 'Esteira Documental', moduleKey: 'esteira' }, 
+    { path: '/sprints', icon: <IconSprint className="w-5 h-5" />, label: 'Sprints (CoE)', moduleKey: 'sprints' }, 
+    { path: '/project-report', icon: <IconChartBar className="w-5 h-5" />, label: 'Report Projetos', moduleKey: 'projectReport' }, 
+    { path: '/kanban', icon: <IconKanban className="w-5 h-5" />, label: 'Kanban', moduleKey: 'kanban' }, 
+    { path: '/list', icon: <IconList className="w-5 h-5" />, label: 'Lista', moduleKey: 'list' }, 
+    { path: '/gantt', icon: <IconClock className="w-5 h-5" />, label: 'Gantt', moduleKey: 'gantt' }, 
+    { path: '/robots', icon: <IconRobot className="w-5 h-5" />, label: 'Robôs (RPA)', moduleKey: 'robots' }, 
+    { path: '/totem', icon: <IconTerminal className="w-5 h-5" />, label: 'Totem RPA', moduleKey: 'totem' },
+    { path: '/reports', icon: <IconDocument className="w-5 h-5" />, label: 'Relatórios', moduleKey: 'reports' },
+    ...(isAdmin ? [{ path: '/admin', icon: <IconShieldCheck className="w-5 h-5 text-indigo-400" />, label: 'Administração', moduleKey: 'admin' }] : []),
+    { path: '/profile', icon: <IconUsers className="w-5 h-5" />, label: 'Meu Perfil', moduleKey: 'profile' }
   ];
+
+  const menuItems = allMenuItems.filter(item => {
+    if (isAdmin) return true;
+    if (item.moduleKey === 'profile') return true;
+    if (item.moduleKey === 'admin') return false;
+    return Boolean(userPerms.modules[item.moduleKey as keyof UserPermissions['modules']]);
+  });
 
   const isGuestOrLocal = !user?.email || user.email.includes('convidado') || user.id === 'user-1' || user.id === 'guest-1' || String(user?.id || '').startsWith('guest-');
 
@@ -7822,6 +8296,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     const [name, setName] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [showHelpModal, setShowHelpModal] = useState(false);
 
     const handleGoogleLogin = async () => {
         setError('');
@@ -7994,7 +8469,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                         />
                     </div>
                     <div>
-                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">Senha</label>
+                        <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">Senha do Nexus</label>
                         <input 
                             type="password" 
                             value={password} 
@@ -8003,6 +8478,9 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                             placeholder="••••••••" 
                             required
                         />
+                        <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                          E-mail corporativo (Microsoft 365 / Outlook corporativo) ou pessoal. Utilize a sua senha própria cadastrada no Nexus (não use a senha de rede do Windows/Outlook).
+                        </p>
                     </div>
 
                     {error && (
@@ -8023,26 +8501,41 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                         <button 
                             type="button" 
                             onClick={() => { setIsRegister(!isRegister); setError(''); }} 
-                            className="text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                            className="text-xs text-slate-400 hover:text-indigo-300 transition-colors cursor-pointer"
                         >
                             {isRegister ? 'Já possui conta? Clique para Entrar' : 'Não tem conta? Cadastrar no Firebase'}
                         </button>
 
                         <button 
                             type="button" 
+                            onClick={() => setShowHelpModal(true)}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 underline transition-colors cursor-pointer"
+                        >
+                            Esqueceu a senha ou precisa de liberação? Solicitar ajuda ao administrador
+                        </button>
+
+                        <button 
+                            type="button" 
                             onClick={handleGuestLogin}
-                            className="text-xs text-slate-500 hover:text-slate-300 transition-colors mt-1"
+                            className="text-xs text-slate-500 hover:text-slate-300 transition-colors mt-1 cursor-pointer"
                         >
                             Continuar como Visitante (Modo Demonstração)
                         </button>
                     </div>
                 </form>
+
+                <AccountHelpModal
+                    isOpen={showHelpModal}
+                    onClose={() => setShowHelpModal(false)}
+                    defaultEmail={email}
+                    defaultName={name}
+                />
             </div>
         </div>
     );
 };
 
-const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig, onOpenManageDevs }: any) => {
+const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, workflowConfig, onOpenManageDevs, canEdit = true, canDelete = true }: any) => {
     const [formData, setFormData] = useState<Task>(task ? { ...task, status: normalizeStatus(task.status) } : { id: '', type: 'Incidente', summary: '', description: '', requester: '', priority: '3 - Moderada', status: 'Novo', assignee: null, estimatedTime: '', actualTime: '', startDate: '', endDate: '', projectPath: '', automationName: '', managementArea: '', fteValue: undefined, blocker: '', projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } });
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncLog, setSyncLog] = useState<string[]>([]);
@@ -8084,6 +8577,9 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 try {
                     data = JSON.parse(responseText);
                 } catch (e) {
+                    if (responseText.includes("FUNCTION_INVOCATION_FAILED")) {
+                        throw new Error(`Falha de inicialização na função do servidor (Status 500 FUNCTION_INVOCATION_FAILED). Assegure-se de que o deploy contenha as correções recentes.`);
+                    }
                     throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
                 }
 
@@ -8139,6 +8635,9 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 try {
                     data = JSON.parse(responseText);
                 } catch (e) {
+                    if (responseText.includes("FUNCTION_INVOCATION_FAILED")) {
+                        throw new Error(`Falha de inicialização na função do servidor (Status 500 FUNCTION_INVOCATION_FAILED). Assegure-se de que o deploy contenha as correções recentes.`);
+                    }
                     throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
                 }
 
@@ -8198,6 +8697,9 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             try {
                 data = JSON.parse(responseText);
             } catch (e) {
+                if (responseText.includes("FUNCTION_INVOCATION_FAILED")) {
+                    throw new Error(`Falha de inicialização na função do servidor (Status 500 FUNCTION_INVOCATION_FAILED). Assegure-se de que o deploy contenha as correções recentes.`);
+                }
                 throw new Error(`Resposta do servidor não pôde ser interpretada como JSON (Status ${res.status}): ${responseText.substring(0, 200)}...`);
             }
 
@@ -9203,8 +9705,47 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             </div>
         </div>
     </div>
-)}{formData.history && formData.history.length > 0 && (<div className="mt-6 border-t border-slate-800/80 pt-4"><h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações</h4><div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">{formData.history.slice().reverse().map((entry: HistoryEntry) => (<div key={entry.id} className="text-xs bg-dark-900/60 p-3 rounded-xl border border-slate-800/60 hover:border-slate-750 transition-colors"><div className="flex justify-between text-slate-500 mb-1"><span className="font-mono">{new Date(entry.date).toLocaleString()}</span><span className="font-medium text-indigo-400">{entry.user}</span></div><p className="text-slate-300">{entry.action}</p></div>))}</div></div>)}</div><div className="p-4 sm:p-5 border-t border-slate-800/90 flex justify-between bg-dark-900/90 rounded-b-2xl"><Button variant="danger" onClick={() => onDelete(formData.id)}>Excluir</Button><div className="flex gap-2.5"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={handleSaveTask}>Salvar Alterações</Button></div></div></div></div>)
-}
+)}
+{formData.history && formData.history.length > 0 && (
+    <div className="mt-6 border-t border-slate-800/80 pt-4">
+        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <IconClock className="w-4 h-4 text-indigo-400" /> Histórico de Alterações
+        </h4>
+        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+            {formData.history.slice().reverse().map((entry: HistoryEntry) => (
+                <div key={entry.id} className="text-xs bg-dark-900/60 p-3 rounded-xl border border-slate-800/60 hover:border-slate-750 transition-colors">
+                    <div className="flex justify-between text-slate-500 mb-1">
+                        <span className="font-mono">{new Date(entry.date).toLocaleString()}</span>
+                        <span className="font-medium text-indigo-400">{entry.user}</span>
+                    </div>
+                    <p className="text-slate-300">{entry.action}</p>
+                </div>
+            ))}
+        </div>
+    </div>
+)}
+</div>
+<div className="p-4 sm:p-5 border-t border-slate-800/90 flex justify-between bg-dark-900/90 rounded-b-2xl">
+    {canDelete && (
+        <Button variant="danger" onClick={() => onDelete(formData.id)}>
+            Excluir
+        </Button>
+    )}
+    <div className="flex gap-2.5 ml-auto">
+        <Button variant="secondary" onClick={onClose}>
+            Cancelar
+        </Button>
+        {canEdit && (
+            <Button onClick={handleSaveTask}>
+                Salvar Alterações
+            </Button>
+        )}
+    </div>
+</div>
+</div>
+</div>
+);
+};
 
 const PowerBIDataView = () => {
     const loggedUser = StorageService.getUser();
@@ -9776,22 +10317,80 @@ export default function App() {
   const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
 
   const syncTaskWithSprints = (task: Task, currentSprints: Sprint[]) => {
+    let newSprints = [...currentSprints];
+    let changed = false;
+
+    // 1. Explicit user assignment: if sprintId is set, respect it and do not overwrite with date calculation
+    if (task.sprintId) {
+      const explicitSprint = newSprints.find(s => s.id === task.sprintId);
+      if (explicitSprint) {
+        // Remove from all other sprints
+        newSprints = newSprints.map(s => {
+          if (s.id !== task.sprintId && s.tasks.some(st => st.taskId === task.id)) {
+            changed = true;
+            return {
+              ...s,
+              tasks: s.tasks.filter(st => st.taskId !== task.id)
+            };
+          }
+          return s;
+        });
+
+        // Ensure task is present in target sprint with up-to-date hours/status
+        newSprints = newSprints.map(s => {
+          if (s.id === task.sprintId) {
+            const sprintTask: SprintTask = {
+              taskId: task.id,
+              plannedHours: parseDuration(task.estimatedTime || '0h'),
+              actualHours: parseDuration(task.actualTime || '0h'),
+              status: isCompletedStatus(task.status) ? 'Concluído' : 'Em Progresso'
+            };
+            const existingIdx = s.tasks.findIndex(st => st.taskId === task.id);
+            if (existingIdx >= 0) {
+              const current = s.tasks[existingIdx];
+              if (current.plannedHours !== sprintTask.plannedHours || current.actualHours !== sprintTask.actualHours || current.status !== sprintTask.status) {
+                changed = true;
+                const updatedTasks = [...s.tasks];
+                updatedTasks[existingIdx] = sprintTask;
+                return { ...s, tasks: updatedTasks };
+              }
+              return s;
+            } else {
+              changed = true;
+              return { ...s, tasks: [...s.tasks, sprintTask] };
+            }
+          }
+          return s;
+        });
+
+        return { newSprints, changed };
+      }
+    }
+
+    // 2. Explicit removal: if sprintId is explicitly null, remove from all sprints and don't re-assign
+    if (task.sprintId === null) {
+      const wasInAnySprint = newSprints.some(s => s.tasks.some(st => st.taskId === task.id));
+      if (wasInAnySprint) {
+        newSprints = newSprints.map(s => ({
+          ...s,
+          tasks: s.tasks.filter(st => st.taskId !== task.id)
+        }));
+        return { newSprints, changed: true };
+      }
+      return { newSprints, changed: false };
+    }
+
+    // 3. Fallback automated sprint alignment by phase/date for tasks without explicit sprintId
     const phaseId = task.projectData?.currentPhaseId || '1';
     const phaseStatus = task.projectData?.phaseStatus || 'Não iniciado';
     
     const currentPhaseIndex = workflowConfig.findIndex(w => w.id === phaseId);
     const devPhaseIndex = workflowConfig.findIndex(w => w.id === '4');
     
-    // Development started if current phase is after dev phase, 
-    // or if it's the dev phase and status is not "Não iniciado"
     const devStarted = currentPhaseIndex > devPhaseIndex || 
                       (currentPhaseIndex === devPhaseIndex && phaseStatus.toLowerCase() !== 'não iniciado');
-    
-    let newSprints = [...currentSprints];
-    let changed = false;
 
     if (!devStarted) {
-        // If dev hasn't started, remove from any sprint
         const wasInAnySprint = newSprints.some(s => s.tasks.some(st => st.taskId === task.id));
         if (wasInAnySprint) {
             newSprints = newSprints.map(s => ({
@@ -9889,6 +10488,7 @@ export default function App() {
   };
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [showPendingHelpModal, setShowPendingHelpModal] = useState(false);
 
   // Automatic Sprint Status Management
   useEffect(() => {
@@ -9944,8 +10544,9 @@ export default function App() {
   useEffect(() => {
     const unsubAuth = FirebaseService.onAuthChange((fbUser) => {
       if (fbUser) {
-        setUser(fbUser);
-        StorageService.updateUser(fbUser);
+        const resolved = StorageService.resolveUserMembership(fbUser);
+        setUser(resolved);
+        StorageService.updateUser(resolved);
       }
     });
     return () => unsubAuth();
@@ -9961,23 +10562,49 @@ export default function App() {
       return;
     }
 
-    StorageService.setCurrentUserId(user.id);
+    // Security Gate: Pending or Inactive accounts NEVER load workspace records!
+    if (user.status === 'pending' || user.status === 'inactive') {
+      setTasks([]);
+      setDevs([]);
+      setRobots([]);
+      setSprints([]);
+      setIsInitialDataLoaded(true);
+      return;
+    }
 
-    // Migration of legacy data if needed (only for admin email)
-    FirebaseService.migrateLegacyDataIfNeeded(user);
+    const isAdmin = isUserAdmin(user);
+    // Canonical workspace owner UID is strictly NEXUS_OWNER_UID (pM6ApHmKYfW2nMFRmUFGCtfjCEx1)
+    const workspaceUid = user.workspaceOwnerUid || (isOwnerUser(user) ? NEXUS_OWNER_UID : (user.id || NEXUS_OWNER_UID));
+    StorageService.setCurrentUserId(workspaceUid);
 
-    // Load workflow & documents & devops settings from Firestore
-    FirebaseService.getSetting<WorkflowPhase[]>('workflow', DEFAULT_WORKFLOW, user.id).then(cfg => {
+    // If ADM, subscribe to members registry on canonical owner workspace
+    let unsubMembers = () => {};
+    if (isAdmin) {
+      unsubMembers = FirebaseService.subscribeMembers(NEXUS_OWNER_UID, (remoteMembers) => {
+        if (remoteMembers && remoteMembers.length > 0) {
+          StorageService.setMembersInMemory(remoteMembers);
+        }
+      });
+    }
+
+    // Migration of legacy data if needed (strictly for root owner UID)
+    if (isOwnerUser(user)) {
+      FirebaseService.migrateLegacyDataIfNeeded(user);
+    }
+
+    // Load workflow & documents & devops settings from Firestore (only for authorized users)
+    FirebaseService.getSetting<WorkflowPhase[]>('workflow', DEFAULT_WORKFLOW, workspaceUid).then(cfg => {
       setWorkflowConfig(cfg);
       StorageService.setWorkflowConfigInMemory(cfg);
     });
 
-    FirebaseService.getSetting<DocumentConfig[]>('documents', DEFAULT_DOCS, user.id).then(cfg => {
+    FirebaseService.getSetting<DocumentConfig[]>('documents', DEFAULT_DOCS, workspaceUid).then(cfg => {
       setDocumentsConfig(cfg);
       StorageService.setDocumentsConfigInMemory(cfg);
     });
 
-    StorageService.syncDevOpsFromCloud(user.id).catch(e => {
+    // Azure DevOps Cloud Sync for all authorized sessions (loads credentials automatically from first integration across any machine)
+    StorageService.syncDevOpsFromCloud(NEXUS_OWNER_UID).catch(e => {
       console.warn('DevOps cloud sync notice:', e);
     });
 
@@ -9986,33 +10613,35 @@ export default function App() {
       // 1. Filter out deleted tasks
       const activeRemoteTasks = (remoteTasks || []).filter(t => !StorageService.isTaskDeleted(t.id));
 
-      // 2. Proactively delete any lingering remote tasks that are marked as deleted
-      (remoteTasks || []).forEach(t => {
-        if (StorageService.isTaskDeleted(t.id)) {
-          FirebaseService.deleteTask(t.id, user.id).catch(() => {});
-        }
-      });
+      // 2. Proactively delete any lingering remote tasks that are marked as deleted (only if admin)
+      if (isAdmin) {
+        (remoteTasks || []).forEach(t => {
+          if (StorageService.isTaskDeleted(t.id)) {
+            FirebaseService.deleteTask(t.id, workspaceUid).catch(() => {});
+          }
+        });
+      }
 
       if (activeRemoteTasks.length > 0) {
         setTasks(activeRemoteTasks);
         StorageService.setTasksInMemory(activeRemoteTasks);
       } else {
         const localTasks = StorageService.getTasks();
-        if (localTasks.length > 0) {
-          FirebaseService.saveTasksBatch(localTasks, user.id, true).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
+        if (localTasks.length > 0 && isAdmin) {
+          FirebaseService.saveTasksBatch(localTasks, workspaceUid, true).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
           setTasks(localTasks);
         } else {
           setTasks([]);
         }
       }
       setIsInitialDataLoaded(true);
-    }, user.id);
+    }, workspaceUid);
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
       const cleanDevs = remoteDevs || [];
       setDevs(cleanDevs);
       StorageService.setDevsInMemory(cleanDevs);
-    }, user.id);
+    }, workspaceUid);
 
     const unsubRobots = FirebaseService.subscribeRobots((remoteRobots) => {
       const cleanRobots = remoteRobots || [];
@@ -10021,13 +10650,13 @@ export default function App() {
         StorageService.setRobotsInMemory(cleanRobots);
       } else {
         const localRobots = StorageService.getRobots();
-        if (localRobots.length > 0) {
-          FirebaseService.saveRobots(localRobots, user.id).catch(e => console.warn('Sync local robots notice:', e));
+        if (localRobots.length > 0 && isAdmin) {
+          FirebaseService.saveRobots(localRobots, workspaceUid).catch(e => console.warn('Sync local robots notice:', e));
         } else {
           setRobots([]);
         }
       }
-    }, user.id);
+    }, workspaceUid);
 
     const unsubSprints = FirebaseService.subscribeSprints((remoteSprints) => {
       const cleanSprints = remoteSprints || [];
@@ -10036,21 +10665,22 @@ export default function App() {
         StorageService.setSprintsInMemory(cleanSprints);
       } else {
         const localSprints = StorageService.getSprints();
-        if (localSprints.length > 0) {
-          FirebaseService.saveSprints(localSprints, user.id).catch(e => console.warn('Sync local sprints notice:', e));
+        if (localSprints.length > 0 && isAdmin) {
+          FirebaseService.saveSprints(localSprints, workspaceUid).catch(e => console.warn('Sync local sprints notice:', e));
         } else {
           setSprints([]);
         }
       }
-    }, user.id);
+    }, workspaceUid);
 
     return () => {
       unsubTasks();
       unsubDevs();
       unsubRobots();
       unsubSprints();
+      unsubMembers();
     };
-  }, [user?.id]);
+  }, [user?.id, user?.status]);
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
@@ -10129,10 +10759,19 @@ export default function App() {
     setReadNotificationIds(NotificationService.getReadNotificationIds(user?.id));
   }, [user?.id]);
 
-  // Live calculated notifications from tasks and schedulings
+  const isAdmin = isUserAdmin(user);
+  const userPermissions = getUserPermissions(user);
+
+  // Scoped tasks: Collaborators can ONLY see tasks authorized or assigned to them
+  const visibleTasks = useMemo(() => {
+    if (isAdmin) return tasks;
+    return tasks.filter(t => isTaskAuthorized(t, user));
+  }, [tasks, isAdmin, user]);
+
+  // Live calculated notifications from authorized tasks
   const notifications = useMemo(() => {
-    return NotificationService.calculateNotifications(tasks, readNotificationIds);
-  }, [tasks, readNotificationIds]);
+    return NotificationService.calculateNotifications(visibleTasks, readNotificationIds);
+  }, [visibleTasks, readNotificationIds]);
 
   const unreadNotificationsCount = useMemo(() => {
     return notifications.filter(n => !n.isRead).length;
@@ -10191,8 +10830,9 @@ export default function App() {
     setRobots([]);
     setSprints([]);
     setIsInitialDataLoaded(false);
-    StorageService.updateUser(loggedInUser);
-    setUser(loggedInUser);
+    const resolved = StorageService.resolveUserMembership(loggedInUser);
+    StorageService.updateUser(resolved);
+    setUser(resolved);
   };
   const handleLogout = async () => { 
     try {
@@ -10215,8 +10855,9 @@ export default function App() {
       setDevs([]);
       setRobots([]);
       setSprints([]);
-      StorageService.updateUser(fbUser);
-      setUser(fbUser);
+      const resolved = StorageService.resolveUserMembership(fbUser);
+      StorageService.updateUser(resolved);
+      setUser(resolved);
     } catch (err: any) {
       console.error('Google login failed:', err);
       if (err.code === 'auth/unauthorized-domain') {
@@ -10727,50 +11368,82 @@ export default function App() {
   };
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
+
+  // Barrier: Block pending and inactive accounts from accessing data or workspace
+  if (user && (user.status === 'pending' || user.status === 'inactive') && !isPowerBiRoute) {
+    return (
+      <>
+        <PendingAccessScreen 
+          user={user} 
+          onRefresh={() => {
+            const fresh = StorageService.resolveUserMembership(user);
+            setUser(fresh);
+          }} 
+          onLogout={handleLogout} 
+          onRequestHelp={() => setShowPendingHelpModal(true)}
+        />
+        <AccountHelpModal
+          isOpen={showPendingHelpModal}
+          onClose={() => setShowPendingHelpModal(false)}
+          defaultEmail={user.email}
+          defaultName={user.name}
+        />
+      </>
+    );
+  }
+
   const headerActions = (
     <div className="flex items-center gap-1.5 sm:gap-2 bg-dark-850/90 p-1 sm:p-1.5 rounded-2xl backdrop-blur-md border border-slate-800/90 shadow-lg shadow-black/20">
-      <Button 
-        onClick={handleCreateTask} 
-        variant="primary" 
-        className="h-9 px-3 sm:px-3.5 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-indigo-950/50"
-        title="Criar nova demanda ou chamado"
-      >
-        <IconPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" /> 
-        <span className="hidden sm:inline">Nova Demanda</span>
-        <span className="sm:hidden">+ Demanda</span>
-      </Button>
+      {(isAdmin || userPermissions.actions.create) && (
+        <Button 
+          onClick={handleCreateTask} 
+          variant="primary" 
+          className="h-9 px-3 sm:px-3.5 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-indigo-950/50"
+          title="Criar nova demanda ou chamado"
+        >
+          <IconPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" /> 
+          <span className="hidden sm:inline">Nova Demanda</span>
+          <span className="sm:hidden">+ Demanda</span>
+        </Button>
+      )}
 
-      <div className="w-px bg-slate-800 h-5 self-center hidden sm:block"></div>
+      {isAdmin && <div className="w-px bg-slate-800 h-5 self-center hidden sm:block"></div>}
 
-      <Button
-        onClick={() => setIsUploadModalOpen(true)} 
-        variant="success"
-        className="h-9 px-2.5 sm:px-3 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-emerald-950/40"
-        title="Subir Planilha Excel de Backup ou Demandas (.xlsx, .xls, .csv)"
-      >
-        <IconUpload className="w-3.5 h-3.5 text-white" /> 
-        <span className="hidden md:inline">Importar Planilha</span>
-        <span className="md:hidden">Upload</span>
-      </Button>
+      {isAdmin && (
+        <Button
+          onClick={() => setIsUploadModalOpen(true)} 
+          variant="success"
+          className="h-9 px-2.5 sm:px-3 text-xs font-bold gap-1.5 whitespace-nowrap shadow-sm shadow-emerald-950/40"
+          title="Subir Planilha Excel de Backup ou Demandas (.xlsx, .xls, .csv)"
+        >
+          <IconUpload className="w-3.5 h-3.5 text-white" /> 
+          <span className="hidden md:inline">Importar Planilha</span>
+          <span className="md:hidden">Upload</span>
+        </Button>
+      )}
 
-      <Button
-        onClick={() => ExcelService.exportBackupExcel(tasks, robots, devs)} 
-        variant="secondary"
-        className="hidden lg:inline-flex h-9 px-3 text-xs font-semibold gap-1.5 whitespace-nowrap"
-        title="Exportar planilha Excel completa com todas as demandas"
-      >
-        <IconDownload className="w-3.5 h-3.5 text-slate-300" /> 
-        <span>Exportar Excel</span>
-      </Button>
+      {(isAdmin || userPermissions.actions.export) && (
+        <Button
+          onClick={() => ExcelService.exportBackupExcel(visibleTasks, robots, devs)} 
+          variant="secondary"
+          className="hidden lg:inline-flex h-9 px-3 text-xs font-semibold gap-1.5 whitespace-nowrap"
+          title="Exportar planilha Excel com demandas autorizadas"
+        >
+          <IconDownload className="w-3.5 h-3.5 text-slate-300" /> 
+          <span>Exportar Excel</span>
+        </Button>
+      )}
 
-      <Button 
-        onClick={() => setIsManageDevsOpen(true)} 
-        variant="ghost" 
-        className="h-9 px-2.5 text-xs font-medium gap-1.5 text-slate-300 hover:text-white hover:bg-dark-800/80 border border-slate-800/80"
-        title="Gerenciar lista de desenvolvedores da equipe"
-      >
-        <IconUsers className="w-3.5 h-3.5 text-indigo-400" /> Devs
-      </Button>
+      {isAdmin && (
+        <Button 
+          onClick={() => setIsManageDevsOpen(true)} 
+          variant="ghost" 
+          className="h-9 px-2.5 text-xs font-medium gap-1.5 text-slate-300 hover:text-white hover:bg-dark-800/80 border border-slate-800/80"
+          title="Gerenciar lista de desenvolvedores da equipe"
+        >
+          <IconUsers className="w-3.5 h-3.5 text-indigo-400" /> Devs
+        </Button>
+      )}
     </div>
   );
   return (<HashRouter><Layout user={user || {id:'0',name:'Guest',email:''}} onLogout={handleLogout} onGoogleLogin={handleGoogleLoginDirect} headerContent={headerActions} onCreateTask={handleCreateTask} onOpenUpload={() => setIsUploadModalOpen(true)} onOpenManageDevs={() => setIsManageDevsOpen(true)} onOpenNotifications={() => setIsNotificationCenterOpen(true)} unreadNotificationsCount={unreadNotificationsCount} hasCriticalNotifications={hasCriticalNotifications}>{isUploadModalOpen && (
@@ -11174,12 +11847,14 @@ export default function App() {
   <TaskModal 
     task={editingTask} 
     developers={devs} 
-    allTasks={tasks} 
+    allTasks={visibleTasks} 
     workflowConfig={workflowConfig} 
     onClose={() => setEditingTask(null)} 
     onSave={handleTaskUpdate} 
     onDelete={handleTaskDelete}
     onOpenManageDevs={() => setIsManageDevsOpen(true)}
+    canEdit={isAdmin || userPermissions.actions.edit}
+    canDelete={isAdmin}
   />
 )}
 {appToast && (
@@ -11226,7 +11901,7 @@ export default function App() {
 <NotificationCenter
   isOpen={isNotificationCenterOpen}
   onClose={() => setIsNotificationCenterOpen(false)}
-  tasks={tasks}
+  tasks={visibleTasks}
   user={user || { id: '0', name: 'Usuário', email: '' }}
   onEditTask={setEditingTask}
   readNotificationIds={readNotificationIds}
@@ -11238,5 +11913,21 @@ export default function App() {
   onClose={() => setIsAIAgentApiModalOpen(false)}
   onRefreshData={syncFromAIAgentStore}
 />
-<Routes><Route path="/" element={<DashboardView tasks={tasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} /><Route path="/projects" element={<ProjectFlowView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} /><Route path="/esteira" element={<DocumentPipelineView tasks={tasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} /><Route path="/sprints" element={<SprintsView tasks={tasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} /><Route path="/project-report" element={<ProjectReportView tasks={tasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} /><Route path="/kanban" element={<KanbanView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/list" element={<ListView tasks={tasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} /><Route path="/gantt" element={<GanttView tasks={tasks} devs={devs} />} /><Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} /><Route path="/totem" element={<AutomationTotemView tasks={tasks} setTasks={setTasks} robots={robots} />} /><Route path="/reports" element={<ReportsView tasks={tasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} /><Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} /><Route path="/powerbi-data" element={<PowerBIDataView />} /><Route path="*" element={<Navigate to="/" />} /></Routes></Layout></HashRouter>);
+<Routes>
+  <Route path="/" element={<DashboardView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} />
+  <Route path="/projects" element={<ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} />
+  <Route path="/esteira" element={<DocumentPipelineView tasks={visibleTasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} />
+  <Route path="/sprints" element={<SprintsView tasks={visibleTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} />
+  <Route path="/project-report" element={<ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} />
+  <Route path="/kanban" element={<KanbanView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} />
+  <Route path="/list" element={<ListView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} sprints={sprints} setSprints={setSprints} showToast={showToast} />} />
+  <Route path="/gantt" element={<GanttView tasks={visibleTasks} devs={devs} />} />
+  <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
+  <Route path="/totem" element={<AutomationTotemView tasks={visibleTasks} setTasks={setTasks} robots={robots} />} />
+  <Route path="/reports" element={<ReportsView tasks={visibleTasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} />
+  <Route path="/admin" element={isAdmin ? <AdminUserManagementView currentUser={user!} tasks={tasks} /> : <Navigate to="/" />} />
+  <Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} />
+  <Route path="/powerbi-data" element={<PowerBIDataView />} />
+  <Route path="*" element={<Navigate to="/" />} />
+</Routes></Layout></HashRouter>);
 }

@@ -100,6 +100,14 @@ export interface Task {
   hasCost?: boolean;
   dispatchCount?: number;
   costValue?: number;
+
+  // Sprint Reference
+  sprintId?: string;
+
+  // Role-Based Authorization & Demands Scoping
+  assignedUid?: string;
+  allowedUids?: string[];
+  createdByUid?: string;
 }
 
 export interface SubTask {
@@ -143,10 +151,161 @@ export interface Sprint {
   notes?: string;
 }
 
+export const getTaskSprintId = (task: Task, sprints: Sprint[]): string | undefined => {
+  // If sprintId is explicitly defined (even if null or empty), respect it as canonical:
+  if (task.sprintId !== undefined) {
+    if (task.sprintId === null || task.sprintId === '' || task.sprintId === '__none__') {
+      return undefined;
+    }
+    return task.sprintId;
+  }
+  // Fallback ONLY for legacy tasks where sprintId field was never defined:
+  const found = sprints.find(s => s.tasks && s.tasks.some(st => st.taskId === task.id));
+  return found?.id;
+};
+
+export const getTaskSprint = (task: Task, sprints: Sprint[]): Sprint | undefined => {
+  const sprintId = getTaskSprintId(task, sprints);
+  if (!sprintId) return undefined;
+  return sprints.find(s => s.id === sprintId);
+};
+
 export interface Developer {
   id: string;
   name: string;
   email?: string;
+}
+
+export type UserRole = 'ADM' | 'Colaborador';
+export type UserStatus = 'active' | 'pending' | 'inactive';
+
+export interface ModulePermissions {
+  dashboard: boolean;
+  projects: boolean;
+  esteira: boolean;
+  sprints: boolean;
+  projectReport: boolean;
+  kanban: boolean;
+  list: boolean;
+  gantt: boolean;
+  robots: boolean;
+  totem: boolean;
+  reports: boolean;
+}
+
+export interface ActionPermissions {
+  view: boolean;
+  create: boolean;
+  edit: boolean;
+  comment: boolean;
+  attach: boolean;
+  export: boolean;
+}
+
+export interface UserPermissions {
+  modules: ModulePermissions;
+  actions: ActionPermissions;
+  // Privileged actions (ADM-exclusive)
+  canAssign?: boolean;
+  canReorganize?: boolean;
+  canDelete?: boolean;
+  canImport?: boolean;
+  canManageUsers?: boolean;
+  canManageIntegrations?: boolean;
+  canManageSprints?: boolean;
+}
+
+export const DEFAULT_ADM_PERMISSIONS: UserPermissions = {
+  modules: {
+    dashboard: true,
+    projects: true,
+    esteira: true,
+    sprints: true,
+    projectReport: true,
+    kanban: true,
+    list: true,
+    gantt: true,
+    robots: true,
+    totem: true,
+    reports: true
+  },
+  actions: {
+    view: true,
+    create: true,
+    edit: true,
+    comment: true,
+    attach: true,
+    export: true
+  },
+  canAssign: true,
+  canReorganize: true,
+  canDelete: true,
+  canImport: true,
+  canManageUsers: true,
+  canManageIntegrations: true,
+  canManageSprints: true
+};
+
+export const DEFAULT_COLLABORATOR_PERMISSIONS: UserPermissions = {
+  modules: {
+    dashboard: true,
+    projects: true,
+    esteira: true,
+    sprints: true,
+    projectReport: false,
+    kanban: true,
+    list: true,
+    gantt: false,
+    robots: false,
+    totem: false,
+    reports: false
+  },
+  actions: {
+    view: true,
+    create: false,
+    edit: true,
+    comment: true,
+    attach: true,
+    export: false
+  },
+  canAssign: false,
+  canReorganize: false,
+  canDelete: false,
+  canImport: false,
+  canManageUsers: false,
+  canManageIntegrations: false,
+  canManageSprints: false
+};
+
+export const NEXUS_OWNER_UID = 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+
+export interface AccountRecoveryRequest {
+  id: string;
+  email: string;
+  name?: string;
+  department?: string;
+  requestedAt: string;
+  status: 'pending' | 'resolved' | 'rejected';
+  resolvedAt?: string;
+  resolvedByUid?: string;
+  notes?: string;
+  isGoogleAccount?: boolean;
+}
+
+export interface WorkspaceMember {
+  id: string; // member document ID (sanitized email or uid)
+  uid?: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  status: UserStatus;
+  permissions: UserPermissions;
+  assignedTaskIds: string[]; // Specific demands explicitly authorized for this user
+  workspaceOwnerUid: string;
+  invitedAt: string;
+  activatedAt?: string;
+  lastActiveAt?: string;
+  invitedBy?: string;
 }
 
 export interface User {
@@ -155,6 +314,11 @@ export interface User {
   name: string;
   password?: string; // Added for auth
   avatar?: string;   // Base64 string for profile picture
+  role?: UserRole;
+  status?: UserStatus;
+  permissions?: UserPermissions;
+  assignedTaskIds?: string[];
+  workspaceOwnerUid?: string;
 }
 
 export interface DevOpsConfig {

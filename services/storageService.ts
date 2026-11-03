@@ -1,6 +1,79 @@
-import { Task, Developer, User, WorkflowPhase, Robot, DocumentConfig, Sprint, DevOpsConfig, normalizeStatus, normalizeTaskType } from '../types';
+import { 
+  Task, 
+  Developer, 
+  User, 
+  WorkflowPhase, 
+  Robot, 
+  DocumentConfig, 
+  Sprint, 
+  SprintTask,
+  HistoryEntry,
+  getTaskSprintId,
+  DevOpsConfig, 
+  WorkspaceMember,
+  UserRole,
+  UserStatus,
+  UserPermissions,
+  AccountRecoveryRequest,
+  NEXUS_OWNER_UID,
+  DEFAULT_ADM_PERMISSIONS,
+  DEFAULT_COLLABORATOR_PERMISSIONS,
+  normalizeStatus, 
+  normalizeTaskType 
+} from '../types';
 import { BackupService } from './backupService';
 import { FirebaseService } from './firebase';
+
+// Confirmed owner identity for Nexus ADM (authoritative UID: pM6ApHmKYfW2nMFRmUFGCtfjCEx1)
+export const OWNER_UID = NEXUS_OWNER_UID;
+// Maintain OWNER_EMAIL alias for backward-compatibility with display badges
+export const OWNER_EMAIL = 'paulo.mmartinio@gmail.com';
+
+// Security Helper: verify if user is the immutable root workspace owner
+export const isOwnerUser = (user?: User | null): boolean => {
+  if (!user || !user.id) return false;
+  return user.id === NEXUS_OWNER_UID;
+};
+
+// Security Helper: verify if user is confirmed ADM (Owner or active delegated ADM)
+export const isUserAdmin = (user?: User | null): boolean => {
+  if (!user || !user.id) return false;
+  if (user.id === NEXUS_OWNER_UID) return true;
+  return user.role === 'ADM' && user.status === 'active';
+};
+
+// Security Helper: verify if a task is authorized for a specific user
+export const isTaskAuthorized = (task: Task, user?: User | null): boolean => {
+  if (!user) return false;
+  if (isUserAdmin(user)) return true;
+
+  const targetUserId = user.id ? String(user.id).trim() : '';
+
+  // 1. Direct assigned UID
+  if (task.assignedUid && task.assignedUid === targetUserId) return true;
+
+  // 2. Explicitly authorized UIDs array
+  if (Array.isArray(task.allowedUids) && task.allowedUids.includes(targetUserId)) return true;
+
+  // 3. User's explicit authorized demands list
+  if (Array.isArray(user.assignedTaskIds) && user.assignedTaskIds.includes(task.id)) return true;
+
+  // 4. Assignee name / email match
+  if (task.assignee) {
+    const cleanAssignee = task.assignee.trim().toLowerCase();
+    if (user.name && cleanAssignee === user.name.trim().toLowerCase()) return true;
+    if (user.email && cleanAssignee === user.email.trim().toLowerCase()) return true;
+  }
+
+  return false;
+};
+
+// Resolve effective permissions for a user
+export const getUserPermissions = (user?: User | null): UserPermissions => {
+  if (!user) return DEFAULT_COLLABORATOR_PERMISSIONS;
+  if (isUserAdmin(user)) return DEFAULT_ADM_PERMISSIONS;
+  return user.permissions || DEFAULT_COLLABORATOR_PERMISSIONS;
+};
 
 // Purge all legacy localStorage data so that nothing is read from or saved to client disk
 try {
@@ -23,7 +96,8 @@ try {
 }
 
 // Safe persistent workspace cache key for seamless offline & reload survival
-const WORKSPACE_CACHE_KEY = 'nexus_workspace_cache_v3';
+const WORKSPACE_CACHE_KEY = 'nexus_workspace_cache_v4';
+const MEMBERS_PERSISTENT_KEY = 'nexus_workspace_members_v2';
 
 interface WorkspaceCachePayload {
   tasks: Task[];
@@ -35,6 +109,7 @@ interface WorkspaceCachePayload {
   devops: DevOpsConfig;
   user: User | null;
   apiKey: string | null;
+  members?: WorkspaceMember[];
 }
 
 const loadLocalCache = (): WorkspaceCachePayload | null => {
@@ -59,7 +134,8 @@ const saveLocalCache = () => {
       docs: inMemoryDocs,
       devops: inMemoryDevOps,
       user: inMemoryUser,
-      apiKey: inMemoryApiKey
+      apiKey: inMemoryApiKey,
+      members: inMemoryMembers
     };
     localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(payload));
   } catch (e) {
@@ -135,7 +211,199 @@ let inMemoryDevOps: DevOpsConfig = getSavedDevOpsConfig();
 let inMemoryUser: User | null = initialCache?.user || null;
 let inMemoryApiKey: string | null = initialCache?.apiKey || null;
 
+const RECOVERY_PERSISTENT_KEY = 'nexus_recovery_requests';
+
+const getInitialMembers = (): WorkspaceMember[] => {
+  try {
+    const raw = localStorage.getItem(MEMBERS_PERSISTENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  if (initialCache?.members && Array.isArray(initialCache.members)) {
+    return initialCache.members;
+  }
+  return [
+    {
+      id: 'member_owner_paulo',
+      uid: NEXUS_OWNER_UID,
+      email: 'paulo.mmartinio@gmail.com',
+      name: 'Paulo Martinio (Proprietário)',
+      role: 'ADM',
+      status: 'active',
+      permissions: DEFAULT_ADM_PERMISSIONS,
+      assignedTaskIds: [],
+      workspaceOwnerUid: NEXUS_OWNER_UID,
+      invitedAt: new Date().toISOString()
+    }
+  ];
+};
+
+let inMemoryMembers: WorkspaceMember[] = getInitialMembers();
+let inMemoryRecoveryRequests: AccountRecoveryRequest[] = [];
+
 export const StorageService = {
+  // --- Workspace Members & Roles ---
+  getMembers: (): WorkspaceMember[] => {
+    return inMemoryMembers;
+  },
+
+  setMembersInMemory: (members: WorkspaceMember[]) => {
+    inMemoryMembers = members;
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(members));
+    } catch {}
+    saveLocalCache();
+  },
+
+  saveMember: (member: WorkspaceMember, ownerUid?: string) => {
+    const cleanEmail = member.email.trim().toLowerCase();
+    const existingIdx = inMemoryMembers.findIndex(m => 
+      (m.id && m.id === member.id) || 
+      (m.email && m.email.trim().toLowerCase() === cleanEmail) ||
+      (member.uid && m.uid && m.uid === member.uid)
+    );
+
+    let updatedList: WorkspaceMember[];
+    if (existingIdx >= 0) {
+      updatedList = [...inMemoryMembers];
+      updatedList[existingIdx] = { ...updatedList[existingIdx], ...member };
+    } else {
+      updatedList = [...inMemoryMembers, member];
+    }
+
+    inMemoryMembers = updatedList;
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(updatedList));
+    } catch {}
+    saveLocalCache();
+
+    const targetOwner = ownerUid || NEXUS_OWNER_UID;
+    FirebaseService.saveMember(targetOwner, member).catch(e => console.warn('Firebase saveMember error:', e));
+  },
+
+  deleteMember: (memberId: string, ownerUid?: string) => {
+    const updated = inMemoryMembers.filter(m => m.id !== memberId && m.email !== memberId);
+    inMemoryMembers = updated;
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(updated));
+    } catch {}
+    saveLocalCache();
+
+    const targetOwner = ownerUid || NEXUS_OWNER_UID;
+    FirebaseService.deleteMember(targetOwner, memberId).catch(e => console.warn('Firebase deleteMember error:', e));
+  },
+
+  getMemberByEmail: (email: string): WorkspaceMember | null => {
+    if (!email) return null;
+    const clean = email.trim().toLowerCase();
+    return inMemoryMembers.find(m => m.email.trim().toLowerCase() === clean) || null;
+  },
+
+  getMemberByUid: (uid: string): WorkspaceMember | null => {
+    if (!uid) return null;
+    return inMemoryMembers.find(m => m.uid === uid || m.id === uid) || null;
+  },
+
+  resolveUserMembership: (rawUser: User): User => {
+    if (!rawUser) return rawUser;
+
+    // 1. Root Workspace Owner verified by exact immutable UID
+    if (rawUser.id === NEXUS_OWNER_UID) {
+      return {
+        ...rawUser,
+        role: 'ADM',
+        status: 'active',
+        permissions: DEFAULT_ADM_PERMISSIONS,
+        assignedTaskIds: [],
+        workspaceOwnerUid: NEXUS_OWNER_UID
+      };
+    }
+
+    // 2. Guest demo mode
+    const cleanEmail = (rawUser.email || '').trim().toLowerCase();
+    if (rawUser.id.startsWith('guest-') || cleanEmail.includes('convidado')) {
+      return {
+        ...rawUser,
+        role: 'Colaborador',
+        status: 'active',
+        permissions: DEFAULT_COLLABORATOR_PERMISSIONS,
+        assignedTaskIds: [],
+        workspaceOwnerUid: NEXUS_OWNER_UID
+      };
+    }
+
+    // 3. Match against member registry by UID first, then clean email
+    const member = (rawUser.id ? StorageService.getMemberByUid(rawUser.id) : null) || 
+                   (cleanEmail ? StorageService.getMemberByEmail(cleanEmail) : null);
+
+    if (member) {
+      // Auto-link UID if member was pre-registered by email
+      if (!member.uid && rawUser.id) {
+        member.uid = rawUser.id;
+        StorageService.saveMember(member, NEXUS_OWNER_UID);
+      }
+      return {
+        ...rawUser,
+        role: member.role,
+        status: member.status,
+        permissions: member.permissions || (member.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
+        assignedTaskIds: member.assignedTaskIds || [],
+        workspaceOwnerUid: NEXUS_OWNER_UID
+      };
+    }
+
+    // 4. External registration: strictly defaults to pending access!
+    // Never auto-promoted to ADM, never given isolated workspace.
+    return {
+      ...rawUser,
+      role: 'Colaborador',
+      status: 'pending',
+      permissions: DEFAULT_COLLABORATOR_PERMISSIONS,
+      assignedTaskIds: [],
+      workspaceOwnerUid: NEXUS_OWNER_UID
+    };
+  },
+
+  // --- Account Recovery Requests ---
+  getRecoveryRequests: (): AccountRecoveryRequest[] => {
+    return inMemoryRecoveryRequests;
+  },
+
+  setRecoveryRequestsInMemory: (requests: AccountRecoveryRequest[]) => {
+    inMemoryRecoveryRequests = requests;
+    try {
+      localStorage.setItem(RECOVERY_PERSISTENT_KEY, JSON.stringify(requests));
+    } catch {}
+  },
+
+  saveRecoveryRequest: (req: AccountRecoveryRequest) => {
+    const existingIdx = inMemoryRecoveryRequests.findIndex(r => r.id === req.id || (r.email === req.email && r.status === 'pending'));
+    if (existingIdx >= 0) {
+      inMemoryRecoveryRequests[existingIdx] = req;
+    } else {
+      inMemoryRecoveryRequests.unshift(req);
+    }
+    try {
+      localStorage.setItem(RECOVERY_PERSISTENT_KEY, JSON.stringify(inMemoryRecoveryRequests));
+    } catch {}
+    FirebaseService.saveRecoveryRequest(NEXUS_OWNER_UID, req).catch(() => {});
+  },
+
+  updateRecoveryRequestStatus: (id: string, status: 'resolved' | 'rejected', adminUid?: string) => {
+    const target = inMemoryRecoveryRequests.find(r => r.id === id);
+    if (target) {
+      target.status = status;
+      target.resolvedAt = new Date().toISOString();
+      target.resolvedByUid = adminUid;
+      try {
+        localStorage.setItem(RECOVERY_PERSISTENT_KEY, JSON.stringify(inMemoryRecoveryRequests));
+      } catch {}
+      FirebaseService.saveRecoveryRequest(NEXUS_OWNER_UID, target).catch(() => {});
+    }
+  },
+
   setCurrentUserId: (uid: string | null) => {
     currentUserId = uid;
   },
@@ -387,11 +655,15 @@ export const StorageService = {
     window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: inMemoryDevOps }));
     BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
 
-    // 2. Persist to Firestore cloud database so any device/browser loads it
+    // 2. Persist to Firestore cloud database under both targetUid and NEXUS_OWNER_UID so any device/browser loads it
     const targetUid = userId || currentUserId || undefined;
     try {
-      await FirebaseService.saveDevOpsConfig(inMemoryDevOps, targetUid);
-      await FirebaseService.saveSetting('devops', inMemoryDevOps, targetUid);
+      await FirebaseService.saveDevOpsConfig(inMemoryDevOps, NEXUS_OWNER_UID);
+      await FirebaseService.saveSetting('devops', inMemoryDevOps, NEXUS_OWNER_UID);
+      if (targetUid && targetUid !== NEXUS_OWNER_UID) {
+        await FirebaseService.saveDevOpsConfig(inMemoryDevOps, targetUid);
+        await FirebaseService.saveSetting('devops', inMemoryDevOps, targetUid);
+      }
     } catch (e: any) {
       console.warn('Firebase saveDevOpsConfig notice:', e);
     }
@@ -410,12 +682,14 @@ export const StorageService = {
 
   // Synchronizes Azure DevOps config from Firestore cloud storage across devices
   syncDevOpsFromCloud: async (userId?: string): Promise<DevOpsConfig | null> => {
-    const targetUid = userId || currentUserId || undefined;
-    if (!targetUid) return inMemoryDevOps;
+    const targetUid = userId || currentUserId || NEXUS_OWNER_UID;
 
     try {
-      // 1. Query Firestore cloud storage
-      const remote = await FirebaseService.getDevOpsConfig(targetUid);
+      // 1. Query Firestore cloud storage (try targetUid first, then NEXUS_OWNER_UID canonical)
+      let remote = await FirebaseService.getDevOpsConfig(targetUid);
+      if (!remote || (!remote.organization && !remote.pat && !remote.project)) {
+        remote = await FirebaseService.getDevOpsConfig(NEXUS_OWNER_UID);
+      }
       if (remote && (remote.organization || remote.pat || remote.project)) {
         inMemoryDevOps = remote;
         try {
@@ -514,6 +788,197 @@ export const StorageService = {
     saveLocalCache();
     BackupService.triggerAutoBackup("Alteração nas Sprints");
     FirebaseService.saveSprints(sprints, currentUserId || undefined).catch(e => console.warn('Firebase saveSprints error:', e));
+  },
+
+  // Mass Sprint assignment or removal: async, pre-validated, atomic batch, zero unwanted mutations
+  updateTasksSprint: async (
+    taskIds: string[], 
+    targetSprintId: string | null, 
+    actorUser: User,
+    options?: {
+      allowConcludedSprint?: boolean;
+    }
+  ): Promise<{ updatedTasks: Task[]; updatedSprints: Sprint[] }> => {
+    // 1. Validate actor presence and authentication
+    if (!actorUser || !actorUser.id) {
+      throw new Error('Operação rejeitada: Usuário não autenticado.');
+    }
+
+    // 2. Resolve effective user permissions and status
+    const effectiveUser = StorageService.resolveUserMembership(actorUser);
+    const isOwner = isOwnerUser(actorUser);
+    const isAdmin = isUserAdmin(effectiveUser);
+    const permissions = getUserPermissions(effectiveUser);
+
+    if (!isOwner && effectiveUser.status !== 'active') {
+      throw new Error(`Operação rejeitada: Usuário ${actorUser.email || actorUser.id} não possui acesso ativo na workspace.`);
+    }
+
+    const hasSprintPermission = isAdmin || (Boolean(permissions.canManageSprints) && Boolean(permissions.actions?.edit));
+    if (!hasSprintPermission) {
+      throw new Error('Operação rejeitada: Permissão insuficiente para gerenciar sprints (requer perfil ADM ou permissão delegada canManageSprints com edição).');
+    }
+
+    // 3. Validate taskIds parameter & batch size limits
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      throw new Error('Nenhuma demanda selecionada para alteração de sprint.');
+    }
+    if (taskIds.length > 250) {
+      throw new Error('Limite de lote excedido: máximo de 250 demandas por operação.');
+    }
+
+    // 4. Validate existence of ALL tasks and verify per-record ACL before any write
+    const taskIdSet = new Set(taskIds);
+    const missingIds: string[] = [];
+    const unauthorizedIds: string[] = [];
+    const tasksToProcess: Task[] = [];
+
+    for (const id of taskIds) {
+      const task = inMemoryTasks.find(t => t.id === id);
+      if (!task) {
+        missingIds.push(id);
+      } else {
+        tasksToProcess.push(task);
+        if (!isTaskAuthorized(task, effectiveUser)) {
+          unauthorizedIds.push(task.id);
+        }
+      }
+    }
+
+    if (missingIds.length > 0) {
+      throw new Error(`Operação abortada sem alterações: as seguintes demandas não foram encontradas no workspace: ${missingIds.join(', ')}.`);
+    }
+
+    if (unauthorizedIds.length > 0) {
+      throw new Error(`Operação abortada sem alterações (zero writes): você não possui autorização para editar as demandas: ${unauthorizedIds.join(', ')}.`);
+    }
+
+    // 5. Validate target sprint existence & status
+    let targetSprint: Sprint | null = null;
+    let targetSprintName = 'Sem sprint';
+
+    if (targetSprintId !== null && targetSprintId !== '__none__') {
+      targetSprint = inMemorySprints.find(s => s.id === targetSprintId) || null;
+      if (!targetSprint) {
+        throw new Error(`Operação abortada sem alterações: a sprint de destino "${targetSprintId}" não foi encontrada no workspace.`);
+      }
+      targetSprintName = targetSprint.name;
+
+      if (targetSprint.status === 'Concluída' && !options?.allowConcludedSprint) {
+        throw new Error(`Operação abortada sem alterações: a sprint "${targetSprint.name}" está com status Concluída e exige confirmação explícita de administrador.`);
+      }
+    }
+
+    const finalTargetSprintId = (targetSprintId === '__none__' || targetSprintId === null) ? null : targetSprintId;
+
+    // 6. Check for NO-OP: if ALL selected tasks already have the target sprint as canonical, do nothing!
+    const tasksActuallyChanging = tasksToProcess.filter(task => {
+      const currentCanonical = getTaskSprintId(task, inMemorySprints) || null;
+      return currentCanonical !== finalTargetSprintId;
+    });
+
+    if (tasksActuallyChanging.length === 0) {
+      // 100% complete NO-OP: no cloud writes, no memory mutation, no history pollution!
+      return { updatedTasks: inMemoryTasks, updatedSprints: inMemorySprints };
+    }
+
+    const nowIso = new Date().toISOString();
+    const actorRole = isAdmin ? 'ADM' : 'Colaborador';
+    const auditUserName = `${actorUser.name || actorUser.email || 'Usuário'} (${actorRole})`;
+
+    // 7. Prepare atomic task patches and updated in-memory projections (WITHOUT mutating memory yet!)
+    const taskPatches: Array<{
+      id: string;
+      sprintId: string | null;
+      historyEntry: HistoryEntry;
+    }> = [];
+
+    const updatedTasksProjection = inMemoryTasks.map(task => {
+      if (!taskIdSet.has(task.id)) return task;
+      const currentCanonical = getTaskSprintId(task, inMemorySprints) || null;
+      if (currentCanonical === finalTargetSprintId) return task; // unchanged
+
+      const actionText = finalTargetSprintId 
+        ? `Alterou Sprint para "${targetSprintName}"` 
+        : 'Removido da Sprint';
+
+      const entry: HistoryEntry = {
+        id: 'hist_' + Math.random().toString(36).substring(2, 11),
+        date: nowIso,
+        user: auditUserName,
+        action: actionText
+      };
+
+      taskPatches.push({
+        id: task.id,
+        sprintId: finalTargetSprintId,
+        historyEntry: entry
+      });
+
+      // Patch sprintId and append history ONLY. Preserve all other fields!
+      const updatedTask: Task = {
+        ...task,
+        sprintId: finalTargetSprintId || undefined,
+        history: [...(task.history || []), entry]
+      };
+      if (finalTargetSprintId === null) {
+        updatedTask.sprintId = null as any;
+      }
+
+      return updatedTask;
+    });
+
+    // 8. Prepare Sprints projection
+    // Preserves historical records in previous sprints; adds or retains records in destination sprint
+    let updatedSprintsProjection = inMemorySprints;
+    let targetSprintPatch: { id: string; tasks: SprintTask[] } | null = null;
+
+    if (finalTargetSprintId && targetSprint) {
+      const existingTaskMap = new Map((targetSprint.tasks || []).map(st => [st.taskId, st]));
+      const newSprintTasks: SprintTask[] = [...(targetSprint.tasks || [])];
+
+      tasksActuallyChanging.forEach(task => {
+        if (!existingTaskMap.has(task.id)) {
+          const planned = task.estimatedTime ? parseFloat(task.estimatedTime) || 0 : 0;
+          const actual = task.actualTime ? parseFloat(task.actualTime) || 0 : 0;
+          const newEntry: SprintTask = {
+            taskId: task.id,
+            plannedHours: planned,
+            actualHours: actual,
+            status: task.status || 'Novo'
+          };
+          newSprintTasks.push(newEntry);
+          existingTaskMap.set(task.id, newEntry);
+        }
+      });
+
+      targetSprintPatch = {
+        id: targetSprint.id,
+        tasks: newSprintTasks
+      };
+
+      updatedSprintsProjection = inMemorySprints.map(s => {
+        if (s.id === finalTargetSprintId) {
+          return {
+            ...s,
+            tasks: newSprintTasks
+          };
+        }
+        return s;
+      });
+    }
+
+    // 9. Commit atomic batch to Firestore Cloud Storage FIRST
+    const targetOwnerUid = effectiveUser.workspaceOwnerUid || NEXUS_OWNER_UID;
+    await FirebaseService.updateTasksSprintBatch(targetOwnerUid, taskPatches, targetSprintPatch);
+
+    // 10. Only upon confirmed cloud commit: commit to in-memory state and local cache!
+    inMemoryTasks = updatedTasksProjection;
+    inMemorySprints = updatedSprintsProjection;
+    saveLocalCache();
+    BackupService.triggerAutoBackup(`Alteração em Massa de Sprints (${taskPatches.length} demandas)`);
+
+    return { updatedTasks: inMemoryTasks, updatedSprints: inMemorySprints };
   },
 
   // --- Backup & Restore (Full Payload from Database memory) ---

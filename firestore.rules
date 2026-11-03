@@ -6,46 +6,133 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // User profile: only the authenticated user can modify their own record,
-    // but any authenticated team member can view basic user info
+    // Helper to check if requester is the workspace owner (Canonical root Owner UID: pM6ApHmKYfW2nMFRmUFGCtfjCEx1)
+    function isOwner(userId) {
+      return isAuthenticated() && (
+        request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1' ||
+        request.auth.uid == userId
+      );
+    }
+
+    // Helper to check if authenticated user is registered and active as a member
+    function isActiveMember(ownerId) {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)).data.status == 'active'
+      );
+    }
+
+    // User profile document: user can read/write their own minimal profile
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == userId || !exists(/databases/$(database)/documents/users/$(userId)));
+      allow write: if isOwner(userId) || !exists(/databases/$(database)/documents/users/$(userId));
 
-      // User-specific isolated workspace (tasks, devs, robots, sprints, settings, backups)
+      // Workspace Members Registry (Managed strictly by ADM/Owner)
+      match /members/{memberId} {
+        // Owner has full control; member can read their own record
+        allow read: if isOwner(userId) || (isAuthenticated() && request.auth.uid == memberId);
+        allow write: if isOwner(userId);
+      }
+
+      // Tasks Collection under Owner Workspace (Fine-grained ABAC)
+      match /tasks/{taskId} {
+        // Owner can read everything.
+        // Active members can only read if explicitly assigned or in allowedUids
+        allow read: if isOwner(userId) || (
+          isActiveMember(userId) && (
+            resource.data.assignedUid == request.auth.uid ||
+            (resource.data.allowedUids != null && request.auth.uid in resource.data.allowedUids) ||
+            (request.auth.token.email != null && resource.data.assignee == request.auth.token.email)
+          )
+        );
+
+        // Owner can create, edit, and delete any task.
+        // Active members can only create if they set themselves as assignee/creator,
+        // and can only update their assigned task. Members can NEVER delete.
+        allow create: if isOwner(userId) || (
+          isActiveMember(userId) &&
+          request.resource.data.assignedUid == request.auth.uid
+        );
+
+        allow update: if isOwner(userId) || (
+          isActiveMember(userId) && (
+            resource.data.assignedUid == request.auth.uid ||
+            (resource.data.allowedUids != null && request.auth.uid in resource.data.allowedUids)
+          ) &&
+          // Prevent tampering with ownership, assignee, or ACL lists
+          request.resource.data.assignedUid == resource.data.assignedUid &&
+          request.resource.data.allowedUids == resource.data.allowedUids
+        );
+
+        allow delete: if isOwner(userId);
+      }
+
+      // Developers team, Robots inventory, and Sprints
+      match /devs/{devId} {
+        allow read: if isOwner(userId) || isActiveMember(userId);
+        allow write: if isOwner(userId);
+      }
+
+      match /robots/{robotId} {
+        allow read: if isOwner(userId) || isActiveMember(userId);
+        allow write: if isOwner(userId);
+      }
+
+      match /sprints/{sprintId} {
+        allow read: if isOwner(userId) || isActiveMember(userId);
+        allow write: if isOwner(userId) || (
+          isActiveMember(userId) && (
+            get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.role == 'ADM' ||
+            get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.permissions.canManageSprints == true
+          )
+        );
+      }
+
+      // System Settings (Workflow, documents)
+      match /settings/{settingId} {
+        // Highly sensitive settings (DevOps PAT, backups) can ONLY be read/written by Owner
+        allow read, write: if isOwner(userId);
+      }
+
+      // Automated and manual backups
+      match /backups/{backupId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Fallback for any other subcollections
       match /{allSubcollections=**} {
-        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+        allow read, write: if isOwner(userId);
       }
     }
 
-    // Tasks, automations, improvements, incidents
+    // Top-level legacy collections (Restricted strictly to Owner UID for migration/fallback)
     match /tasks/{taskId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
-
-    // Developers team
     match /devs/{devId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
-
-    // RPA Robots
     match /robots/{robotId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
-
-    // Sprints
     match /sprints/{sprintId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
-
-    // System and workflow settings
     match /settings/{settingId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+    }
+    match /backups/{backupId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
 
-    // Automated and manual backups
-    match /backups/{backupId} {
-      allow read, write: if isAuthenticated();
+    // Deny all other unmatched root document paths by default
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
