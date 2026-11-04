@@ -86,7 +86,8 @@ export const FirebaseService = {
         id: fbUser.uid,
         name: fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuário',
         email: fbUser.email || '',
-        avatar: fbUser.photoURL || undefined
+        avatar: fbUser.photoURL || undefined,
+        emailVerified: fbUser.emailVerified
       };
       
       // Save/update profile in Firestore
@@ -132,7 +133,8 @@ export const FirebaseService = {
       id: fbUser.uid,
       name,
       email: fbUser.email || email,
-      avatar
+      avatar,
+      emailVerified: fbUser.emailVerified
     };
   },
 
@@ -152,7 +154,8 @@ export const FirebaseService = {
       id: fbUser.uid,
       name,
       email,
-      avatar: undefined
+      avatar: undefined,
+      emailVerified: fbUser.emailVerified
     };
 
     // Save to Firestore
@@ -176,7 +179,8 @@ export const FirebaseService = {
     return {
       id: result.user.uid,
       name: 'Visitante',
-      email: 'convidado@nexus.app'
+      email: 'convidado@nexus.app',
+      emailVerified: false
     };
   },
 
@@ -204,7 +208,8 @@ export const FirebaseService = {
           id: fbUser.uid,
           name,
           email: fbUser.email || '',
-          avatar
+          avatar,
+          emailVerified: fbUser.emailVerified
         });
       } else {
         callback(null);

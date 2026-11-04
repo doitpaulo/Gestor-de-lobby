@@ -319,6 +319,8 @@ export interface User {
   permissions?: UserPermissions;
   assignedTaskIds?: string[];
   workspaceOwnerUid?: string;
+  emailVerified?: boolean;
+  pendingReason?: 'UNAUTHORIZED' | 'UID_UNLINKED' | 'INACTIVE';
 }
 
 export interface DevOpsConfig {

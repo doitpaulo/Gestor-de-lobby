@@ -53,6 +53,10 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
   const [editingMember, setEditingMember] = useState<WorkspaceMember | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<{ type: 'success' | 'info' | 'error'; message: string } | null>(null);
 
+  // Link UID Modal state
+  const [linkUidModalMember, setLinkUidModalMember] = useState<WorkspaceMember | null>(null);
+  const [linkUidInput, setLinkUidInput] = useState('');
+
   // Form states inside modal
   const [formEmail, setFormEmail] = useState('');
   const [formName, setFormName] = useState('');
@@ -73,6 +77,30 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
     const list = StorageService.getMembers();
     setMembers(list);
     if (onMembersUpdated) onMembersUpdated();
+  };
+
+  const handleOpenLinkUid = (member: WorkspaceMember) => {
+    setLinkUidModalMember(member);
+    setLinkUidInput(member.uid || '');
+  };
+
+  const handleConfirmLinkUid = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkUidModalMember) return;
+    const cleanUid = linkUidInput.trim();
+    if (!cleanUid) {
+      triggerToast('error', 'Por favor, informe o UID do usuário.');
+      return;
+    }
+    const updated = StorageService.linkMemberUid(linkUidModalMember.id, cleanUid, true);
+    if (updated) {
+      reloadMembers();
+      setLinkUidModalMember(null);
+      setLinkUidInput('');
+      triggerToast('success', `UID vinculado com sucesso! Colaborador ${updated.name} está ativado.`);
+    } else {
+      triggerToast('error', 'Falha ao vincular UID.');
+    }
   };
 
   const openCreateModal = () => {
@@ -272,10 +300,15 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
   };
 
   const handleCopyInvite = (member: WorkspaceMember) => {
-    const inviteText = `Olá ${member.name}! Você recebeu acesso à workspace Nexus.\nSeu email cadastrado: ${member.email}\nPerfil: ${member.role}\nAcesse em: ${window.location.origin}${window.location.pathname}`;
+    // PRD domain priority or current origin if on custom domain
+    const appBaseUrl = window.location.hostname === 'localhost' || window.location.hostname.includes('webcontainer')
+      ? 'https://gestor-de-lobby.vercel.app'
+      : window.location.origin;
+
+    const inviteText = `Olá ${member.name}!\n\nSeu acesso à workspace Nexus foi pré-autorizado pelo Administrador.\n\n• E-mail autorizado: ${member.email}\n• Perfil: ${member.role}\n\nINSTRUÇÕES DE PRIMEIRO ACESSO:\n1. Acesse o sistema em: ${appBaseUrl}\n2. Na tela de autenticação, clique na aba "Primeiro Acesso / Ativar Conta"\n3. Preencha seu nome, e-mail (${member.email}) e cadastre uma senha pessoal do Nexus (mínimo 6 caracteres). Não utilize sua senha corporativa do Windows/Outlook.\n4. Após concluir o cadastro, seu perfil e permissões serão validados e ativados pelo Administrador.`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(inviteText);
-      triggerToast('success', `Convite e dados de acesso de ${member.name} copiados para a área de transferência!`);
+      triggerToast('success', `Instruções de acesso e convite de ${member.name} copiadas!`);
     }
   };
 
@@ -350,7 +383,7 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
           className="h-10 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 transition-all active:scale-95 cursor-pointer shrink-0"
         >
           <IconPlus className="w-4 h-4 stroke-[2.5]" />
-          <span>Cadastrar / Autorizar Usuário</span>
+          <span>+ Autorizar Acesso</span>
         </button>
       </div>
 
@@ -517,14 +550,25 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                             {member.name.substring(0, 2).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-bold text-white text-xs truncate flex items-center gap-1.5">
-                              <span>{member.name}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="font-bold text-white text-xs truncate">{member.name}</p>
                               {isOwner && (
                                 <span className="text-[9px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-1.5 py-0.2 rounded font-mono font-normal">
                                   Owner
                                 </span>
                               )}
-                            </p>
+                              {!isOwner && (
+                                member.uid ? (
+                                  <span className="text-[9px] bg-slate-800 text-slate-400 font-mono px-1.5 py-0.2 rounded border border-slate-700/60" title={`UID: ${member.uid}`}>
+                                    UID OK
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded font-mono">
+                                    UID pendente
+                                  </span>
+                                )
+                              )}
+                            </div>
                             <p className="text-[11px] text-slate-400 font-mono truncate">{member.email}</p>
                           </div>
                         </div>
@@ -612,6 +656,22 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                       {/* Manage Buttons */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
+                          {!isOwner && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenLinkUid(member)}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1 ${
+                                !member.uid 
+                                  ? 'bg-amber-950/50 hover:bg-amber-900 border-amber-600/50 text-amber-300' 
+                                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                              }`}
+                              title={member.uid ? `UID: ${member.uid} (Clique para alterar)` : 'Vincular UID informado pelo colaborador'}
+                            >
+                              <IconShieldCheck className="w-3 h-3" />
+                              <span>{member.uid ? 'UID' : 'Vincular UID'}</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => openEditModal(member)}
@@ -783,7 +843,7 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-white">
-                    {editingMember ? `Editar Permissões: ${editingMember.name}` : 'Cadastrar / Autorizar Novo Usuário'}
+                    {editingMember ? `Editar Permissões: ${editingMember.name}` : 'Autorizar Acesso de Colaborador'}
                   </h3>
                   <p className="text-xs text-slate-400">
                     Defina o papel, as telas permitidas e as demandas acessíveis pelo colaborador
@@ -801,6 +861,19 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
 
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveMember} className="p-4 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
+              {/* Security notice regarding pre-authorization vs Firebase Auth */}
+              <div className="bg-amber-950/40 border border-amber-500/40 p-3.5 rounded-2xl flex items-start gap-3 text-xs text-amber-200">
+                <IconShieldCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-300">
+                    Importante: Esta ação apenas pré-autoriza o acesso e define as permissões da workspace.
+                  </p>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    Ela <strong>não cria senha nem cria conta no Firebase Auth</strong>. O colaborador deve acessar a tela inicial do Nexus e realizar o seu <strong>"Primeiro Acesso / Ativar Conta"</strong> utilizando este mesmo e-mail para cadastrar sua senha pessoal.
+                  </p>
+                </div>
+              </div>
+
               {/* Basic Info: Email & Name */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
@@ -1107,7 +1180,69 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-bold shadow-md shadow-indigo-950/50 transition-all cursor-pointer"
                 >
-                  {editingMember ? 'Salvar Permissões' : 'Confirmar Cadastro'}
+                  {editingMember ? 'Salvar Permissões' : 'Confirmar Autorização de Acesso'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Vincular UID */}
+      {linkUidModalMember && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-3xl max-w-md w-full p-6 shadow-2xl text-left space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
+                  <IconShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Vincular UID de Autenticação</h3>
+                  <p className="text-xs text-slate-400 truncate">{linkUidModalMember.name} ({linkUidModalMember.email})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLinkUidModalMember(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <IconX className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmLinkUid} className="space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Insira o <strong>UID do Firebase</strong> do colaborador (obtido via canal corporativo ou copiado pelo próprio usuário da tela de acesso pendente). A vinculação ativará imediatamente o acesso às demandas e módulos autorizados.
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                  UID do Firebase <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={linkUidInput}
+                  onChange={(e) => setLinkUidInput(e.target.value)}
+                  placeholder="ex: pM6ApHmKYfW2nMFRmUFGCtfjCEx1"
+                  required
+                  className="w-full bg-dark-900 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-indigo-300 placeholder-slate-500 outline-none focus:border-indigo-500 font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setLinkUidModalMember(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white text-xs font-bold shadow-md shadow-indigo-950/50 transition-all cursor-pointer"
+                >
+                  Vincular e Ativar
                 </button>
               </div>
             </form>

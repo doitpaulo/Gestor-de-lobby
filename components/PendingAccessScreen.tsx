@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { IconShieldCheck, IconClock, IconUsers } from './Icons';
+import { IconShieldCheck, IconClock, IconUsers, IconCheck } from './Icons';
 
 interface PendingAccessScreenProps {
   user: User;
@@ -37,6 +37,7 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
   };
 
   const isInactive = user.status === 'inactive';
+  const isUidUnlinked = user.pendingReason === 'UID_UNLINKED';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-dark-900 p-4 relative overflow-hidden">
@@ -47,47 +48,78 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
 
       <div className="w-full max-w-lg bg-dark-850/95 backdrop-blur-2xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/60 relative z-10 text-center animate-fade-in">
         {/* Status Icon */}
-        <div className="w-20 h-20 mx-auto mb-5 rounded-2xl flex items-center justify-center border shadow-xl transition-transform hover:scale-105 duration-200"
+        <div 
+          className="w-20 h-20 mx-auto mb-5 rounded-2xl flex items-center justify-center border shadow-xl transition-transform hover:scale-105 duration-200"
           style={{
-            backgroundColor: isInactive ? 'rgba(244, 63, 94, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-            borderColor: isInactive ? 'rgba(244, 63, 94, 0.35)' : 'rgba(245, 158, 11, 0.35)',
-            color: isInactive ? '#fb7185' : '#fbbf24'
+            backgroundColor: isInactive ? 'rgba(244, 63, 94, 0.12)' : isUidUnlinked ? 'rgba(99, 102, 241, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+            borderColor: isInactive ? 'rgba(244, 63, 94, 0.35)' : isUidUnlinked ? 'rgba(99, 102, 241, 0.35)' : 'rgba(245, 158, 11, 0.35)',
+            color: isInactive ? '#fb7185' : isUidUnlinked ? '#818cf8' : '#fbbf24'
           }}
         >
           {isInactive ? (
             <IconShieldCheck className="w-10 h-10 text-rose-400" />
+          ) : isUidUnlinked ? (
+            <IconShieldCheck className="w-10 h-10 text-indigo-400 animate-pulse" />
           ) : (
             <IconClock className="w-10 h-10 text-amber-400 animate-pulse" />
           )}
         </div>
 
         {/* Title & Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider mb-3 border"
+        <div 
+          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider mb-3 border"
           style={{
-            backgroundColor: isInactive ? 'rgba(244, 63, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-            borderColor: isInactive ? 'rgba(244, 63, 94, 0.4)' : 'rgba(245, 158, 11, 0.4)',
-            color: isInactive ? '#fecdd3' : '#fef3c7'
+            backgroundColor: isInactive ? 'rgba(244, 63, 94, 0.15)' : isUidUnlinked ? 'rgba(99, 102, 241, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+            borderColor: isInactive ? 'rgba(244, 63, 94, 0.4)' : isUidUnlinked ? 'rgba(99, 102, 241, 0.4)' : 'rgba(245, 158, 11, 0.4)',
+            color: isInactive ? '#fecdd3' : isUidUnlinked ? '#c7d2fe' : '#fef3c7'
           }}
         >
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: isInactive ? '#f43f5e' : '#f59e0b' }} />
-          <span>{isInactive ? 'Acesso Desativado' : 'Acesso Pendente de Liberação'}</span>
+          <span 
+            className="w-2 h-2 rounded-full" 
+            style={{ backgroundColor: isInactive ? '#f43f5e' : isUidUnlinked ? '#6366f1' : '#f59e0b' }} 
+          />
+          <span>
+            {isInactive 
+              ? 'Acesso Desativado' 
+              : isUidUnlinked 
+              ? 'E-mail Autorizado • Confirmação de UID Pendente' 
+              : 'Acesso Pendente de Pré-Autorização'}
+          </span>
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2">
-          {isInactive ? 'Conta Temporariamente Inativa' : 'Aguardando Aprovação do Administrador'}
+          {isInactive 
+            ? 'Conta Temporariamente Inativa' 
+            : isUidUnlinked 
+            ? 'Primeiro Acesso Concluído: Aguardando Vinculação' 
+            : 'Aguardando Pré-Autorização do Administrador'}
         </h2>
 
-        <p className="text-sm text-slate-300 leading-relaxed mb-6">
+        <div className="text-sm text-slate-300 leading-relaxed mb-6 space-y-2">
           {isInactive ? (
-            <>
+            <p>
               Sua conta foi identificada no sistema, porém o acesso está configurado como <strong className="text-rose-400">inativo</strong>. Entre em contato com o administrador do Nexus para reativação do seu perfil.
+            </p>
+          ) : isUidUnlinked ? (
+            <>
+              <p>
+                Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Sua conta foi criada e seu e-mail já consta como <span className="text-emerald-400 font-semibold">pré-autorizado</span> na workspace.
+              </p>
+              <p className="text-xs text-indigo-300/90 bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl">
+                🔒 Por segurança e conformidade, informe o seu identificador (UID) abaixo ao Administrador para que ele confirme sua identidade e vincule seu acesso no painel de Administração.
+              </p>
             </>
           ) : (
             <>
-              Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Sua conta foi autenticada com sucesso, mas o acesso ao portfólio corporativo de demandas requer liberação individual e definição de permissões pelo administrador do workspace.
+              <p>
+                Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Sua conta foi criada no Firebase, mas este e-mail ainda <span className="text-amber-400 font-semibold">não foi pré-autorizado</span> pelo Administrador do Nexus.
+              </p>
+              <p className="text-xs text-slate-400">
+                Cadastros avulsos permanecem pendentes até que o ADM cadastre seu e-mail e defina suas permissões no painel de Administração.
+              </p>
             </>
           )}
-        </p>
+        </div>
 
         {/* User Card info box */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 mb-6 text-left space-y-2">
@@ -96,9 +128,16 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
             <button
               type="button"
               onClick={handleCopyId}
-              className="text-indigo-400 hover:text-indigo-300 text-[11px] font-semibold underline cursor-pointer"
+              className="text-indigo-400 hover:text-indigo-300 text-[11px] font-semibold underline cursor-pointer flex items-center gap-1"
             >
-              {copied ? '✔ Copiado!' : 'Copiar Identificação'}
+              {copied ? (
+                <>
+                  <IconCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Copiado!</span>
+                </>
+              ) : (
+                'Copiar E-mail e UID'
+              )}
             </button>
           </div>
           <div className="flex items-center gap-3 pt-1">
@@ -108,7 +147,12 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-white truncate">{user.name || 'Sem nome'}</p>
               <p className="text-[11px] text-slate-400 font-mono truncate">{user.email || 'Sem email'}</p>
-              <p className="text-[10px] text-slate-500 font-mono truncate mt-0.5">UID: {user.id}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] text-slate-500 font-mono">UID:</span>
+                <span className="text-[11px] text-indigo-300 font-mono font-semibold truncate bg-indigo-950/60 px-1.5 py-0.2 rounded border border-indigo-500/30">
+                  {user.id}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -151,14 +195,14 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
               onClick={onRequestHelp}
               className="text-xs text-indigo-400 hover:text-indigo-300 font-medium underline transition-colors cursor-pointer"
             >
-              Precisa de ajuda com seu acesso? Solicitar ajuda ao administrador
+              Precisa de liberação rápida? Solicitar ajuda ao administrador
             </button>
           </div>
         )}
 
         {/* Footer note */}
         <p className="text-[11px] text-slate-500 mt-4 italic">
-          * Assim que o administrador cadastrar ou ativar suas permissões no painel de Gestão de Usuários, seu acesso será liberado instantaneamente.
+          * Assim que o administrador vincular ou autorizar seu perfil no painel de Gestão de Usuários, seu acesso será liberado instantaneamente.
         </p>
       </div>
     </div>

@@ -374,27 +374,52 @@ export const StorageService = {
       };
     }
 
-    // 3. Match against member registry by UID first, then clean email
-    const member = (rawUser.id ? StorageService.getMemberByUid(rawUser.id) : null) || 
-                   (cleanEmail ? StorageService.getMemberByEmail(cleanEmail) : null);
-
-    if (member) {
-      // Auto-link UID if member was pre-registered by email
-      if (!member.uid && rawUser.id) {
-        member.uid = rawUser.id;
-        StorageService.saveMember(member, NEXUS_OWNER_UID);
-      }
+    // 3. Match against member registry by UID first (most secure & definitive)
+    const memberByUid = rawUser.id ? StorageService.getMemberByUid(rawUser.id) : null;
+    if (memberByUid) {
       return {
         ...rawUser,
-        role: member.role,
-        status: member.status,
-        permissions: member.permissions || (member.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
-        assignedTaskIds: member.assignedTaskIds || [],
+        role: memberByUid.role,
+        status: memberByUid.status,
+        permissions: memberByUid.permissions || (memberByUid.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
+        assignedTaskIds: memberByUid.assignedTaskIds || [],
         workspaceOwnerUid: NEXUS_OWNER_UID
       };
     }
 
-    // 4. External registration: strictly defaults to pending access!
+    // 4. If UID not yet linked, match against pre-authorized member by clean email
+    const memberByEmail = cleanEmail ? StorageService.getMemberByEmail(cleanEmail) : null;
+    if (memberByEmail) {
+      // Security Policy: Only auto-link UID if the email is cryptographically verified (e.g., Google OAuth).
+      // Unverified email/password registrations remain pending for manual identity confirmation by ADM.
+      const isEmailVerified = Boolean(rawUser.emailVerified);
+
+      if (isEmailVerified && !memberByEmail.uid && rawUser.id) {
+        memberByEmail.uid = rawUser.id;
+        StorageService.saveMember(memberByEmail, NEXUS_OWNER_UID);
+        return {
+          ...rawUser,
+          role: memberByEmail.role,
+          status: memberByEmail.status,
+          permissions: memberByEmail.permissions || (memberByEmail.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
+          assignedTaskIds: memberByEmail.assignedTaskIds || [],
+          workspaceOwnerUid: NEXUS_OWNER_UID
+        };
+      }
+
+      // If email is not yet verified or UID binding awaits ADM confirmation:
+      return {
+        ...rawUser,
+        role: memberByEmail.role,
+        status: 'pending',
+        permissions: memberByEmail.permissions || DEFAULT_COLLABORATOR_PERMISSIONS,
+        assignedTaskIds: memberByEmail.assignedTaskIds || [],
+        workspaceOwnerUid: NEXUS_OWNER_UID,
+        pendingReason: 'UID_UNLINKED'
+      };
+    }
+
+    // 5. External registration / cadastro avulso: strictly defaults to pending access!
     // Never auto-promoted to ADM, never given isolated workspace.
     return {
       ...rawUser,
@@ -402,8 +427,41 @@ export const StorageService = {
       status: 'pending',
       permissions: DEFAULT_COLLABORATOR_PERMISSIONS,
       assignedTaskIds: [],
-      workspaceOwnerUid: NEXUS_OWNER_UID
+      workspaceOwnerUid: NEXUS_OWNER_UID,
+      pendingReason: 'UNAUTHORIZED'
     };
+  },
+
+  // Manual UID binding by ADM after confirming collaborator identity
+  linkMemberUid: (memberIdOrEmail: string, uid: string, activate: boolean = true): WorkspaceMember | null => {
+    const clean = memberIdOrEmail.trim().toLowerCase();
+    const cleanUid = uid.trim();
+    if (!cleanUid) return null;
+
+    let targetUpdated: WorkspaceMember | null = null;
+    inMemoryMembers = inMemoryMembers.map(m => {
+      if (m.id === memberIdOrEmail || m.email.trim().toLowerCase() === clean) {
+        const updated: WorkspaceMember = {
+          ...m,
+          uid: cleanUid,
+          status: activate ? 'active' : m.status,
+          activatedAt: activate ? (m.activatedAt || new Date().toISOString()) : m.activatedAt
+        };
+        targetUpdated = updated;
+        return updated;
+      }
+      return m;
+    });
+
+    if (targetUpdated) {
+      try {
+        localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(inMemoryMembers));
+      } catch {}
+      saveLocalCache();
+      FirebaseService.saveMember(NEXUS_OWNER_UID, targetUpdated).catch(e => console.warn('Firebase saveMember notice:', e));
+    }
+
+    return targetUpdated;
   },
 
   // --- Account Recovery Requests ---
