@@ -205,8 +205,48 @@ if (inMemoryTasks.length > 0 && inMemoryDeletedTaskIds.size > 0) {
 
 let inMemoryRobots: Robot[] = initialCache?.robots || [];
 let inMemorySprints: Sprint[] = initialCache?.sprints || [];
-let inMemoryWorkflow: WorkflowPhase[] = initialCache?.workflow || [];
-let inMemoryDocs: DocumentConfig[] = initialCache?.docs || [];
+
+const WORKFLOW_PERSISTENT_KEY = 'nexus_workflow_phases_saved_v2';
+const DOCUMENTS_PERSISTENT_KEY = 'nexus_documents_config_saved_v2';
+
+const getSavedWorkflowConfig = (): WorkflowPhase[] => {
+  try {
+    const raw = localStorage.getItem(WORKFLOW_PERSISTENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading persistent workflow config:', e);
+  }
+  if (initialCache?.workflow && Array.isArray(initialCache.workflow) && initialCache.workflow.length > 0) {
+    return initialCache.workflow;
+  }
+  return [];
+};
+
+const getSavedDocumentsConfig = (): DocumentConfig[] => {
+  try {
+    const raw = localStorage.getItem(DOCUMENTS_PERSISTENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading persistent documents config:', e);
+  }
+  if (initialCache?.docs && Array.isArray(initialCache.docs) && initialCache.docs.length > 0) {
+    return initialCache.docs;
+  }
+  return [];
+};
+
+let inMemoryWorkflow: WorkflowPhase[] = getSavedWorkflowConfig();
+let inMemoryDocs: DocumentConfig[] = getSavedDocumentsConfig();
 let inMemoryDevOps: DevOpsConfig = getSavedDevOpsConfig();
 let inMemoryUser: User | null = initialCache?.user || null;
 let inMemoryApiKey: string | null = initialCache?.apiKey || null;
@@ -434,8 +474,8 @@ export const StorageService = {
     inMemoryDevs = [];
     inMemoryRobots = [];
     inMemorySprints = [];
-    inMemoryWorkflow = [];
-    inMemoryDocs = [];
+    // Do NOT wipe inMemoryWorkflow - workflow phases must survive logins, logouts, and reloads!
+    // Do NOT wipe inMemoryDocs - document config must survive logins, logouts, and reloads!
     // Do NOT wipe inMemoryDevOps - it must survive logins, logouts, and reloads!
     // Do NOT wipe inMemoryDeletedTaskIds - deleted tasks must stay deleted across logins!
     inMemoryUser = null;
@@ -575,36 +615,302 @@ export const StorageService = {
 
   // --- Workflow Config ---
   getWorkflowConfig: (defaultConfig: WorkflowPhase[]): WorkflowPhase[] => {
+    if (inMemoryWorkflow && inMemoryWorkflow.length > 0) return inMemoryWorkflow;
+    const saved = getSavedWorkflowConfig();
+    if (saved && saved.length > 0) {
+      inMemoryWorkflow = saved;
+      return saved;
+    }
     return inMemoryWorkflow.length > 0 ? inMemoryWorkflow : defaultConfig;
   },
 
   setWorkflowConfigInMemory: (config: WorkflowPhase[]) => {
+    if (!config || !Array.isArray(config) || config.length === 0) return;
     inMemoryWorkflow = config;
+    try {
+      localStorage.setItem(WORKFLOW_PERSISTENT_KEY, JSON.stringify(config));
+    } catch {}
     saveLocalCache();
   },
 
-  saveWorkflowConfig: (config: WorkflowPhase[]) => {
+  saveWorkflowConfig: async (config: WorkflowPhase[], userId?: string): Promise<boolean> => {
+    if (!config || !Array.isArray(config) || config.length === 0) return false;
     inMemoryWorkflow = config;
+    const nowIso = new Date().toISOString();
+
+    // 1. Save locally in dedicated key and metadata
+    try {
+      localStorage.setItem(WORKFLOW_PERSISTENT_KEY, JSON.stringify(config));
+      localStorage.setItem('nexus_workflow_meta_v2', JSON.stringify({
+        updatedAt: nowIso,
+        count: config.length,
+        isCustom: true
+      }));
+    } catch (e) {
+      console.warn('Error saving persistent workflow config to localStorage:', e);
+    }
     saveLocalCache();
+    window.dispatchEvent(new CustomEvent('nexus-workflow-config-updated', { detail: config }));
     BackupService.triggerAutoBackup("Alteração nas Fases de Projetos / Workflow");
-    FirebaseService.saveSetting('workflow', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting workflow error:', e));
+
+    // 2. Persist to backend server disk for node/server resilience across restarts
+    try {
+      await fetch('/api/workflow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workflow: config, updatedAt: nowIso })
+      });
+    } catch (e) {
+      console.warn('Notice saving workflow to server disk:', e);
+    }
+
+    // 3. Persist to Firestore under both targetUid and NEXUS_OWNER_UID so any device/browser loads it
+    const targetUid = userId || currentUserId || undefined;
+    try {
+      await FirebaseService.saveSetting('workflow', config, NEXUS_OWNER_UID);
+      if (targetUid && targetUid !== NEXUS_OWNER_UID) {
+        await FirebaseService.saveSetting('workflow', config, targetUid);
+      }
+    } catch (e) {
+      console.warn('Firebase saveSetting workflow notice:', e);
+    }
+
+    return true;
+  },
+
+  // Smart 3-way synchronization (Local Storage + Node Disk + Cloud Firestore)
+  // Guarantees user created/edited phases are NEVER overwritten by older/empty defaults!
+  syncWorkflowFromServerAndCloud: async (workspaceUid?: string): Promise<WorkflowPhase[] | null> => {
+    let localPhases = StorageService.getWorkflowConfig([]);
+    let localUpdatedAt = 0;
+    try {
+      const metaRaw = localStorage.getItem('nexus_workflow_meta_v2');
+      if (metaRaw) {
+        const parsed = JSON.parse(metaRaw);
+        if (parsed?.updatedAt) localUpdatedAt = new Date(parsed.updatedAt).getTime();
+      }
+    } catch {}
+
+    // A. Check Node Server store
+    try {
+      const res = await fetch('/api/workflow');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.workflow) && data.workflow.length > 0) {
+          const serverUpdatedAt = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+          if (serverUpdatedAt > localUpdatedAt || localPhases.length === 0) {
+            localPhases = data.workflow;
+            inMemoryWorkflow = data.workflow;
+            localUpdatedAt = serverUpdatedAt;
+            try {
+              localStorage.setItem(WORKFLOW_PERSISTENT_KEY, JSON.stringify(data.workflow));
+              localStorage.setItem('nexus_workflow_meta_v2', JSON.stringify({
+                updatedAt: data.updatedAt || new Date().toISOString(),
+                count: data.workflow.length,
+                isCustom: true
+              }));
+            } catch {}
+            saveLocalCache();
+            window.dispatchEvent(new CustomEvent('nexus-workflow-config-updated', { detail: data.workflow }));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Notice syncing workflow from server:', e);
+    }
+
+    // B. Check Cloud Firestore with timestamp metadata
+    const targetUid = workspaceUid || currentUserId || NEXUS_OWNER_UID;
+    try {
+      const remoteMeta = await FirebaseService.getSettingWithMeta<WorkflowPhase[]>('workflow', targetUid);
+      if (remoteMeta && Array.isArray(remoteMeta.value) && remoteMeta.value.length > 0) {
+        const remoteUpdatedAt = remoteMeta.updatedAt ? new Date(remoteMeta.updatedAt).getTime() : 0;
+        if (remoteUpdatedAt > localUpdatedAt) {
+          // Cloud is strictly newer
+          localPhases = remoteMeta.value;
+          inMemoryWorkflow = remoteMeta.value;
+          try {
+            localStorage.setItem(WORKFLOW_PERSISTENT_KEY, JSON.stringify(remoteMeta.value));
+            localStorage.setItem('nexus_workflow_meta_v2', JSON.stringify({
+              updatedAt: remoteMeta.updatedAt || new Date().toISOString(),
+              count: remoteMeta.value.length,
+              isCustom: true
+            }));
+          } catch {}
+          saveLocalCache();
+          window.dispatchEvent(new CustomEvent('nexus-workflow-config-updated', { detail: remoteMeta.value }));
+          // Also sync to server disk
+          fetch('/api/workflow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow: remoteMeta.value, updatedAt: remoteMeta.updatedAt })
+          }).catch(() => {});
+        } else if (localUpdatedAt > remoteUpdatedAt && localPhases.length > 0) {
+          // Local is newer -> push local to Firestore to heal cloud
+          FirebaseService.saveSetting('workflow', localPhases, NEXUS_OWNER_UID).catch(() => {});
+          if (targetUid !== NEXUS_OWNER_UID) {
+            FirebaseService.saveSetting('workflow', localPhases, targetUid).catch(() => {});
+          }
+        }
+      } else if (localPhases.length > 0) {
+        // Cloud has nothing -> push current local phases to Firestore
+        FirebaseService.saveSetting('workflow', localPhases, NEXUS_OWNER_UID).catch(() => {});
+        if (targetUid !== NEXUS_OWNER_UID) {
+          FirebaseService.saveSetting('workflow', localPhases, targetUid).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Notice syncing workflow from Firestore:', e);
+    }
+
+    return localPhases.length > 0 ? localPhases : null;
   },
 
   // --- Documents Config ---
   getDocumentsConfig: (defaults: DocumentConfig[]): DocumentConfig[] => {
+    if (inMemoryDocs && inMemoryDocs.length > 0) return inMemoryDocs;
+    const saved = getSavedDocumentsConfig();
+    if (saved && saved.length > 0) {
+      inMemoryDocs = saved;
+      return saved;
+    }
     return inMemoryDocs.length > 0 ? inMemoryDocs : defaults;
   },
 
   setDocumentsConfigInMemory: (config: DocumentConfig[]) => {
+    if (!config || !Array.isArray(config) || config.length === 0) return;
     inMemoryDocs = config;
+    try {
+      localStorage.setItem(DOCUMENTS_PERSISTENT_KEY, JSON.stringify(config));
+    } catch {}
     saveLocalCache();
   },
 
-  saveDocumentsConfig: (config: DocumentConfig[]) => {
+  saveDocumentsConfig: async (config: DocumentConfig[], userId?: string): Promise<boolean> => {
+    if (!config || !Array.isArray(config) || config.length === 0) return false;
     inMemoryDocs = config;
+    const nowIso = new Date().toISOString();
+
+    // 1. Local storage
+    try {
+      localStorage.setItem(DOCUMENTS_PERSISTENT_KEY, JSON.stringify(config));
+      localStorage.setItem('nexus_documents_meta_v2', JSON.stringify({
+        updatedAt: nowIso,
+        count: config.length,
+        isCustom: true
+      }));
+    } catch (e) {
+      console.warn('Error saving persistent documents config to localStorage:', e);
+    }
     saveLocalCache();
+    window.dispatchEvent(new CustomEvent('nexus-documents-config-updated', { detail: config }));
     BackupService.triggerAutoBackup("Alteração nos Documentos da Esteira");
-    FirebaseService.saveSetting('documents', config, currentUserId || undefined).catch(e => console.warn('Firebase saveSetting documents error:', e));
+
+    // 2. Server disk
+    try {
+      await fetch('/api/documents-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents: config, updatedAt: nowIso })
+      });
+    } catch (e) {
+      console.warn('Notice saving documents config to server:', e);
+    }
+
+    // 3. Firestore
+    const targetUid = userId || currentUserId || undefined;
+    try {
+      await FirebaseService.saveSetting('documents', config, NEXUS_OWNER_UID);
+      if (targetUid && targetUid !== NEXUS_OWNER_UID) {
+        await FirebaseService.saveSetting('documents', config, targetUid);
+      }
+    } catch (e) {
+      console.warn('Firebase saveSetting documents notice:', e);
+    }
+
+    return true;
+  },
+
+  syncDocumentsFromServerAndCloud: async (workspaceUid?: string): Promise<DocumentConfig[] | null> => {
+    let localDocs = StorageService.getDocumentsConfig([]);
+    let localUpdatedAt = 0;
+    try {
+      const metaRaw = localStorage.getItem('nexus_documents_meta_v2');
+      if (metaRaw) {
+        const parsed = JSON.parse(metaRaw);
+        if (parsed?.updatedAt) localUpdatedAt = new Date(parsed.updatedAt).getTime();
+      }
+    } catch {}
+
+    // A. Check Node Server store
+    try {
+      const res = await fetch('/api/documents-config');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.documents) && data.documents.length > 0) {
+          const serverUpdatedAt = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+          if (serverUpdatedAt > localUpdatedAt || localDocs.length === 0) {
+            localDocs = data.documents;
+            inMemoryDocs = data.documents;
+            localUpdatedAt = serverUpdatedAt;
+            try {
+              localStorage.setItem(DOCUMENTS_PERSISTENT_KEY, JSON.stringify(data.documents));
+              localStorage.setItem('nexus_documents_meta_v2', JSON.stringify({
+                updatedAt: data.updatedAt || new Date().toISOString(),
+                count: data.documents.length,
+                isCustom: true
+              }));
+            } catch {}
+            saveLocalCache();
+            window.dispatchEvent(new CustomEvent('nexus-documents-config-updated', { detail: data.documents }));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Notice syncing documents from server:', e);
+    }
+
+    // B. Check Cloud Firestore
+    const targetUid = workspaceUid || currentUserId || NEXUS_OWNER_UID;
+    try {
+      const remoteMeta = await FirebaseService.getSettingWithMeta<DocumentConfig[]>('documents', targetUid);
+      if (remoteMeta && Array.isArray(remoteMeta.value) && remoteMeta.value.length > 0) {
+        const remoteUpdatedAt = remoteMeta.updatedAt ? new Date(remoteMeta.updatedAt).getTime() : 0;
+        if (remoteUpdatedAt > localUpdatedAt) {
+          localDocs = remoteMeta.value;
+          inMemoryDocs = remoteMeta.value;
+          try {
+            localStorage.setItem(DOCUMENTS_PERSISTENT_KEY, JSON.stringify(remoteMeta.value));
+            localStorage.setItem('nexus_documents_meta_v2', JSON.stringify({
+              updatedAt: remoteMeta.updatedAt || new Date().toISOString(),
+              count: remoteMeta.value.length,
+              isCustom: true
+            }));
+          } catch {}
+          saveLocalCache();
+          window.dispatchEvent(new CustomEvent('nexus-documents-config-updated', { detail: remoteMeta.value }));
+          fetch('/api/documents-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ documents: remoteMeta.value, updatedAt: remoteMeta.updatedAt })
+          }).catch(() => {});
+        } else if (localUpdatedAt > remoteUpdatedAt && localDocs.length > 0) {
+          FirebaseService.saveSetting('documents', localDocs, NEXUS_OWNER_UID).catch(() => {});
+          if (targetUid !== NEXUS_OWNER_UID) {
+            FirebaseService.saveSetting('documents', localDocs, targetUid).catch(() => {});
+          }
+        }
+      } else if (localDocs.length > 0) {
+        FirebaseService.saveSetting('documents', localDocs, NEXUS_OWNER_UID).catch(() => {});
+        if (targetUid !== NEXUS_OWNER_UID) {
+          FirebaseService.saveSetting('documents', localDocs, targetUid).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Notice syncing documents from Firestore:', e);
+    }
+
+    return localDocs.length > 0 ? localDocs : null;
   },
 
   // --- Azure DevOps Configuration ---

@@ -739,6 +739,24 @@ export const FirebaseService = {
     return fallback;
   },
 
+  getSettingWithMeta: async <T>(key: string, userId?: string): Promise<{ value: T; updatedAt?: string } | null> => {
+    if (isGuestUserId(userId)) return null;
+    try {
+      const docRef = FirebaseService.getTargetDoc('settings', key, userId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.value !== undefined) {
+          return { value: data.value as T, updatedAt: data.updatedAt };
+        }
+        return { value: data as unknown as T, updatedAt: data?.updatedAt };
+      }
+    } catch (e) {
+      console.warn(`Error getting setting with meta ${key}:`, e);
+    }
+    return null;
+  },
+
   // Dedicated Azure DevOps Cloud Configuration Persistence
   saveDevOpsConfig: async (config: DevOpsConfig, userId?: string): Promise<boolean> => {
     const uid = userId || auth.currentUser?.uid;

@@ -36,6 +36,68 @@ if (!fs.existsSync(DATA_DIR)) {
 const STORE_FILE = path.join(DATA_DIR, "nexus-store.json");
 const DEVOPS_FILE = path.join(DATA_DIR, "nexus-devops.json");
 const AGENT_CONFIG_FILE = path.join(DATA_DIR, "nexus-agent-config.json");
+const WORKFLOW_FILE = path.join(DATA_DIR, "nexus-workflow.json");
+const TMP_WORKFLOW_FILE = path.join("/tmp", "nexus-workflow.json");
+const DOCUMENTS_FILE = path.join(DATA_DIR, "nexus-documents.json");
+const TMP_DOCUMENTS_FILE = path.join("/tmp", "nexus-documents.json");
+
+const readWorkflowConfig = () => {
+  try {
+    if (fs.existsSync(WORKFLOW_FILE)) {
+      return JSON.parse(fs.readFileSync(WORKFLOW_FILE, "utf-8"));
+    }
+  } catch {}
+  try {
+    if (fs.existsSync(TMP_WORKFLOW_FILE)) {
+      return JSON.parse(fs.readFileSync(TMP_WORKFLOW_FILE, "utf-8"));
+    }
+  } catch {}
+  return null;
+};
+
+const writeWorkflowConfig = (data: { workflow: any[]; updatedAt: string }) => {
+  let written = false;
+  try {
+    fs.writeFileSync(WORKFLOW_FILE, JSON.stringify(data, null, 2), "utf-8");
+    written = true;
+  } catch {}
+  if (!written) {
+    try {
+      fs.writeFileSync(TMP_WORKFLOW_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Error writing fallback tmp workflow config:", e);
+    }
+  }
+};
+
+const readDocumentsConfig = () => {
+  try {
+    if (fs.existsSync(DOCUMENTS_FILE)) {
+      return JSON.parse(fs.readFileSync(DOCUMENTS_FILE, "utf-8"));
+    }
+  } catch {}
+  try {
+    if (fs.existsSync(TMP_DOCUMENTS_FILE)) {
+      return JSON.parse(fs.readFileSync(TMP_DOCUMENTS_FILE, "utf-8"));
+    }
+  } catch {}
+  return null;
+};
+
+const writeDocumentsConfig = (data: { documents: any[]; updatedAt: string }) => {
+  let written = false;
+  try {
+    fs.writeFileSync(DOCUMENTS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    written = true;
+  } catch {}
+  if (!written) {
+    try {
+      fs.writeFileSync(TMP_DOCUMENTS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch (e) {
+      console.warn("Error writing fallback tmp documents config:", e);
+    }
+  }
+};
 
 interface ServerStore {
   tasks: any[];
@@ -262,6 +324,63 @@ router.post("/devops/config", async (req: express.Request, res: express.Response
     res.json({ success: true, config: { ...config, pat: config.pat ? "••••••••••••" : "" } });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// Workflow Phases & Documents Pipeline Persistence Endpoints
+// -------------------------------------------------------------
+router.get("/workflow", (req: express.Request, res: express.Response) => {
+  try {
+    const data = readWorkflowConfig();
+    res.json(data || { workflow: null });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/workflow", (req: express.Request, res: express.Response) => {
+  try {
+    const { workflow, updatedAt } = req.body || {};
+    if (!workflow || !Array.isArray(workflow)) {
+      res.status(400).json({ error: "Payload inválido para workflow." });
+      return;
+    }
+    const payload = {
+      workflow,
+      updatedAt: updatedAt || new Date().toISOString()
+    };
+    writeWorkflowConfig(payload);
+    res.json({ success: true, count: workflow.length, updatedAt: payload.updatedAt });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/documents-config", (req: express.Request, res: express.Response) => {
+  try {
+    const data = readDocumentsConfig();
+    res.json(data || { documents: null });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/documents-config", (req: express.Request, res: express.Response) => {
+  try {
+    const { documents, updatedAt } = req.body || {};
+    if (!documents || !Array.isArray(documents)) {
+      res.status(400).json({ error: "Payload inválido para documents." });
+      return;
+    }
+    const payload = {
+      documents,
+      updatedAt: updatedAt || new Date().toISOString()
+    };
+    writeDocumentsConfig(payload);
+    res.json({ success: true, count: documents.length, updatedAt: payload.updatedAt });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -90,8 +90,15 @@ service cloud.firestore {
 
       // System Settings (Workflow, documents)
       match /settings/{settingId} {
-        // Highly sensitive settings (DevOps PAT, backups) can ONLY be read/written by Owner
-        allow read, write: if isOwner(userId);
+        // Workflow and pipeline document definitions can be read by active members and updated by Owner or ADM
+        allow read: if isOwner(userId) || (
+          (settingId == 'workflow' || settingId == 'documents') && isActiveMember(userId)
+        );
+        allow write: if isOwner(userId) || (
+          (settingId == 'workflow' || settingId == 'documents') &&
+          isActiveMember(userId) &&
+          get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.role == 'ADM'
+        );
       }
 
       // Automated and manual backups

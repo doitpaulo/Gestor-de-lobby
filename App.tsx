@@ -6182,7 +6182,7 @@ const AutomationTotemView = ({ tasks, setTasks, robots }: any) => {
     );
 };
 
-const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig, sprints, setSprints, syncTaskWithSprints }: any) => {
+const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConfig, setWorkflowConfig, sprints, setSprints, syncTaskWithSprints, showToast }: any) => {
     const [isConfigOpen, setIsConfigOpen] = useState(false);
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ search: '', type: [], priority: [], status: [], assignee: [] });
     const filteredTasks = useMemo(() => { return tasks.filter((t:Task) => { const isProjectType = t.type === 'Melhoria' || t.type === 'Nova Automação'; if (!isProjectType) return false; const matchesSearch = t.summary.toLowerCase().includes(filters.search.toLowerCase()) || t.id.toLowerCase().includes(filters.search.toLowerCase()) || (t.requester && t.requester.toLowerCase().includes(filters.search.toLowerCase())); const matchesType = filters.type.length === 0 || filters.type.includes(t.type); const matchesPriority = filters.priority.length === 0 || filters.priority.includes(t.priority); const matchesStatus = filters.status.length === 0 || filters.status.includes(t.status); let matchesAssignee = true; if (filters.assignee.length > 0) { const hasUnassigned = filters.assignee.includes('Não Atribuído'); if (hasUnassigned) { matchesAssignee = !t.assignee || filters.assignee.includes(t.assignee); } else { matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee); } } return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee; }); }, [tasks, filters]);
@@ -6258,9 +6258,43 @@ const ProjectFlowView = ({ tasks, setTasks, devs, onEditTask, user, workflowConf
         }
     };
 
-    const handleAddPhase = (newPhase: WorkflowPhase) => { const updated = [...workflowConfig, newPhase]; setWorkflowConfig(updated); StorageService.saveWorkflowConfig(updated); };
-    const handleUpdatePhase = (updatedPhase: WorkflowPhase) => { const updated = workflowConfig.map((p:any) => p.id === updatedPhase.id ? updatedPhase : p); setWorkflowConfig(updated); StorageService.saveWorkflowConfig(updated); };
-    const handleDeletePhase = (phaseId: string) => { const updated = workflowConfig.filter((p:any) => p.id !== phaseId); setWorkflowConfig(updated); StorageService.saveWorkflowConfig(updated); };
+    const handleAddPhase = async (newPhase: WorkflowPhase) => { 
+        const safeStatuses = (newPhase.statuses && newPhase.statuses.length > 0)
+            ? newPhase.statuses
+            : ['Não iniciado', 'Em andamento', 'Concluído'];
+        const safePhase: WorkflowPhase = {
+            ...newPhase,
+            statuses: safeStatuses,
+            activities: newPhase.activities || []
+        };
+        const updated = [...workflowConfig, safePhase]; 
+        setWorkflowConfig(updated); 
+        await StorageService.saveWorkflowConfig(updated, user?.workspaceOwnerUid || user?.id); 
+        showToast?.('success', `Fase "${safePhase.name}" criada e persistida com sucesso!`);
+    };
+
+    const handleUpdatePhase = async (updatedPhase: WorkflowPhase) => { 
+        const safeStatuses = (updatedPhase.statuses && updatedPhase.statuses.length > 0)
+            ? updatedPhase.statuses
+            : ['Não iniciado', 'Em andamento', 'Concluído'];
+        const safePhase: WorkflowPhase = {
+            ...updatedPhase,
+            statuses: safeStatuses,
+            activities: updatedPhase.activities || []
+        };
+        const updated = workflowConfig.map((p:any) => p.id === safePhase.id ? safePhase : p); 
+        setWorkflowConfig(updated); 
+        await StorageService.saveWorkflowConfig(updated, user?.workspaceOwnerUid || user?.id); 
+        showToast?.('success', `Fase "${safePhase.name}" atualizada com sucesso!`);
+    };
+
+    const handleDeletePhase = async (phaseId: string) => { 
+        const target = workflowConfig.find((p:any) => p.id === phaseId);
+        const updated = workflowConfig.filter((p:any) => p.id !== phaseId); 
+        setWorkflowConfig(updated); 
+        await StorageService.saveWorkflowConfig(updated, user?.workspaceOwnerUid || user?.id); 
+        showToast?.('info', `Fase "${target?.name || phaseId}" removida.`);
+    };
     
     const getProgress = (task: Task) => calculateTaskProgress(task, workflowConfig);
     
@@ -6272,10 +6306,42 @@ const WorkflowEditor = ({ currentConfig, onSave, onUpdate, onDelete, onClose }: 
     const [name, setName] = useState('');
     const [statuses, setStatuses] = useState('');
     const [activities, setActivities] = useState('');
-    useEffect(() => { if (editingId) { const phase = currentConfig.find((p: WorkflowPhase) => p.id === editingId); if (phase) { setName(phase.name); setStatuses(phase.statuses.join(', ')); setActivities(phase.activities.join(', ')); } } else { setName(''); setStatuses('Não Iniciado, Concluído'); setActivities(''); } }, [editingId, currentConfig]);
-    const handleSubmit = () => { if (!name) return; const phaseData: WorkflowPhase = { id: editingId || `ph-${Date.now()}`, name, statuses: statuses.split(',').map(s => s.trim()).filter(Boolean), activities: activities.split(',').map(a => a.trim()).filter(Boolean) }; if (editingId) { onUpdate(phaseData); setEditingId(null); } else { onSave(phaseData); setName(''); setStatuses('Não Iniciado, Concluído'); setActivities(''); } };
+    useEffect(() => { 
+        if (editingId) { 
+            const phase = currentConfig.find((p: WorkflowPhase) => p.id === editingId); 
+            if (phase) { 
+                setName(phase.name); 
+                setStatuses(phase.statuses.join(', ')); 
+                setActivities(phase.activities.join(', ')); 
+            } 
+        } else { 
+            setName(''); 
+            setStatuses('Não iniciado, Em andamento, Concluído'); 
+            setActivities(''); 
+        } 
+    }, [editingId, currentConfig]);
+    const handleSubmit = () => { 
+        if (!name.trim()) return; 
+        const parsedStatuses = statuses.split(',').map(s => s.trim()).filter(Boolean);
+        const finalStatuses = parsedStatuses.length > 0 ? parsedStatuses : ['Não iniciado', 'Em andamento', 'Concluído'];
+        const phaseData: WorkflowPhase = { 
+            id: editingId || `ph-${Date.now()}`, 
+            name: name.trim(), 
+            statuses: finalStatuses, 
+            activities: activities.split(',').map(a => a.trim()).filter(Boolean) 
+        }; 
+        if (editingId) { 
+            onUpdate(phaseData); 
+            setEditingId(null); 
+        } else { 
+            onSave(phaseData); 
+            setName(''); 
+            setStatuses('Não iniciado, Em andamento, Concluído'); 
+            setActivities(''); 
+        } 
+    };
     const handleDelete = (id: string) => { if (window.confirm('Tem certeza? Isso removerá a visualização desta fase de todos os projetos.')) { onDelete(id); if (editingId === id) setEditingId(null); } }
-    return (<div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden"><div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4"><h3 className="text-lg font-bold mb-4 text-white">Etapas Existentes</h3><div className="space-y-2">{currentConfig.map((phase: WorkflowPhase, idx: number) => (<div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}><div><span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span><span className="font-medium text-slate-200">{phase.name}</span><p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p></div><div className="flex gap-1"><button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400">✏️</button><button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400">🗑️</button></div></div>))}</div><div className="mt-4"><Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs"><IconPlus className="w-3 h-3" /> Adicionar Nova Fase</Button></div></div><div className="flex-1 flex flex-col"><h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3><div className="space-y-4 flex-1"><div><label className="block text-xs text-slate-400 mb-1">Nome da Fase</label><input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" /></div><div><label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não Iniciado, Em Andamento, Concluído..." /></div><div><label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." /></div></div><div className="flex justify-end gap-2 mt-6"><Button variant="secondary" onClick={onClose}>Fechar</Button><Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button></div></div></div>);
+    return (<div className="bg-slate-800 p-6 rounded-2xl border border-slate-600 max-w-4xl w-full flex flex-col md:flex-row gap-6 max-h-[90vh] overflow-hidden"><div className="flex-1 overflow-y-auto custom-scrollbar border-r border-slate-700 pr-4"><div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold text-white">Etapas Existentes</h3><span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30 font-mono">{currentConfig.length} fases</span></div><div className="space-y-2">{currentConfig.map((phase: WorkflowPhase, idx: number) => (<div key={phase.id} className={`p-3 rounded border flex justify-between items-center ${editingId === phase.id ? 'bg-indigo-900/30 border-indigo-500' : 'bg-slate-900/50 border-slate-700'}`}><div><span className="text-xs text-slate-500 font-mono mr-2">{idx + 1}.</span><span className="font-medium text-slate-200">{phase.name}</span><p className="text-[10px] text-slate-500 mt-1">{phase.statuses.length} status, {phase.activities.length} atividades</p></div><div className="flex gap-1"><button onClick={() => setEditingId(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-indigo-400" title="Editar fase">✏️</button><button onClick={() => handleDelete(phase.id)} className="p-1.5 hover:bg-slate-700 rounded text-rose-400" title="Excluir fase">🗑️</button></div></div>))}</div><div className="mt-4"><Button variant="secondary" onClick={() => setEditingId(null)} className="w-full text-xs"><IconPlus className="w-3 h-3" /> Adicionar Nova Fase</Button></div></div><div className="flex-1 flex flex-col"><h3 className="text-lg font-bold mb-4 text-white">{editingId ? 'Editar Fase' : 'Nova Fase'}</h3><div className="space-y-4 flex-1"><div><label className="block text-xs text-slate-400 mb-1">Nome da Fase *</label><input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Validação Final" /></div><div><label className="block text-xs text-slate-400 mb-1">Status Possíveis (separados por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={statuses} onChange={e => setStatuses(e.target.value)} rows={3} placeholder="Não iniciado, Em andamento, Concluído..." /></div><div><label className="block text-xs text-slate-400 mb-1">Atividades (separadas por vírgula)</label><textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none focus:border-indigo-500" value={activities} onChange={e => setActivities(e.target.value)} rows={3} placeholder="Criar Documento, Validar com Cliente..." /></div></div><div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-700"><p className="text-[11px] text-slate-400 italic">As fases são salvas imediatamente e preservadas ao reiniciar.</p><div className="flex gap-2"><Button variant="secondary" onClick={onClose}>Fechar</Button><Button onClick={handleSubmit}>{editingId ? 'Atualizar' : 'Adicionar'}</Button></div></div></div></div>);
 };
 
 const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, onCreateTask, onOpenNotifications, user }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void, onOpenUpload?: () => void, onCreateTask?: () => void, onOpenNotifications?: () => void, user?: User }) => {
@@ -10312,8 +10378,8 @@ export default function App() {
   const [devs, setDevs] = useState<Developer[]>(() => StorageService.getDevs());
   const [robots, setRobots] = useState<Robot[]>(() => StorageService.getRobots());
   const [sprints, setSprints] = useState<Sprint[]>(() => StorageService.getSprints());
-  const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(DEFAULT_WORKFLOW);
-  const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(DEFAULT_DOCS);
+  const [workflowConfig, setWorkflowConfig] = useState<WorkflowPhase[]>(() => StorageService.getWorkflowConfig(DEFAULT_WORKFLOW));
+  const [documentsConfig, setDocumentsConfig] = useState<DocumentConfig[]>(() => StorageService.getDocumentsConfig(DEFAULT_DOCS));
   const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
 
   const syncTaskWithSprints = (task: Task, currentSprints: Sprint[]) => {
@@ -10540,6 +10606,26 @@ export default function App() {
     }
   }, []);
 
+  // Listen for pipeline config updates across the tool
+  useEffect(() => {
+    const handleWorkflowUpdated = (e: any) => {
+      if (e.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        setWorkflowConfig(e.detail);
+      }
+    };
+    const handleDocsUpdated = (e: any) => {
+      if (e.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        setDocumentsConfig(e.detail);
+      }
+    };
+    window.addEventListener('nexus-workflow-config-updated', handleWorkflowUpdated);
+    window.addEventListener('nexus-documents-config-updated', handleDocsUpdated);
+    return () => {
+      window.removeEventListener('nexus-workflow-config-updated', handleWorkflowUpdated);
+      window.removeEventListener('nexus-documents-config-updated', handleDocsUpdated);
+    };
+  }, []);
+
   // Firebase Auth State Listener
   useEffect(() => {
     const unsubAuth = FirebaseService.onAuthChange((fbUser) => {
@@ -10592,16 +10678,18 @@ export default function App() {
       FirebaseService.migrateLegacyDataIfNeeded(user);
     }
 
-    // Load workflow & documents & devops settings from Firestore (only for authorized users)
-    FirebaseService.getSetting<WorkflowPhase[]>('workflow', DEFAULT_WORKFLOW, workspaceUid).then(cfg => {
-      setWorkflowConfig(cfg);
-      StorageService.setWorkflowConfigInMemory(cfg);
-    });
+    // Load workflow & documents settings with smart conflict resolution (never clobber custom phases with defaults!)
+    StorageService.syncWorkflowFromServerAndCloud(workspaceUid).then(resolved => {
+      if (resolved && Array.isArray(resolved) && resolved.length > 0) {
+        setWorkflowConfig(resolved);
+      }
+    }).catch(e => console.warn('Workflow cloud/server sync notice:', e));
 
-    FirebaseService.getSetting<DocumentConfig[]>('documents', DEFAULT_DOCS, workspaceUid).then(cfg => {
-      setDocumentsConfig(cfg);
-      StorageService.setDocumentsConfigInMemory(cfg);
-    });
+    StorageService.syncDocumentsFromServerAndCloud(workspaceUid).then(resolved => {
+      if (resolved && Array.isArray(resolved) && resolved.length > 0) {
+        setDocumentsConfig(resolved);
+      }
+    }).catch(e => console.warn('Documents cloud/server sync notice:', e));
 
     // Azure DevOps Cloud Sync for all authorized sessions (loads credentials automatically from first integration across any machine)
     StorageService.syncDevOpsFromCloud(NEXUS_OWNER_UID).catch(e => {
@@ -11915,7 +12003,7 @@ export default function App() {
 />
 <Routes>
   <Route path="/" element={<DashboardView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} />
-  <Route path="/projects" element={<ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} />} />
+  <Route path="/projects" element={<ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} showToast={showToast} />} />
   <Route path="/esteira" element={<DocumentPipelineView tasks={visibleTasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} />
   <Route path="/sprints" element={<SprintsView tasks={visibleTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} />
   <Route path="/project-report" element={<ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} />
