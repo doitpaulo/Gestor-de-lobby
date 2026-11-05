@@ -1794,6 +1794,12 @@ router.get("/powerbi-data", async (req: express.Request, res: express.Response) 
     res.json(payload);
   } catch (err: any) {
     const status = err.status || 500;
+    if (status >= 500) {
+      const code = typeof err.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(err.code)
+        ? err.code
+        : status === 503 ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR";
+      console.error("[powerbi-data] source request failed", { status, code });
+    }
     if (status === 401) {
       res.setHeader("WWW-Authenticate", 'Basic realm="Power BI", charset="UTF-8"');
     }
