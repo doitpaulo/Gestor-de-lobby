@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { PowerBIService } from "../services/powerbiService.js";
 import { powerBiBasicKey } from "../services/powerbiAuth.js";
+import { AdminProvisioningService } from "../services/adminProvisioningService.js";
 
 const app = express();
 
@@ -20,6 +21,37 @@ app.use((req, res, next) => {
 
 // Middleware to support JSON request bodies
 app.use(express.json({ limit: "25mb" }));
+
+// Path normalizer for serverless environments (Vercel rewrites & direct invocations)
+app.use((req, res, next) => {
+  // Never intercept non-API frontend routes (like /, /index.html, vite assets, etc.)
+  if (!req.url.startsWith("/api")) {
+    return next();
+  }
+
+  const forwardedUri = (req.headers["x-forwarded-uri"] as string) || (req.headers["x-original-url"] as string);
+  const matchedPath = req.headers["x-matched-path"] as string;
+
+  if (req.url === "/api/index" || req.url.startsWith("/api/index?") || req.url.startsWith("/api/index/")) {
+    if (forwardedUri && typeof forwardedUri === "string" && forwardedUri !== "/api/index" && forwardedUri.startsWith("/api")) {
+      req.url = forwardedUri;
+    } else if (matchedPath && typeof matchedPath === "string" && matchedPath.startsWith("/api") && matchedPath !== "/api/index") {
+      req.url = matchedPath;
+    } else if (req.query && req.query.path) {
+      const rawSubPath = Array.isArray(req.query.path) ? req.query.path.join("/") : String(req.query.path);
+      const cleanSubPath = rawSubPath.startsWith("/") ? rawSubPath : `/${rawSubPath}`;
+      const finalPath = cleanSubPath.startsWith("/api") ? cleanSubPath : `/api${cleanSubPath}`;
+      const queryIdx = req.url.indexOf("?");
+      const queryStr = queryIdx >= 0 ? req.url.substring(queryIdx) : "";
+      req.url = `${finalPath}${queryStr}`;
+    } else {
+      req.url = "/api";
+    }
+  } else if (forwardedUri && typeof forwardedUri === "string" && forwardedUri.startsWith("/api") && forwardedUri !== "/api/index") {
+    req.url = forwardedUri;
+  }
+  next();
+});
 
 // -------------------------------------------------------------
 // Server Data Persistence Helpers (Disk-based Store in /data)
@@ -242,9 +274,27 @@ const validateAIAgentKey = (req: express.Request, res: express.Response, next: e
 
 const router = express.Router();
 
-router.get("/health", (req, res) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
-});
+const handleHealth = (req: express.Request, res: express.Response) => {
+  res.json({
+    status: "ok",
+    service: "Nexus Project API",
+    time: new Date().toISOString(),
+    endpoints: {
+      health: "/api/health",
+      powerbi: "/api/powerbi/extract",
+      powerbiData: "/api/powerbi-data",
+      recovery: "/api/recovery/request",
+      aiSpec: "/api/ai/spec"
+    }
+  });
+};
+
+router.get("/health", handleHealth);
+router.get("/index", handleHealth);
+router.get("/", handleHealth);
+app.get("/api/health", handleHealth);
+app.get("/api/index", handleHealth);
+app.get("/api", handleHealth);
 
 // Helper to generate Base64 Basic auth header for Azure DevOps
 function getDevOpsHeaders(pat: string) {
@@ -531,6 +581,54 @@ router.post("/admin/generate-password-reset-link", async (req: express.Request, 
     error: "NOT_IMPLEMENTED",
     message: "Geração delegada via Admin SDK offline."
   });
+});
+
+// 5. Server-side Developer Provisioning via Firebase Admin SDK (Verified ADM only)
+// Never logs or persists temporary passwords; handles create-with-temp-password and link-existing cleanly.
+router.post("/admin/provision-dev", async (req: express.Request, res: express.Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await AdminProvisioningService.provisionDeveloper(
+      req.headers["authorization"] as string | undefined,
+      req.body
+    );
+    res.status(200).json(result);
+  } catch (err: any) {
+    const status = err?.status || 500;
+    res.status(status).json({
+      success: false,
+      error: err?.code || "PROVISION_FAILED",
+      code: err?.code || "PROVISION_FAILED",
+      message: err?.message || "Falha ao provisionar colaborador.",
+      partialFailure: Boolean(err?.partialFailure),
+      authCreated: err?.authCreated,
+      memberSaved: err?.memberSaved,
+      tasksSynced: err?.tasksSynced,
+      rollbackSucceeded: err?.rollbackSucceeded,
+      createdUid: err?.createdUid,
+      existingUid: err?.existingUid,
+      member: err?.member
+    });
+  }
+});
+
+// 6. Complete First-Access Password Change Verification (Authenticated Dev)
+router.post("/auth/complete-first-password-change", async (req: express.Request, res: express.Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const result = await AdminProvisioningService.completeFirstPasswordChange(
+      req.headers["authorization"] as string | undefined
+    );
+    res.status(200).json(result);
+  } catch (err: any) {
+    const status = err?.status || 500;
+    res.status(status).json({
+      success: false,
+      error: err?.code || "PASSWORD_CHANGE_VERIFICATION_FAILED",
+      code: err?.code || "PASSWORD_CHANGE_VERIFICATION_FAILED",
+      message: err?.message || "Não foi possível confirmar a troca de senha."
+    });
+  }
 });
 
 // -------------------------------------------------------------
@@ -1774,7 +1872,7 @@ router.post("/ai/execute-tool", validateAIAgentKey, async (req: express.Request,
 // -------------------------------------------------------------
 
 // 1. Live Data Endpoint for Power BI (Read-only, strictly authenticated)
-router.get("/powerbi-data", async (req: express.Request, res: express.Response) => {
+const handlePowerBiExtraction = async (req: express.Request, res: express.Response) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
@@ -1808,7 +1906,14 @@ router.get("/powerbi-data", async (req: express.Request, res: express.Response) 
       code: err.code || (status === 401 ? "UNAUTHORIZED" : status === 503 ? "SERVICE_UNAVAILABLE" : "SERVER_ERROR")
     });
   }
-});
+};
+
+router.get("/powerbi-data", handlePowerBiExtraction);
+router.get("/powerbi/extract", handlePowerBiExtraction);
+router.get("/extract", handlePowerBiExtraction);
+app.get("/api/powerbi-data", handlePowerBiExtraction);
+app.get("/api/powerbi/extract", handlePowerBiExtraction);
+app.get("/api/extract", handlePowerBiExtraction);
 
 // 2. Session Bridge Endpoint: Connects authenticated web session to Power BI
 router.post("/powerbi/session-bridge", async (req: express.Request, res: express.Response) => {
@@ -1859,8 +1964,7 @@ router.get("/powerbi/session-status", (req: express.Request, res: express.Respon
   res.json(status);
 });
 
-// Mount the router on /api and / to handle both direct and rewritten requests seamlessly
+// Mount the router exclusively on /api so frontend routes (/, /index.html) are untouched
 app.use("/api", router);
-app.use("/", router);
 
 export default app;

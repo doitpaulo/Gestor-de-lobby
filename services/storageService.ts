@@ -44,10 +44,13 @@ export const isUserAdmin = (user?: User | null): boolean => {
 
 // Security Helper: verify if a task is authorized for a specific user
 export const isTaskAuthorized = (task: Task, user?: User | null): boolean => {
-  if (!user) return false;
+  if (!user || !user.id) return false;
+  if (user.mustChangePassword && !isOwnerUser(user)) return false;
+  if (!isOwnerUser(user) && user.status && user.status !== 'active') return false;
   if (isUserAdmin(user)) return true;
 
-  const targetUserId = user.id ? String(user.id).trim() : '';
+  const targetUserId = String(user.id).trim();
+  if (!targetUserId) return false;
 
   // 1. Direct assigned UID
   if (task.assignedUid && task.assignedUid === targetUserId) return true;
@@ -57,13 +60,6 @@ export const isTaskAuthorized = (task: Task, user?: User | null): boolean => {
 
   // 3. User's explicit authorized demands list
   if (Array.isArray(user.assignedTaskIds) && user.assignedTaskIds.includes(task.id)) return true;
-
-  // 4. Assignee name / email match
-  if (task.assignee) {
-    const cleanAssignee = task.assignee.trim().toLowerCase();
-    if (user.name && cleanAssignee === user.name.trim().toLowerCase()) return true;
-    if (user.email && cleanAssignee === user.email.trim().toLowerCase()) return true;
-  }
 
   return false;
 };
@@ -323,6 +319,34 @@ export const StorageService = {
     FirebaseService.saveMember(targetOwner, member).catch(e => console.warn('Firebase saveMember error:', e));
   },
 
+  saveMemberAsync: async (member: WorkspaceMember, ownerUid?: string): Promise<WorkspaceMember> => {
+    const targetOwner = ownerUid || NEXUS_OWNER_UID;
+    const saved = await FirebaseService.saveMember(targetOwner, member);
+
+    const cleanEmail = saved.email.trim().toLowerCase();
+    const existingIdx = inMemoryMembers.findIndex(m =>
+      (m.id && m.id === member.id) ||
+      (m.id && m.id === saved.id) ||
+      (m.email && m.email.trim().toLowerCase() === cleanEmail) ||
+      (saved.uid && m.uid && m.uid === saved.uid)
+    );
+
+    let updatedList: WorkspaceMember[];
+    if (existingIdx >= 0) {
+      updatedList = [...inMemoryMembers];
+      updatedList[existingIdx] = { ...updatedList[existingIdx], ...saved };
+    } else {
+      updatedList = [...inMemoryMembers, saved];
+    }
+
+    inMemoryMembers = updatedList;
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(updatedList));
+    } catch {}
+    saveLocalCache();
+    return saved;
+  },
+
   deleteMember: (memberId: string, ownerUid?: string) => {
     const updated = inMemoryMembers.filter(m => m.id !== memberId && m.email !== memberId);
     inMemoryMembers = updated;
@@ -333,6 +357,17 @@ export const StorageService = {
 
     const targetOwner = ownerUid || NEXUS_OWNER_UID;
     FirebaseService.deleteMember(targetOwner, memberId).catch(e => console.warn('Firebase deleteMember error:', e));
+  },
+
+  deleteMemberAsync: async (memberId: string, ownerUid?: string): Promise<void> => {
+    const targetOwner = ownerUid || NEXUS_OWNER_UID;
+    await FirebaseService.deleteMember(targetOwner, memberId);
+    const updated = inMemoryMembers.filter(m => m.id !== memberId && m.uid !== memberId && m.email !== memberId);
+    inMemoryMembers = updated;
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(updated));
+    } catch {}
+    saveLocalCache();
   },
 
   getMemberByEmail: (email: string): WorkspaceMember | null => {
@@ -346,7 +381,7 @@ export const StorageService = {
     return inMemoryMembers.find(m => m.uid === uid || m.id === uid) || null;
   },
 
-  resolveUserMembership: (rawUser: User): User => {
+  resolveUserMembership: (rawUser: User, explicitMember?: WorkspaceMember | null): User => {
     if (!rawUser) return rawUser;
 
     // 1. Root Workspace Owner verified by exact immutable UID
@@ -357,7 +392,8 @@ export const StorageService = {
         status: 'active',
         permissions: DEFAULT_ADM_PERMISSIONS,
         assignedTaskIds: [],
-        workspaceOwnerUid: NEXUS_OWNER_UID
+        workspaceOwnerUid: NEXUS_OWNER_UID,
+        mustChangePassword: false
       };
     }
 
@@ -370,44 +406,47 @@ export const StorageService = {
         status: 'active',
         permissions: DEFAULT_COLLABORATOR_PERMISSIONS,
         assignedTaskIds: [],
-        workspaceOwnerUid: NEXUS_OWNER_UID
+        workspaceOwnerUid: NEXUS_OWNER_UID,
+        mustChangePassword: false
       };
     }
 
-    // 3. Match against member registry by UID first (most secure & definitive)
-    const memberByUid = rawUser.id ? StorageService.getMemberByUid(rawUser.id) : null;
+    // 3. Match against canonical member doc from Firestore (explicitMember) or memory by UID
+    const memberByUid = explicitMember || (rawUser.id ? StorageService.getMemberByUid(rawUser.id) : null);
     if (memberByUid) {
+      const mustChange = Boolean(memberByUid.mustChangePassword === true);
+      const pendingReason =
+        memberByUid.status === 'inactive'
+          ? 'INACTIVE'
+          : mustChange
+          ? 'MUST_CHANGE_PASSWORD'
+          : memberByUid.status === 'pending'
+          ? 'UID_UNLINKED'
+          : undefined;
+
       return {
         ...rawUser,
+        name: memberByUid.name || rawUser.name,
         role: memberByUid.role,
         status: memberByUid.status,
-        permissions: memberByUid.permissions || (memberByUid.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
+        permissions:
+          memberByUid.permissions ||
+          (memberByUid.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
         assignedTaskIds: memberByUid.assignedTaskIds || [],
-        workspaceOwnerUid: NEXUS_OWNER_UID
+        workspaceOwnerUid: NEXUS_OWNER_UID,
+        linkedDevId: memberByUid.linkedDevId,
+        linkedDevName: memberByUid.linkedDevName,
+        mustChangePassword: mustChange,
+        tempPasswordSetAt: memberByUid.tempPasswordSetAt,
+        passwordChangedAt: memberByUid.passwordChangedAt,
+        pendingReason
       };
     }
 
-    // 4. If UID not yet linked, match against pre-authorized member by clean email
+    // 4. Match pre-authorized member by clean email (ADM pre-registered without UID yet)
     const memberByEmail = cleanEmail ? StorageService.getMemberByEmail(cleanEmail) : null;
     if (memberByEmail) {
-      // Security Policy: Only auto-link UID if the email is cryptographically verified (e.g., Google OAuth).
-      // Unverified email/password registrations remain pending for manual identity confirmation by ADM.
       const isEmailVerified = Boolean(rawUser.emailVerified);
-
-      if (isEmailVerified && !memberByEmail.uid && rawUser.id) {
-        memberByEmail.uid = rawUser.id;
-        StorageService.saveMember(memberByEmail, NEXUS_OWNER_UID);
-        return {
-          ...rawUser,
-          role: memberByEmail.role,
-          status: memberByEmail.status,
-          permissions: memberByEmail.permissions || (memberByEmail.role === 'ADM' ? DEFAULT_ADM_PERMISSIONS : DEFAULT_COLLABORATOR_PERMISSIONS),
-          assignedTaskIds: memberByEmail.assignedTaskIds || [],
-          workspaceOwnerUid: NEXUS_OWNER_UID
-        };
-      }
-
-      // If email is not yet verified or UID binding awaits ADM confirmation:
       return {
         ...rawUser,
         role: memberByEmail.role,
@@ -415,12 +454,15 @@ export const StorageService = {
         permissions: memberByEmail.permissions || DEFAULT_COLLABORATOR_PERMISSIONS,
         assignedTaskIds: memberByEmail.assignedTaskIds || [],
         workspaceOwnerUid: NEXUS_OWNER_UID,
-        pendingReason: 'UID_UNLINKED'
+        linkedDevId: memberByEmail.linkedDevId,
+        linkedDevName: memberByEmail.linkedDevName,
+        mustChangePassword: Boolean(memberByEmail.mustChangePassword),
+        pendingReason: isEmailVerified ? 'UID_UNLINKED' : 'EMAIL_UNVERIFIED'
       };
     }
 
-    // 5. External registration / cadastro avulso: strictly defaults to pending access!
-    // Never auto-promoted to ADM, never given isolated workspace.
+    // 5. External registration / unassigned developer: strictly defaults to pending access!
+    // Never auto-promoted to ADM, never granted automatic access from devs list.
     return {
       ...rawUser,
       role: 'Colaborador',
@@ -428,7 +470,8 @@ export const StorageService = {
       permissions: DEFAULT_COLLABORATOR_PERMISSIONS,
       assignedTaskIds: [],
       workspaceOwnerUid: NEXUS_OWNER_UID,
-      pendingReason: 'UNAUTHORIZED'
+      mustChangePassword: false,
+      pendingReason: rawUser.emailVerified === false ? 'EMAIL_UNVERIFIED' : 'UNAUTHORIZED'
     };
   },
 
@@ -443,6 +486,7 @@ export const StorageService = {
       if (m.id === memberIdOrEmail || m.email.trim().toLowerCase() === clean) {
         const updated: WorkspaceMember = {
           ...m,
+          id: cleanUid,
           uid: cleanUid,
           status: activate ? 'active' : m.status,
           activatedAt: activate ? (m.activatedAt || new Date().toISOString()) : m.activatedAt
@@ -462,6 +506,51 @@ export const StorageService = {
     }
 
     return targetUpdated;
+  },
+
+  linkMemberUidAsync: async (
+    memberIdOrEmail: string,
+    uid: string,
+    activate: boolean = true
+  ): Promise<WorkspaceMember> => {
+    const clean = memberIdOrEmail.trim().toLowerCase();
+    const cleanUid = uid.trim();
+    if (!cleanUid) {
+      throw new Error('UID inválido para vinculação.');
+    }
+
+    const existing = inMemoryMembers.find(
+      m => m.id === memberIdOrEmail || m.email.trim().toLowerCase() === clean
+    );
+    if (!existing) {
+      throw new Error('Registro de membro não encontrado.');
+    }
+
+    const updatedPayload: WorkspaceMember = {
+      ...existing,
+      id: cleanUid,
+      uid: cleanUid,
+      status: activate ? 'active' : existing.status,
+      activatedAt: activate ? (existing.activatedAt || new Date().toISOString()) : existing.activatedAt
+    };
+
+    const saved = await FirebaseService.saveMember(NEXUS_OWNER_UID, updatedPayload);
+    await FirebaseService.syncMemberTaskAuthorization(
+      NEXUS_OWNER_UID,
+      cleanUid,
+      saved.assignedTaskIds || [],
+      []
+    );
+
+    inMemoryMembers = inMemoryMembers.map(m =>
+      m.id === existing.id || m.email.trim().toLowerCase() === clean ? saved : m
+    );
+    try {
+      localStorage.setItem(MEMBERS_PERSISTENT_KEY, JSON.stringify(inMemoryMembers));
+    } catch {}
+    saveLocalCache();
+
+    return saved;
   },
 
   // --- Account Recovery Requests ---

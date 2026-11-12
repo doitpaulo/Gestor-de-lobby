@@ -29,16 +29,53 @@
         "updatedAt": { "type": "string", "optional": true },
         "hasCost": { "type": "boolean", "optional": true },
         "dispatchCount": { "type": "number", "optional": true },
-        "costValue": { "type": "number", "optional": true }
+        "costValue": { "type": "number", "optional": true },
+        "assignedUid": { "type": "string", "optional": true },
+        "allowedUids": { "type": "array", "optional": true }
+      }
+    },
+    "WorkspaceMember": {
+      "path": "users/{userId}/members/{memberId}",
+      "description": "RBAC membership and demand permissions keyed by Auth UID",
+      "fields": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "assignedTaskIds": { "type": "array" },
+        "linkedDevId": { "type": "string", "optional": true },
+        "linkedDevName": { "type": "string", "optional": true },
+        "mustChangePassword": { "type": "boolean", "optional": true },
+        "tempPasswordSetAt": { "type": "number", "optional": true },
+        "passwordChangedAt": { "type": "string", "optional": true },
+        "provisioningMode": { "type": "string", "optional": true }
+      }
+    },
+    "AccessRequest": {
+      "path": "users/{userId}/accessRequests/{requestId}",
+      "description": "Authenticated, verified-email dev onboarding request keyed by Auth UID",
+      "fields": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string", "optional": true },
+        "department": { "type": "string", "optional": true },
+        "devNameHint": { "type": "string", "optional": true },
+        "status": { "type": "string" },
+        "requestedAt": { "type": "string" }
       }
     },
     "Developer": {
       "path": "devs/{devId}",
-      "description": "Developer team members",
+      "description": "Developer team display catalog (never grants RBAC access)",
       "fields": {
         "id": { "type": "string" },
         "name": { "type": "string" },
-        "email": { "type": "string", "optional": true }
+        "email": { "type": "string", "optional": true },
+        "linkedUid": { "type": "string", "optional": true },
+        "linkedMemberId": { "type": "string", "optional": true }
       }
     },
     "Robot": {

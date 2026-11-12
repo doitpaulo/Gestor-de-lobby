@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { StorageService } from '../services/storageService';
 import { IconShieldCheck, IconX, IconCheck } from './Icons';
 
 interface AccountHelpModalProps {
@@ -49,36 +48,29 @@ export const AccountHelpModal: React.FC<AccountHelpModalProps> = ({
       });
 
       const data = await res.json().catch(() => ({}));
-
       if (!res.ok) {
-        if (res.status === 429) {
-          setFeedback({
-            type: 'error',
-            message: data.message || 'Uma solicitação recente já foi registrada para este endereço nos últimos 15 minutos.'
-          });
-          return;
-        }
-        throw new Error(data.error || 'Erro ao registrar solicitação.');
+        setFeedback({
+          type: 'error',
+          message:
+            data?.message ||
+            data?.error ||
+            'Não foi possível registrar a solicitação no servidor. Tente novamente ou contate o administrador.'
+        });
+        return;
       }
-
-      // Also record in client storage service
-      StorageService.saveRecoveryRequest({
-        id: 'req_' + Date.now(),
-        email: cleanEmail,
-        name: safeName || undefined,
-        department: safeDept || undefined,
-        requestedAt: new Date().toISOString(),
-        status: 'pending'
-      });
 
       setFeedback({
         type: 'success',
-        message: data.message || 'Solicitação enviada ao administrador! Ele analisará sua fila de solicitações no painel corporativo.'
+        message:
+          data?.message ||
+          'Solicitação registrada com sucesso na fila de suporte do administrador.'
       });
-    } catch (err: any) {
+    } catch (backendErr: any) {
       setFeedback({
         type: 'error',
-        message: err.message || 'Erro ao comunicar com o servidor de recuperação.'
+        message:
+          backendErr?.message ||
+          'Falha de conexão ao registrar a solicitação. Tente novamente ou contate o administrador diretamente.'
       });
     } finally {
       setIsSubmitting(false);

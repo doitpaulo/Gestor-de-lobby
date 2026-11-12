@@ -10,94 +10,112 @@ service cloud.firestore {
     function isOwner(userId) {
       return isAuthenticated() && (
         request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1' ||
-        request.auth.uid == userId
+        (request.auth.uid == userId && userId != 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1')
       );
     }
 
-    // Helper to check if authenticated user is registered and active as a member
+    // Strict check for root workspace owner
+    function isRootOwner(userId) {
+      return isAuthenticated() &&
+        request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1' &&
+        userId == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+    }
+
+    // Helper to check if authenticated user is registered, active, and has already changed temporary password
     function isActiveMember(ownerId) {
-      return isAuthenticated() && (
+      return isAuthenticated() &&
         exists(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)).data.status == 'active'
-      );
+        get(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)).data.status == 'active' &&
+        get(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)).data.get('mustChangePassword', false) != true;
     }
 
-    // User profile document: user can read/write their own minimal profile
-    match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId) || !exists(/databases/$(database)/documents/users/$(userId));
+    // Helper to check if authenticated user is an active delegated ADM
+    function isAdminMember(ownerId) {
+      return isActiveMember(ownerId) &&
+        get(/databases/$(database)/documents/users/$(ownerId)/members/$(request.auth.uid)).data.role == 'ADM';
+    }
 
-      // Workspace Members Registry (Managed strictly by ADM/Owner)
+    // User profile document: strictly scoped to own user or workspace owner
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdminMember(userId) || (isAuthenticated() && request.auth.uid == userId);
+      allow create, update: if isOwner(userId) || (isAuthenticated() && request.auth.uid == userId);
+      allow delete: if isRootOwner(userId);
+
+      // Workspace Members Registry (Managed strictly by Owner / Server Admin SDK)
       match /members/{memberId} {
-        // Owner has full control; member can read their own record
-        allow read: if isOwner(userId) || (isAuthenticated() && request.auth.uid == memberId);
-        allow write: if isOwner(userId);
+        // Owner and active ADMs can read all; a collaborator can get ONLY their own record (even if mustChangePassword == true)
+        allow get: if isOwner(userId) || isAdminMember(userId) || (isAuthenticated() && request.auth.uid == memberId);
+        allow list: if isOwner(userId) || isAdminMember(userId);
+
+        // Root owner has full write; delegated ADMs can manage Colaborador records only (never touch owner or promote to ADM)
+        allow create, update: if isOwner(userId) || (
+          isAdminMember(userId) &&
+          memberId != 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1' &&
+          memberId != 'member_owner_paulo' &&
+          request.resource.data.role == 'Colaborador' &&
+          (!exists(/databases/$(database)/documents/users/$(userId)/members/$(memberId)) ||
+           resource.data.role != 'ADM')
+        );
+        allow delete: if (isOwner(userId) || isAdminMember(userId)) &&
+          memberId != 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1' &&
+          memberId != 'member_owner_paulo';
       }
 
-      // Tasks Collection under Owner Workspace (Fine-grained ABAC)
+      // Tasks Collection under Owner Workspace (Fine-grained UID-bound ABAC)
+      // Note: Devs collection NEVER grants read/write access to tasks; mustChangePassword == true blocks isActiveMember.
       match /tasks/{taskId} {
-        // Owner can read everything.
-        // Active members can only read if explicitly assigned or in allowedUids
-        allow read: if isOwner(userId) || (
+        allow read: if isOwner(userId) || isAdminMember(userId) || (
           isActiveMember(userId) && (
-            resource.data.assignedUid == request.auth.uid ||
-            (resource.data.allowedUids != null && request.auth.uid in resource.data.allowedUids) ||
-            (request.auth.token.email != null && resource.data.assignee == request.auth.token.email)
+            resource.data.get('assignedUid', null) == request.auth.uid ||
+            (resource.data.get('allowedUids', null) != null && request.auth.uid in resource.data.allowedUids)
           )
         );
 
-        // Owner can create, edit, and delete any task.
-        // Active members can only create if they set themselves as assignee/creator,
-        // and can only update their assigned task. Members can NEVER delete.
-        allow create: if isOwner(userId) || (
+        // Active members can only create if they set themselves as assignedUid/allowedUids; never delete
+        allow create: if isOwner(userId) || isAdminMember(userId) || (
           isActiveMember(userId) &&
-          request.resource.data.assignedUid == request.auth.uid
+          request.resource.data.get('assignedUid', null) == request.auth.uid
         );
 
-        allow update: if isOwner(userId) || (
+        allow update: if isOwner(userId) || isAdminMember(userId) || (
           isActiveMember(userId) && (
-            resource.data.assignedUid == request.auth.uid ||
-            (resource.data.allowedUids != null && request.auth.uid in resource.data.allowedUids)
+            resource.data.get('assignedUid', null) == request.auth.uid ||
+            (resource.data.get('allowedUids', null) != null && request.auth.uid in resource.data.allowedUids)
           ) &&
-          // Prevent tampering with ownership, assignee, or ACL lists
-          request.resource.data.assignedUid == resource.data.assignedUid &&
-          request.resource.data.allowedUids == resource.data.allowedUids
+          // Prevent tampering with ownership or ACL lists
+          request.resource.data.get('assignedUid', null) == resource.data.get('assignedUid', null) &&
+          request.resource.data.get('allowedUids', []) == resource.data.get('allowedUids', [])
         );
 
-        allow delete: if isOwner(userId);
+        allow delete: if isOwner(userId) || isAdminMember(userId);
       }
 
-      // Developers team, Robots inventory, and Sprints
+      // Developers catalog (read-only metadata for active members after password change; NEVER grants task access)
       match /devs/{devId} {
         allow read: if isOwner(userId) || isActiveMember(userId);
-        allow write: if isOwner(userId);
+        allow write: if isOwner(userId) || isAdminMember(userId);
       }
 
       match /robots/{robotId} {
         allow read: if isOwner(userId) || isActiveMember(userId);
-        allow write: if isOwner(userId);
+        allow write: if isOwner(userId) || isAdminMember(userId);
       }
 
       match /sprints/{sprintId} {
         allow read: if isOwner(userId) || isActiveMember(userId);
-        allow write: if isOwner(userId) || (
-          isActiveMember(userId) && (
-            get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.role == 'ADM' ||
-            get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.permissions.canManageSprints == true
-          )
+        allow write: if isOwner(userId) || isAdminMember(userId) || (
+          isActiveMember(userId) &&
+          get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.get('permissions', {}).get('canManageSprints', false) == true
         );
       }
 
       // System Settings (Workflow, documents)
       match /settings/{settingId} {
-        // Workflow and pipeline document definitions can be read by active members and updated by Owner or ADM
-        allow read: if isOwner(userId) || (
+        allow read: if isOwner(userId) || isAdminMember(userId) || (
           (settingId == 'workflow' || settingId == 'documents') && isActiveMember(userId)
         );
         allow write: if isOwner(userId) || (
-          (settingId == 'workflow' || settingId == 'documents') &&
-          isActiveMember(userId) &&
-          get(/databases/$(database)/documents/users/$(userId)/members/$(request.auth.uid)).data.role == 'ADM'
+          (settingId == 'workflow' || settingId == 'documents') && isAdminMember(userId)
         );
       }
 
@@ -106,32 +124,58 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      // Authenticated Dev Access Requests Queue (strictly UID-bound, verified email, no spoofing, no duplicates)
+      match /accessRequests/{requestId} {
+        allow get: if isOwner(userId) || isAdminMember(userId) || (isAuthenticated() && request.auth.uid == requestId);
+        allow list: if isOwner(userId) || isAdminMember(userId);
+        allow create: if isAuthenticated() &&
+          request.auth.uid == requestId &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email != null &&
+          !exists(/databases/$(database)/documents/users/$(userId)/accessRequests/$(requestId)) &&
+          request.resource.data.keys().hasAll(['id', 'uid', 'email', 'status', 'requestedAt']) &&
+          request.resource.data.keys().hasOnly(['id', 'uid', 'email', 'name', 'department', 'devNameHint', 'status', 'requestedAt', 'updatedAt']) &&
+          request.resource.data.id == request.auth.uid &&
+          request.resource.data.uid == request.auth.uid &&
+          request.resource.data.email is string &&
+          request.resource.data.email.size() >= 3 &&
+          request.resource.data.email.size() <= 160 &&
+          request.resource.data.email.lower() == request.auth.token.email.lower() &&
+          request.resource.data.status == 'pending' &&
+          request.resource.data.requestedAt is string &&
+          request.resource.data.requestedAt.size() <= 64 &&
+          (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 120)) &&
+          (!('department' in request.resource.data) || (request.resource.data.department is string && request.resource.data.department.size() <= 160)) &&
+          (!('devNameHint' in request.resource.data) || (request.resource.data.devNameHint is string && request.resource.data.devNameHint.size() <= 120));
+        allow update, delete: if isOwner(userId) || isAdminMember(userId);
+      }
+
+      // Password Recovery Queue (Managed strictly by Owner/ADM or Server Admin SDK; NO open public create)
+      match /recoveryRequests/{requestId} {
+        allow read, write: if isOwner(userId) || isAdminMember(userId);
+      }
+
       // Fallback for any other subcollections
       match /{allSubcollections=**} {
         allow read, write: if isOwner(userId);
       }
     }
 
-    // Top-level legacy collections (Restricted strictly to Owner UID for migration/fallback)
+    // Top-level legacy collections (Strictly restricted to Root Owner UID only)
     match /tasks/{taskId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
     match /devs/{devId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
     match /robots/{robotId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
     match /sprints/{sprintId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
     match /settings/{settingId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
+      allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
     }
     match /backups/{backupId} {
       allow read, write: if isAuthenticated() && request.auth.uid == 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';

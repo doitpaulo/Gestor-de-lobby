@@ -9,6 +9,10 @@ import {
   onAuthStateChanged,
   updateProfile,
   signInAnonymously,
+  sendEmailVerification,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -22,7 +26,10 @@ import {
   writeBatch, 
   onSnapshot,
   arrayUnion,
-  updateDoc
+  arrayRemove,
+  updateDoc,
+  query,
+  where
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import { 
@@ -36,6 +43,7 @@ import {
   User, 
   WorkspaceMember,
   AccountRecoveryRequest,
+  AccessRequest,
   NEXUS_OWNER_UID
 } from '../types';
 import { StorageService } from './storageService';
@@ -189,6 +197,84 @@ export const FirebaseService = {
     await signOut(auth);
   },
 
+  // Get current Firebase ID Token for authenticated API calls
+  getIdToken: async (forceRefresh: boolean = false): Promise<string | null> => {
+    if (!auth.currentUser) return null;
+    return await auth.currentUser.getIdToken(forceRefresh);
+  },
+
+  // Reload current Firebase Auth user (refreshes emailVerified and token state)
+  reloadCurrentUser: async (): Promise<User | null> => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) return null;
+    await fbUser.reload();
+    await fbUser.getIdToken(true);
+    let name = fbUser.displayName || fbUser.email?.split('@')[0] || 'Usuário';
+    let avatar = fbUser.photoURL || undefined;
+    try {
+      const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        if (data.name) name = data.name;
+        if (data.avatar) avatar = data.avatar;
+      }
+    } catch {}
+    return {
+      id: fbUser.uid,
+      name,
+      email: fbUser.email || '',
+      avatar,
+      emailVerified: fbUser.emailVerified
+    };
+  },
+
+  // Send Firebase email verification to current email/password user
+  sendVerificationEmail: async (): Promise<void> => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) {
+      throw new Error('Usuário não autenticado para envio de verificação.');
+    }
+    if (fbUser.emailVerified) return;
+    await sendEmailVerification(fbUser);
+  },
+
+  // Mandatory first-access password change flow (reauthenticate -> updatePassword -> server confirmation)
+  changeFirstAccessPassword: async (
+    currentTempPassword: string,
+    newPassword: string
+  ): Promise<{ member: WorkspaceMember }> => {
+    const fbUser = auth.currentUser;
+    if (!fbUser || !fbUser.email) {
+      throw new Error('Sessão expirada. Faça login novamente com seu e-mail e senha temporária.');
+    }
+
+    const credential = EmailAuthProvider.credential(fbUser.email, currentTempPassword);
+    await reauthenticateWithCredential(fbUser, credential);
+    await updatePassword(fbUser, newPassword);
+
+    // Re-authenticate with the new password so auth_time >= tokensValidAfterTime
+    // and checkRevoked=true on the server accepts the fresh ID token immediately.
+    const refreshedCred = await signInWithEmailAndPassword(auth, fbUser.email, newPassword);
+    const freshIdToken = await refreshedCred.user.getIdToken(true);
+    const res = await fetch('/api/auth/complete-first-password-change', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${freshIdToken}`
+      }
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      throw new Error(
+        data?.message ||
+          'A nova senha foi salva no Auth, mas houve falha ao confirmar a liberação no servidor. Tente novamente ou contate o administrador.'
+      );
+    }
+
+    return { member: data.member as WorkspaceMember };
+  },
+
   // Auth state listener
   onAuthChange: (callback: (user: User | null) => void) => {
     return onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
@@ -259,8 +345,12 @@ export const FirebaseService = {
     }
   },
 
-  // Subscribe to real-time Tasks directly from Firestore
-  subscribeTasks: (onTasks: (tasks: Task[]) => void, userId?: string) => {
+  // Subscribe to real-time Tasks directly from Firestore (ADM/Owner full workspace scan)
+  subscribeTasks: (
+    onTasks: (tasks: Task[]) => void,
+    userId?: string,
+    onError?: (error: any) => void
+  ) => {
     if (isGuestUserId(userId)) {
       // Local guest mode operates purely in local storage; emit local tasks immediately
       setTimeout(() => {
@@ -281,7 +371,77 @@ export const FirebaseService = {
       onTasks(tasks);
     }, (error) => {
       console.warn('Firestore tasks subscription notice:', error);
+      if (onError) onError(error);
     });
+  },
+
+  // Scoped real-time Tasks subscription for approved Collaborators (matches Firestore ABAC rules)
+  subscribeAuthorizedTasks: (
+    ownerUid: string,
+    collaboratorUid: string,
+    onTasks: (tasks: Task[]) => void,
+    onError?: (error: any) => void
+  ) => {
+    if (isGuestUserId(ownerUid) || !collaboratorUid) {
+      onTasks([]);
+      return () => {};
+    }
+
+    const colRef = collection(db, 'users', ownerUid, 'tasks');
+    const qAssigned = query(colRef, where('assignedUid', '==', collaboratorUid));
+    const qAllowed = query(colRef, where('allowedUids', 'array-contains', collaboratorUid));
+
+    const assignedMap = new Map<string, Task>();
+    const allowedMap = new Map<string, Task>();
+    let assignedReady = false;
+    let allowedReady = false;
+
+    const emitMerged = () => {
+      if (!assignedReady && !allowedReady) return;
+      const merged = new Map<string, Task>();
+      assignedMap.forEach((t, id) => merged.set(id, t));
+      allowedMap.forEach((t, id) => merged.set(id, t));
+      onTasks(Array.from(merged.values()));
+    };
+
+    const unsub1 = onSnapshot(
+      qAssigned,
+      (snap) => {
+        assignedMap.clear();
+        snap.forEach((d) => {
+          const data = d.data() as Task;
+          assignedMap.set(data.id || d.id, data);
+        });
+        assignedReady = true;
+        emitMerged();
+      },
+      (err) => {
+        console.warn('Firestore scoped assignedUid tasks subscription error:', err);
+        if (onError) onError(err);
+      }
+    );
+
+    const unsub2 = onSnapshot(
+      qAllowed,
+      (snap) => {
+        allowedMap.clear();
+        snap.forEach((d) => {
+          const data = d.data() as Task;
+          allowedMap.set(data.id || d.id, data);
+        });
+        allowedReady = true;
+        emitMerged();
+      },
+      (err) => {
+        console.warn('Firestore scoped allowedUids tasks subscription error:', err);
+        if (onError) onError(err);
+      }
+    );
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
   },
 
   // Save/Update a single task directly in Firestore
@@ -502,7 +662,10 @@ export const FirebaseService = {
         if (data && (data.name || data.id)) {
           devs.push({
             id: String(data.id || d.id),
-            name: String(data.name || d.id).trim()
+            name: String(data.name || d.id).trim(),
+            email: data.email ? String(data.email).trim() : undefined,
+            linkedUid: data.linkedUid ? String(data.linkedUid).trim() : undefined,
+            linkedMemberId: data.linkedMemberId ? String(data.linkedMemberId).trim() : undefined
           });
         }
       });
@@ -561,7 +724,13 @@ export const FirebaseService = {
       devs.forEach((d, idx) => {
         const safeId = String(d.id || `dev-${Date.now()}-${idx}`).replace(/\//g, '_').trim();
         const ref = FirebaseService.getTargetDoc('devs', safeId, userId);
-        batch.set(ref, cleanForFirestore({ id: safeId, name: d.name.trim() }), { merge: true });
+        batch.set(ref, cleanForFirestore({
+          id: safeId,
+          name: d.name.trim(),
+          email: d.email,
+          linkedUid: d.linkedUid,
+          linkedMemberId: d.linkedMemberId
+        }), { merge: true });
       });
       await batch.commit();
     } catch (e) {
@@ -940,7 +1109,11 @@ export const FirebaseService = {
   },
 
   // --- Workspace Members Management (Firestore Real-time & CRUD) ---
-  subscribeMembers: (ownerUid: string, onMembers: (members: WorkspaceMember[]) => void) => {
+  subscribeMembers: (
+    ownerUid: string,
+    onMembers: (members: WorkspaceMember[]) => void,
+    onError?: (error: any) => void
+  ) => {
     if (isGuestUserId(ownerUid)) {
       setTimeout(() => {
         try {
@@ -953,88 +1126,254 @@ export const FirebaseService = {
     return onSnapshot(colRef, (snapshot) => {
       const list: WorkspaceMember[] = [];
       snapshot.forEach(docSnap => {
-        list.push(docSnap.data() as WorkspaceMember);
+        list.push({ id: docSnap.id, ...(docSnap.data() as WorkspaceMember) });
       });
       onMembers(list);
     }, (error) => {
       console.warn('Firestore members subscription notice:', error);
+      if (onError) onError(error);
     });
   },
 
-  saveMember: async (ownerUid: string, member: WorkspaceMember) => {
-    if (isGuestUserId(ownerUid) || !member) return;
-    try {
-      const safeId = String(member.id || member.email).replace(/[/\\?%*:|"<>]/g, '_').trim();
-      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
-      const data = cleanForFirestore({
-        ...member,
-        workspaceOwnerUid: ownerUid,
-        updatedAt: new Date().toISOString()
+  fetchMyMemberRecord: async (ownerUid: string, uid: string): Promise<WorkspaceMember | null> => {
+    if (isGuestUserId(ownerUid) || !uid) return null;
+    const docRef = doc(db, 'users', ownerUid, 'members', uid);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as WorkspaceMember) };
+  },
+
+  subscribeMyMemberRecord: (
+    ownerUid: string,
+    uid: string,
+    onMember: (member: WorkspaceMember | null) => void,
+    onError?: (error: any) => void
+  ) => {
+    if (isGuestUserId(ownerUid) || !uid) {
+      onMember(null);
+      return () => {};
+    }
+    const docRef = doc(db, 'users', ownerUid, 'members', uid);
+    return onSnapshot(
+      docRef,
+      (snap) => {
+        if (!snap.exists()) {
+          onMember(null);
+        } else {
+          onMember({ id: snap.id, ...(snap.data() as WorkspaceMember) });
+        }
+      },
+      (err) => {
+        console.warn('Firestore my member record subscription notice:', err);
+        if (onError) onError(err);
+      }
+    );
+  },
+
+  saveMember: async (ownerUid: string, member: WorkspaceMember): Promise<WorkspaceMember> => {
+    if (isGuestUserId(ownerUid) || !member) return member;
+    // Canonical doc ID is strictly member.uid when UID is known (required by firestore.rules)
+    const canonicalId = String(member.uid || member.id || member.email)
+      .replace(/[/\\?%*:|"<>]/g, '_')
+      .trim();
+    const legacyId = member.id ? String(member.id).replace(/[/\\?%*:|"<>]/g, '_').trim() : canonicalId;
+
+    const canonicalMember: WorkspaceMember = {
+      ...member,
+      id: canonicalId,
+      workspaceOwnerUid: ownerUid
+    };
+
+    const docRef = doc(db, 'users', ownerUid, 'members', canonicalId);
+    const data = cleanForFirestore({
+      ...canonicalMember,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(docRef, data, { merge: true });
+
+    // Clean up legacy mem_... doc if migrated to UID key
+    if (member.uid && legacyId && legacyId !== canonicalId) {
+      await deleteDoc(doc(db, 'users', ownerUid, 'members', legacyId)).catch(() => {});
+    }
+
+    return canonicalMember;
+  },
+
+  syncMemberTaskAuthorization: async (
+    ownerUid: string,
+    targetUid: string,
+    assignedTaskIds: string[],
+    previousTaskIds: string[] = []
+  ): Promise<void> => {
+    if (isGuestUserId(ownerUid) || !targetUid) return;
+    const cleanTarget = targetUid.trim();
+    const desired = Array.from(new Set((assignedTaskIds || []).map(x => String(x || '').trim()).filter(Boolean)));
+    const removed = (previousTaskIds || [])
+      .map(x => String(x || '').trim())
+      .filter(id => id && !desired.includes(id));
+
+    const ops: Array<{ ref: any; payload: Record<string, any> }> = [];
+    const nowIso = new Date().toISOString();
+
+    for (const taskId of desired) {
+      const safeTaskId = taskId.replace(/\//g, '_').trim();
+      const ref = doc(db, 'users', ownerUid, 'tasks', safeTaskId);
+      ops.push({
+        ref,
+        payload: {
+          allowedUids: arrayUnion(cleanTarget),
+          updatedAt: nowIso
+        }
       });
-      await setDoc(docRef, data, { merge: true });
-    } catch (e) {
-      console.warn('Error saving member to Firestore:', e);
+    }
+
+    for (const taskId of removed) {
+      const safeTaskId = taskId.replace(/\//g, '_').trim();
+      const ref = doc(db, 'users', ownerUid, 'tasks', safeTaskId);
+      ops.push({
+        ref,
+        payload: {
+          allowedUids: arrayRemove(cleanTarget),
+          updatedAt: nowIso
+        }
+      });
+    }
+
+    const chunkSize = 400;
+    for (let i = 0; i < ops.length; i += chunkSize) {
+      const batch = writeBatch(db);
+      ops.slice(i, i + chunkSize).forEach(op => batch.set(op.ref, op.payload, { merge: true }));
+      await batch.commit();
     }
   },
 
-  deleteMember: async (ownerUid: string, memberId: string) => {
+  deleteMember: async (ownerUid: string, memberId: string): Promise<void> => {
     if (isGuestUserId(ownerUid) || !memberId) return;
-    try {
-      const safeId = String(memberId).replace(/[/\\?%*:|"<>]/g, '_').trim();
-      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
-      await deleteDoc(docRef);
-    } catch (e) {
-      console.warn('Error deleting member from Firestore:', e);
-    }
+    const safeId = String(memberId).replace(/[/\\?%*:|"<>]/g, '_').trim();
+    const docRef = doc(db, 'users', ownerUid, 'members', safeId);
+    await deleteDoc(docRef);
   },
 
   fetchMember: async (ownerUid: string, identifier: string): Promise<WorkspaceMember | null> => {
     if (isGuestUserId(ownerUid) || !identifier) return null;
-    try {
-      const safeId = String(identifier).replace(/[/\\?%*:|"<>]/g, '_').trim();
-      const docRef = doc(db, 'users', ownerUid, 'members', safeId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        return snap.data() as WorkspaceMember;
-      }
-    } catch (e) {
-      console.warn('Error fetching member from Firestore:', e);
+    const safeId = String(identifier).replace(/[/\\?%*:|"<>]/g, '_').trim();
+    const docRef = doc(db, 'users', ownerUid, 'members', safeId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...(snap.data() as WorkspaceMember) };
     }
     return null;
   },
 
-  // --- Account Recovery Requests (Persistent queue in Firestore) ---
-  subscribeRecoveryRequests: (ownerUid: string, callback: (requests: AccountRecoveryRequest[]) => void) => {
+  // --- Authenticated Dev Access Requests Queue (Strict UID-bound & Verified Email) ---
+  subscribeAccessRequests: (
+    ownerUid: string,
+    callback: (requests: AccessRequest[]) => void,
+    onError?: (error: any) => void
+  ) => {
     if (isGuestUserId(ownerUid)) {
       callback([]);
       return () => {};
     }
-    try {
-      const colRef = collection(db, 'users', ownerUid, 'recoveryRequests');
-      return onSnapshot(colRef, (snapshot) => {
-        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AccountRecoveryRequest));
+    const colRef = collection(db, 'users', ownerUid, 'accessRequests');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as AccessRequest) }));
         list.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
         callback(list);
-      }, (err) => {
-        console.warn('[Firebase] subscribeRecoveryRequests notice:', err);
-        callback([]);
-      });
-    } catch (e) {
-      console.warn('[Firebase] subscribeRecoveryRequests error:', e);
+      },
+      (err) => {
+        console.warn('[Firebase] subscribeAccessRequests error:', err);
+        if (onError) onError(err);
+      }
+    );
+  },
+
+  fetchMyAccessRequest: async (ownerUid: string, uid: string): Promise<AccessRequest | null> => {
+    if (isGuestUserId(ownerUid) || !uid) return null;
+    const docRef = doc(db, 'users', ownerUid, 'accessRequests', uid);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as AccessRequest) };
+  },
+
+  saveAccessRequest: async (ownerUid: string, req: AccessRequest): Promise<void> => {
+    if (isGuestUserId(ownerUid)) {
+      throw new Error('Sessão não autenticada no Firebase.');
+    }
+    const current = auth.currentUser;
+    if (!current || current.uid !== req.uid) {
+      throw new Error('UID da solicitação não coincide com a conta autenticada.');
+    }
+    if (!current.emailVerified) {
+      throw new Error('Verifique seu e-mail antes de enviar a solicitação de acesso.');
+    }
+    const docRef = doc(db, 'users', ownerUid, 'accessRequests', current.uid);
+    const existingSnap = await getDoc(docRef);
+    if (existingSnap.exists()) {
+      // Request already persisted for this UID - return cleanly without violating !exists() create rule
+      return;
+    }
+    const payload = cleanForFirestore({
+      id: current.uid,
+      uid: current.uid,
+      email: (current.email || req.email).trim().toLowerCase(),
+      name: req.name ? req.name.trim().slice(0, 120) : undefined,
+      department: req.department ? req.department.trim().slice(0, 160) : undefined,
+      devNameHint: req.devNameHint ? req.devNameHint.trim().slice(0, 120) : undefined,
+      status: 'pending',
+      requestedAt: req.requestedAt || new Date().toISOString()
+    });
+    await setDoc(docRef, payload);
+  },
+
+  updateAccessRequestStatus: async (
+    ownerUid: string,
+    requestUid: string,
+    status: 'resolved' | 'rejected',
+    resolvedByUid?: string
+  ): Promise<void> => {
+    if (isGuestUserId(ownerUid) || !requestUid) return;
+    const docRef = doc(db, 'users', ownerUid, 'accessRequests', requestUid);
+    await setDoc(
+      docRef,
+      cleanForFirestore({
+        status,
+        resolvedAt: new Date().toISOString(),
+        resolvedByUid,
+        updatedAt: new Date().toISOString()
+      }),
+      { merge: true }
+    );
+  },
+
+  // --- Account Recovery Requests (Admin/Owner managed queue in Firestore) ---
+  subscribeRecoveryRequests: (
+    ownerUid: string,
+    callback: (requests: AccountRecoveryRequest[]) => void,
+    onError?: (error: any) => void
+  ) => {
+    if (isGuestUserId(ownerUid)) {
       callback([]);
       return () => {};
     }
+    const colRef = collection(db, 'users', ownerUid, 'recoveryRequests');
+    return onSnapshot(colRef, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AccountRecoveryRequest));
+      list.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
+      callback(list);
+    }, (err) => {
+      console.warn('[Firebase] subscribeRecoveryRequests notice:', err);
+      if (onError) onError(err);
+    });
   },
 
   saveRecoveryRequest: async (ownerUid: string, req: AccountRecoveryRequest) => {
     if (isGuestUserId(ownerUid) || !req || !req.id) return;
-    try {
-      const safeId = String(req.id).replace(/[/\\?%*:|"<>]/g, '_').trim();
-      const docRef = doc(db, 'users', ownerUid, 'recoveryRequests', safeId);
-      await setDoc(docRef, cleanForFirestore(req), { merge: true });
-    } catch (e) {
-      console.warn('[Firebase] saveRecoveryRequest error:', e);
-    }
+    const safeId = String(req.id).replace(/[/\\?%*:|"<>]/g, '_').trim();
+    const docRef = doc(db, 'users', ownerUid, 'recoveryRequests', safeId);
+    await setDoc(docRef, cleanForFirestore(req), { merge: true });
   },
 
   // Completely wipe all user data in Firestore

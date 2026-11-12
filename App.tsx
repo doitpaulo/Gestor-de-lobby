@@ -19,6 +19,7 @@ import { TodayNotificationBanner } from './components/TodayNotificationBanner';
 import { AIAgentApiModal } from './components/AIAgentApiModal';
 import { AdminUserManagementView } from './components/AdminUserManagementView';
 import { PendingAccessScreen } from './components/PendingAccessScreen';
+import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScreen';
 import { AccountHelpModal } from './components/AccountHelpModal';
 import { NotificationService } from './services/notificationService';
 import { OWNER_EMAIL, isUserAdmin, isOwnerUser, isTaskAuthorized, getUserPermissions } from './services/storageService';
@@ -7958,17 +7959,19 @@ const Layout = ({ children, user, onLogout, onGoogleLogin, headerContent, onCrea
 
         {/* Mobile Quick Action Buttons in Drawer */}
         <div className="p-3 border-b border-slate-800 bg-slate-950/60 space-y-2">
-          <button
-            onClick={() => {
-              if (onOpenUpload) onOpenUpload();
-              setIsMobileDrawerOpen(false);
-            }}
-            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95 transition-all"
-          >
-            <IconUpload className="w-4 h-4" />
-            <span>Importar Planilha / Backup</span>
-          </button>
-          {onOpenManageDevs && (
+          {isAdmin && onOpenUpload && (
+            <button
+              onClick={() => {
+                onOpenUpload();
+                setIsMobileDrawerOpen(false);
+              }}
+              className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95 transition-all"
+            >
+              <IconUpload className="w-4 h-4" />
+              <span>Importar Planilha / Backup</span>
+            </button>
+          )}
+          {isAdmin && onOpenManageDevs && (
             <button
               onClick={() => {
                 onOpenManageDevs();
@@ -8422,13 +8425,37 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                     const fbUser = await FirebaseService.registerWithEmail(cleanEmail, password, cleanName);
                     StorageService.clearAllMemory();
                     StorageService.updateUser(fbUser);
-                    setSuccessMessage('Conta ativada com sucesso! Conectando...');
+
+                    // Send Firebase email verification link cleanly; accessRequests require emailVerified == true
+                    try {
+                        await FirebaseService.sendVerificationEmail();
+                    } catch (verifyErr) {
+                        console.warn('Notice: Could not send verification email immediately:', verifyErr);
+                    }
+
+                    if (fbUser.emailVerified) {
+                        try {
+                            await FirebaseService.saveAccessRequest(NEXUS_OWNER_UID, {
+                                id: fbUser.id,
+                                uid: fbUser.id,
+                                email: cleanEmail,
+                                name: cleanName,
+                                department: `Primeiro Acesso Concluído (UID: ${fbUser.id})`,
+                                requestedAt: new Date().toISOString(),
+                                status: 'pending'
+                            });
+                        } catch (queueErr) {
+                            console.warn('Notice: Could not auto-queue access request:', queueErr);
+                        }
+                    }
+
+                    setSuccessMessage('Conta criada com sucesso! Verifique seu e-mail para enviar sua solicitação ao ADM ou aguarde a vinculação.');
                     setTimeout(() => {
                         onLogin(fbUser);
                     }, 400);
                 } catch (fbErr: any) {
                     if (fbErr.code === 'auth/email-already-in-use') {
-                        setError('Este e-mail já possui conta criada. Utilize a aba "Entrar" com sua senha do Nexus ou solicite ajuda ao administrador.');
+                        setError('Este e-mail já possui conta criada. Utilize a aba "Entrar" (inclusive se o ADM forneceu uma senha temporária) ou solicite ajuda ao administrador.');
                     } else if (fbErr.code === 'auth/weak-password') {
                         setError('A senha fornecida é muito fraca. Utilize uma combinação mais segura.');
                     } else if (fbErr.code === 'auth/invalid-email') {
@@ -8617,7 +8644,7 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
                     {authMode === 'login' && (
                         <p className="text-[11px] text-slate-400 leading-relaxed">
-                            Utilize o e-mail pré-autorizado e a senha própria cadastrada para o Nexus.
+                            Entre com seu e-mail e sua senha pessoal do Nexus (ou com a senha temporária criada pelo ADM para definir sua nova senha no primeiro login).
                         </p>
                     )}
 
@@ -10714,17 +10741,56 @@ export default function App() {
     };
   }, []);
 
-  // Firebase Auth State Listener
+  // Firebase Auth State Listener (hydrates authoritative member record from Firestore)
   useEffect(() => {
-    const unsubAuth = FirebaseService.onAuthChange((fbUser) => {
+    let active = true;
+    const unsubAuth = FirebaseService.onAuthChange(async (fbUser) => {
+      if (!active) return;
       if (fbUser) {
-        const resolved = StorageService.resolveUserMembership(fbUser);
+        let memberDoc: WorkspaceMember | null = null;
+        if (fbUser.id !== NEXUS_OWNER_UID && !fbUser.id.startsWith('guest-')) {
+          try {
+            memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, fbUser.id);
+          } catch (e) {
+            console.warn('Notice reading member record on auth change:', e);
+          }
+        }
+        if (!active) return;
+        const resolved = StorageService.resolveUserMembership(fbUser, memberDoc);
         setUser(resolved);
         StorageService.updateUser(resolved);
       }
     });
-    return () => unsubAuth();
+    return () => {
+      active = false;
+      unsubAuth();
+    };
   }, []);
+
+  // Real-time listener for current user's own member record (transitions pending -> mustChangePassword -> active)
+  useEffect(() => {
+    if (!user || !user.id || isOwnerUser(user) || user.id.startsWith('guest-')) {
+      return;
+    }
+
+    const unsubMyMember = FirebaseService.subscribeMyMemberRecord(
+      NEXUS_OWNER_UID,
+      user.id,
+      (memberDoc) => {
+        setUser(prev => {
+          if (!prev || prev.id !== user.id) return prev;
+          const next = StorageService.resolveUserMembership(prev, memberDoc);
+          StorageService.updateUser(next);
+          return next;
+        });
+      },
+      (err) => {
+        console.warn('MyMember subscription error:', err);
+      }
+    );
+
+    return () => unsubMyMember();
+  }, [user?.id]);
 
   // Firebase Firestore Real-Time Sync across devices directly with Database
   useEffect(() => {
@@ -10736,8 +10802,9 @@ export default function App() {
       return;
     }
 
-    // Security Gate: Pending or Inactive accounts NEVER load workspace records!
-    if (user.status === 'pending' || user.status === 'inactive') {
+    // Dual Security Gate: Accounts requiring password change, pending, or inactive NEVER load workspace records!
+    const isOwner = isOwnerUser(user);
+    if ((user.mustChangePassword && !isOwner) || (!isOwner && (user.status === 'pending' || user.status === 'inactive'))) {
       setTasks([]);
       setDevs([]);
       setRobots([]);
@@ -10748,25 +10815,31 @@ export default function App() {
 
     const isAdmin = isUserAdmin(user);
     // Canonical workspace owner UID is strictly NEXUS_OWNER_UID (pM6ApHmKYfW2nMFRmUFGCtfjCEx1)
-    const workspaceUid = user.workspaceOwnerUid || (isOwnerUser(user) ? NEXUS_OWNER_UID : (user.id || NEXUS_OWNER_UID));
+    const workspaceUid = user.workspaceOwnerUid || (isOwner ? NEXUS_OWNER_UID : (user.id || NEXUS_OWNER_UID));
     StorageService.setCurrentUserId(workspaceUid);
 
     // If ADM, subscribe to members registry on canonical owner workspace
     let unsubMembers = () => {};
     if (isAdmin) {
-      unsubMembers = FirebaseService.subscribeMembers(NEXUS_OWNER_UID, (remoteMembers) => {
-        if (remoteMembers && remoteMembers.length > 0) {
-          StorageService.setMembersInMemory(remoteMembers);
+      unsubMembers = FirebaseService.subscribeMembers(
+        NEXUS_OWNER_UID,
+        (remoteMembers) => {
+          if (remoteMembers && remoteMembers.length > 0) {
+            StorageService.setMembersInMemory(remoteMembers);
+          }
+        },
+        (err) => {
+          console.warn('Members subscription error:', err);
         }
-      });
+      );
     }
 
     // Migration of legacy data if needed (strictly for root owner UID)
-    if (isOwnerUser(user)) {
+    if (isOwner) {
       FirebaseService.migrateLegacyDataIfNeeded(user);
     }
 
-    // Load workflow & documents settings with smart conflict resolution (never clobber custom phases with defaults!)
+    // Load workflow & documents settings with smart conflict resolution
     StorageService.syncWorkflowFromServerAndCloud(workspaceUid).then(resolved => {
       if (resolved && Array.isArray(resolved) && resolved.length > 0) {
         setWorkflowConfig(resolved);
@@ -10779,39 +10852,63 @@ export default function App() {
       }
     }).catch(e => console.warn('Documents cloud/server sync notice:', e));
 
-    // Azure DevOps Cloud Sync for all authorized sessions (loads credentials automatically from first integration across any machine)
+    // Azure DevOps Cloud Sync
     StorageService.syncDevOpsFromCloud(NEXUS_OWNER_UID).catch(e => {
       console.warn('DevOps cloud sync notice:', e);
     });
 
-    // Subscribe to Firestore collections in real time
-    const unsubTasks = FirebaseService.subscribeTasks((remoteTasks) => {
-      // 1. Filter out deleted tasks
-      const activeRemoteTasks = (remoteTasks || []).filter(t => !StorageService.isTaskDeleted(t.id));
+    // Subscribe to Firestore tasks: ADM scans workspace; Collaborator subscribes strictly to UID-authorized queries!
+    const unsubTasks = isAdmin
+      ? FirebaseService.subscribeTasks(
+          (remoteTasks) => {
+            const activeRemoteTasks = (remoteTasks || []).filter(t => !StorageService.isTaskDeleted(t.id));
+            (remoteTasks || []).forEach(t => {
+              if (StorageService.isTaskDeleted(t.id)) {
+                FirebaseService.deleteTask(t.id, workspaceUid).catch(() => {});
+              }
+            });
 
-      // 2. Proactively delete any lingering remote tasks that are marked as deleted (only if admin)
-      if (isAdmin) {
-        (remoteTasks || []).forEach(t => {
-          if (StorageService.isTaskDeleted(t.id)) {
-            FirebaseService.deleteTask(t.id, workspaceUid).catch(() => {});
+            if (activeRemoteTasks.length > 0) {
+              setTasks(activeRemoteTasks);
+              StorageService.setTasksInMemory(activeRemoteTasks);
+            } else {
+              const localTasks = StorageService.getTasks();
+              if (localTasks.length > 0) {
+                FirebaseService.saveTasksBatch(localTasks, workspaceUid, true).catch(e =>
+                  console.warn('Sync local tasks to Firestore notice:', e)
+                );
+                setTasks(localTasks);
+              } else {
+                setTasks([]);
+              }
+            }
+            setIsInitialDataLoaded(true);
+          },
+          workspaceUid,
+          (err) => {
+            showToast('error', `Falha ao sincronizar demandas do Firestore: ${err?.message || 'permissão ou rede'}`);
           }
-        });
-      }
-
-      if (activeRemoteTasks.length > 0) {
-        setTasks(activeRemoteTasks);
-        StorageService.setTasksInMemory(activeRemoteTasks);
-      } else {
-        const localTasks = StorageService.getTasks();
-        if (localTasks.length > 0 && isAdmin) {
-          FirebaseService.saveTasksBatch(localTasks, workspaceUid, true).catch(e => console.warn('Sync local tasks to Firestore notice:', e));
-          setTasks(localTasks);
-        } else {
-          setTasks([]);
-        }
-      }
-      setIsInitialDataLoaded(true);
-    }, workspaceUid);
+        )
+      : FirebaseService.subscribeAuthorizedTasks(
+          workspaceUid,
+          user.id,
+          (remoteTasks) => {
+            const activeRemoteTasks = (remoteTasks || []).filter(
+              t => !StorageService.isTaskDeleted(t.id) && isTaskAuthorized(t, user)
+            );
+            setTasks(activeRemoteTasks);
+            StorageService.setTasksInMemory(activeRemoteTasks);
+            setIsInitialDataLoaded(true);
+          },
+          (err) => {
+            setIsInitialDataLoaded(true);
+            showToast(
+              'error',
+              `Erro ao ler suas demandas autorizadas no Firestore: ${err?.message || 'verifique permissões com o ADM.'}`,
+              'Acesso Restrito / Erro de Leitura'
+            );
+          }
+        );
 
     const unsubDevs = FirebaseService.subscribeDevs((remoteDevs) => {
       const cleanDevs = remoteDevs || [];
@@ -10856,7 +10953,7 @@ export default function App() {
       unsubSprints();
       unsubMembers();
     };
-  }, [user?.id, user?.status]);
+  }, [user?.id, user?.status, user?.mustChangePassword]);
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
@@ -10999,14 +11096,24 @@ export default function App() {
     window.addEventListener('nexus-data-restored', handleDataRestored);
     return () => window.removeEventListener('nexus-data-restored', handleDataRestored);
   }, []);
-  const handleLogin = (loggedInUser: User) => {
+  const handleLogin = async (loggedInUser: User) => {
     StorageService.clearAllMemory();
     setTasks([]);
     setDevs([]);
     setRobots([]);
     setSprints([]);
     setIsInitialDataLoaded(false);
-    const resolved = StorageService.resolveUserMembership(loggedInUser);
+
+    let memberDoc: WorkspaceMember | null = null;
+    if (loggedInUser.id !== NEXUS_OWNER_UID && !loggedInUser.id.startsWith('guest-')) {
+      try {
+        memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, loggedInUser.id);
+      } catch (e) {
+        console.warn('Notice reading member record after login:', e);
+      }
+    }
+
+    const resolved = StorageService.resolveUserMembership(loggedInUser, memberDoc);
     StorageService.updateUser(resolved);
     setUser(resolved);
   };
@@ -11026,14 +11133,7 @@ export default function App() {
   const handleGoogleLoginDirect = async () => {
     try {
       const fbUser = await FirebaseService.loginWithGoogle();
-      StorageService.clearAllMemory();
-      setTasks([]);
-      setDevs([]);
-      setRobots([]);
-      setSprints([]);
-      const resolved = StorageService.resolveUserMembership(fbUser);
-      StorageService.updateUser(resolved);
-      setUser(resolved);
+      await handleLogin(fbUser);
     } catch (err: any) {
       console.error('Google login failed:', err);
       if (err.code === 'auth/unauthorized-domain') {
@@ -11370,11 +11470,36 @@ export default function App() {
 
     let finalTask = { ...updatedTask, id: cleanId, summary: cleanSummary }; 
 
+    // Auto-populate UID ACLs when ADM assigns/edits a task for a provisioned Developer
+    if (isAdmin) {
+      if (finalTask.assignee) {
+        const cleanAssignee = finalTask.assignee.trim().toLowerCase();
+        const matchingMember = StorageService.getMembers().find(
+          m =>
+            m.uid &&
+            ((m.linkedDevName && m.linkedDevName.trim().toLowerCase() === cleanAssignee) ||
+              (m.name && m.name.trim().toLowerCase() === cleanAssignee))
+        );
+        const matchingDev = devs.find(d => d.name.trim().toLowerCase() === cleanAssignee && d.linkedUid);
+        const targetUid = matchingMember?.uid || matchingDev?.linkedUid;
+        if (targetUid) {
+          finalTask.assignedUid = targetUid;
+          finalTask.allowedUids = Array.from(new Set([...(finalTask.allowedUids || []), targetUid]));
+        }
+      }
+    } else if (isCreating) {
+      finalTask.assignedUid = user.id;
+      finalTask.allowedUids = Array.from(new Set([...(finalTask.allowedUids || []), user.id]));
+      finalTask.createdByUid = user.id;
+    }
+
     // Set endDate if 100% complete
     const progress = calculateTaskProgress(finalTask, workflowConfig);
     if (progress === 100 && !finalTask.endDate) {
         finalTask.endDate = new Date().toISOString().split('T')[0];
     }
+
+    const workspaceUid = user.workspaceOwnerUid || NEXUS_OWNER_UID;
 
     if (!isCreating) { 
         const oldTask = tasks.find(t => t.id.trim().toLowerCase() === oldId.toLowerCase()) || tasks.find(t => t.id.trim().toLowerCase() === cleanId.toLowerCase()); 
@@ -11399,23 +11524,35 @@ export default function App() {
         } 
         
         // If ID changed during edit, clean up the old doc in Firestore
-        if (oldId && oldId.toLowerCase() !== cleanId.toLowerCase()) {
-            if (user?.id) {
-                FirebaseService.deleteTask(oldId, user.id).catch(e => console.warn('Delete old taskId in rename:', e));
-            }
+        if (isAdmin && oldId && oldId.toLowerCase() !== cleanId.toLowerCase()) {
+            FirebaseService.deleteTask(oldId, workspaceUid).catch(e => console.warn('Delete old taskId in rename:', e));
         }
 
         const newTasks = tasks.map(t => 
             (t.id.trim().toLowerCase() === oldId.toLowerCase() || t.id.trim().toLowerCase() === cleanId.toLowerCase()) ? finalTask : t
         ); 
         setTasks(newTasks); 
-        StorageService.saveTasks(newTasks); 
+        if (isAdmin) {
+            StorageService.saveTasks(newTasks); 
+        } else {
+            StorageService.setTasksInMemory(newTasks);
+            FirebaseService.saveTask(finalTask, workspaceUid).catch(e => {
+                showToast('error', `Erro ao salvar alteração da demanda: ${e?.message || 'permissão negada'}`);
+            });
+        }
     } else { 
         finalTask.createdAt = new Date().toISOString();
         finalTask.history = [{ id: Math.random().toString(36).substr(2, 9), date: new Date().toISOString(), user: user.name, action: 'Tarefa criada manualmente' }]; 
         const newTasks = [...tasks, finalTask]; 
         setTasks(newTasks); 
-        StorageService.saveTasks(newTasks); 
+        if (isAdmin) {
+            StorageService.saveTasks(newTasks); 
+        } else {
+            StorageService.setTasksInMemory(newTasks);
+            FirebaseService.saveTask(finalTask, workspaceUid).catch(e => {
+                showToast('error', `Erro ao criar demanda: ${e?.message || 'permissão negada'}`);
+            });
+        }
     } 
 
     setEditingTask(null);
@@ -11542,20 +11679,45 @@ export default function App() {
       throw error;
     }
   };
+  const refreshUserAccess = async () => {
+    if (!user) return;
+    const reloaded = await FirebaseService.reloadCurrentUser().catch(() => null);
+    const baseUser = reloaded || user;
+    let memberDoc: WorkspaceMember | null = null;
+    if (baseUser.id !== NEXUS_OWNER_UID && !baseUser.id.startsWith('guest-')) {
+      memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, baseUser.id);
+    }
+    const fresh = StorageService.resolveUserMembership(baseUser, memberDoc);
+    StorageService.updateUser(fresh);
+    setUser(fresh);
+  };
+
   const isPowerBiRoute = window.location.hash.includes('powerbi-data');
   if (!user && !isPowerBiRoute) return <AuthPage onLogin={handleLogin} />;
 
-  // Barrier: Block pending and inactive accounts from accessing data or workspace
-  if (user && (user.status === 'pending' || user.status === 'inactive') && !isPowerBiRoute) {
+  // Barrier 1: Mandatory First-Access Password Change BEFORE any data subscriptions/routes
+  if (user && user.mustChangePassword && !isOwnerUser(user) && !isPowerBiRoute) {
+    return (
+      <ForcePasswordChangeScreen
+        user={user}
+        onPasswordChanged={(updatedMember) => {
+          const fresh = StorageService.resolveUserMembership(user, updatedMember);
+          StorageService.updateUser(fresh);
+          setUser(fresh);
+        }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // Barrier 2: Block pending and inactive accounts from accessing data or workspace
+  if (user && !isOwnerUser(user) && (user.status === 'pending' || user.status === 'inactive') && !isPowerBiRoute) {
     return (
       <>
-        <PendingAccessScreen 
-          user={user} 
-          onRefresh={() => {
-            const fresh = StorageService.resolveUserMembership(user);
-            setUser(fresh);
-          }} 
-          onLogout={handleLogout} 
+        <PendingAccessScreen
+          user={user}
+          onRefresh={refreshUserAccess}
+          onLogout={handleLogout}
           onRequestHelp={() => setShowPendingHelpModal(true)}
         />
         <AccountHelpModal
@@ -12089,21 +12251,47 @@ export default function App() {
   onClose={() => setIsAIAgentApiModalOpen(false)}
   onRefreshData={syncFromAIAgentStore}
 />
-<Routes>
-  <Route path="/" element={<DashboardView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} />} />
-  <Route path="/projects" element={<ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} showToast={showToast} />} />
-  <Route path="/esteira" element={<DocumentPipelineView tasks={visibleTasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} />} />
-  <Route path="/sprints" element={<SprintsView tasks={visibleTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} />} />
-  <Route path="/project-report" element={<ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} />} />
-  <Route path="/kanban" element={<KanbanView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} />} />
-  <Route path="/list" element={<ListView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} sprints={sprints} setSprints={setSprints} showToast={showToast} />} />
-  <Route path="/gantt" element={<GanttView tasks={visibleTasks} devs={devs} />} />
-  <Route path="/robots" element={<RobotManagementView robots={robots} setRobots={setRobots} />} />
-  <Route path="/totem" element={<AutomationTotemView tasks={visibleTasks} setTasks={setTasks} robots={robots} />} />
-  <Route path="/reports" element={<ReportsView tasks={visibleTasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} />} />
-  <Route path="/admin" element={isAdmin ? <AdminUserManagementView currentUser={user!} tasks={tasks} /> : <Navigate to="/" />} />
-  <Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} />
-  <Route path="/powerbi-data" element={<PowerBIDataView />} />
-  <Route path="*" element={<Navigate to="/" />} />
-</Routes></Layout></HashRouter>);
+{(() => {
+  const canAccessModule = (moduleKey: keyof UserPermissions['modules']): boolean =>
+    isAdmin || Boolean(userPermissions.modules?.[moduleKey]);
+
+  const moduleRoutes: Array<{ key: keyof UserPermissions['modules']; path: string }> = [
+    { key: 'dashboard', path: '/' },
+    { key: 'list', path: '/list' },
+    { key: 'kanban', path: '/kanban' },
+    { key: 'projects', path: '/projects' },
+    { key: 'esteira', path: '/esteira' },
+    { key: 'sprints', path: '/sprints' },
+    { key: 'projectReport', path: '/project-report' },
+    { key: 'gantt', path: '/gantt' },
+    { key: 'robots', path: '/robots' },
+    { key: 'totem', path: '/totem' },
+    { key: 'reports', path: '/reports' }
+  ];
+
+  const defaultAllowedPath = isAdmin
+    ? '/'
+    : moduleRoutes.find(r => Boolean(userPermissions.modules?.[r.key]))?.path || '/profile';
+
+  return (
+    <Routes>
+      <Route path="/" element={canAccessModule('dashboard') ? <DashboardView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/projects" element={canAccessModule('projects') ? <ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/esteira" element={canAccessModule('esteira') ? <DocumentPipelineView tasks={visibleTasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/sprints" element={canAccessModule('sprints') ? <SprintsView tasks={visibleTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/project-report" element={canAccessModule('projectReport') ? <ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/kanban" element={canAccessModule('kanban') ? <KanbanView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/list" element={canAccessModule('list') ? <ListView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} sprints={sprints} setSprints={setSprints} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/gantt" element={canAccessModule('gantt') ? <GanttView tasks={visibleTasks} devs={devs} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/robots" element={canAccessModule('robots') ? <RobotManagementView robots={robots} setRobots={setRobots} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/totem" element={canAccessModule('totem') ? <AutomationTotemView tasks={visibleTasks} setTasks={setTasks} robots={robots} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/reports" element={canAccessModule('reports') ? <ReportsView tasks={visibleTasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/admin" element={isAdmin ? <AdminUserManagementView currentUser={user!} tasks={tasks} devs={devs} onMembersUpdated={refreshUserAccess} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} />
+      <Route path="/powerbi-data" element={<PowerBIDataView />} />
+      <Route path="*" element={<Navigate to={defaultAllowedPath} replace />} />
+    </Routes>
+  );
+})()}
+</Layout></HashRouter>);
 }

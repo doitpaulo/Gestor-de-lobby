@@ -174,6 +174,8 @@ export interface Developer {
   id: string;
   name: string;
   email?: string;
+  linkedUid?: string;
+  linkedMemberId?: string;
 }
 
 export type UserRole = 'ADM' | 'Colaborador';
@@ -284,6 +286,7 @@ export interface AccountRecoveryRequest {
   email: string;
   name?: string;
   department?: string;
+  reason?: string;
   requestedAt: string;
   status: 'pending' | 'resolved' | 'rejected';
   resolvedAt?: string;
@@ -292,8 +295,22 @@ export interface AccountRecoveryRequest {
   isGoogleAccount?: boolean;
 }
 
+export interface AccessRequest {
+  id: string; // canonical UID of authenticated requester
+  uid: string;
+  email: string;
+  name?: string;
+  department?: string;
+  devNameHint?: string;
+  requestedAt: string;
+  updatedAt?: string;
+  status: 'pending' | 'resolved' | 'rejected';
+  resolvedAt?: string;
+  resolvedByUid?: string;
+}
+
 export interface WorkspaceMember {
-  id: string; // member document ID (sanitized email or uid)
+  id: string; // canonical UID once linked (legacy mem_... migrated on link)
   uid?: string;
   email: string;
   name: string;
@@ -306,6 +323,13 @@ export interface WorkspaceMember {
   activatedAt?: string;
   lastActiveAt?: string;
   invitedBy?: string;
+  linkedDevId?: string;
+  linkedDevName?: string;
+  mustChangePassword?: boolean;
+  tempPasswordSetAt?: number; // Unix epoch seconds when temporary password was provisioned (password NEVER stored)
+  authValidAfterAtProvisionMs?: number; // Auth tokensValidAfterTime at creation
+  passwordChangedAt?: string;
+  provisioningMode?: 'admin-temp-password' | 'admin-linked-existing' | 'self-registered';
 }
 
 export interface User {
@@ -320,7 +344,12 @@ export interface User {
   assignedTaskIds?: string[];
   workspaceOwnerUid?: string;
   emailVerified?: boolean;
-  pendingReason?: 'UNAUTHORIZED' | 'UID_UNLINKED' | 'INACTIVE';
+  linkedDevId?: string;
+  linkedDevName?: string;
+  mustChangePassword?: boolean;
+  tempPasswordSetAt?: number;
+  passwordChangedAt?: string;
+  pendingReason?: 'UNAUTHORIZED' | 'UID_UNLINKED' | 'INACTIVE' | 'EMAIL_UNVERIFIED' | 'MUST_CHANGE_PASSWORD';
 }
 
 export interface DevOpsConfig {
