@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   User,
   Task,
@@ -15,7 +15,7 @@ import {
   sanitizeMemberPermissions
 } from '../types';
 import { OWNER_EMAIL, StorageService } from '../services/storageService';
-import { FirebaseService } from '../services/firebase';
+import { FirebaseService, auth } from '../services/firebase';
 import {
   IconShieldCheck,
   IconUsers,
@@ -56,6 +56,8 @@ const generateRandomTempPassword = (): string => {
   return result;
 };
 
+export type QueueLoadStatus = 'auth-pending' | 'loading' | 'cache' | 'server' | 'error';
+
 export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = ({
   currentUser,
   tasks,
@@ -66,7 +68,19 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
   const [members, setMembers] = useState<WorkspaceMember[]>(() => StorageService.getMembers());
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [recoveryRequests, setRecoveryRequests] = useState<AccountRecoveryRequest[]>(() => StorageService.getRecoveryRequests());
+  const [authSession, setAuthSession] = useState<{ ready: boolean; uid: string | null; email: string | null }>(() => ({
+    ready: Boolean(auth.currentUser),
+    uid: auth.currentUser?.uid || null,
+    email: auth.currentUser?.email || null
+  }));
+  const [accessQueueStatus, setAccessQueueStatus] = useState<QueueLoadStatus>(() =>
+    auth.currentUser ? 'loading' : 'auth-pending'
+  );
+  const [lastServerSyncAt, setLastServerSyncAt] = useState<string | null>(null);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [subscriptionRevision, setSubscriptionRevision] = useState(0);
   const [requestsError, setRequestsError] = useState<string | null>(null);
+  const serverConfirmedRef = useRef<boolean>(false);
   const [recoveryModalInfo, setRecoveryModalInfo] = useState<{ open: boolean; title: string; message: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | UserStatus>('all');
@@ -128,11 +142,100 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
     );
   };
 
-  // Subscribe to members, verified accessRequests, and recoveryRequests
+  // Track live Firebase Auth session readiness (prevents silent [] when localStorage hydrates before Auth persistence)
   useEffect(() => {
+    const unsubAuthSession = FirebaseService.subscribeAuthSession((session) => {
+      setAuthSession(prev => {
+        if (prev.ready === session.ready && prev.uid === session.uid && prev.email === session.email) {
+          return prev;
+        }
+        return session;
+      });
+    });
+    return () => unsubAuthSession();
+  }, []);
+
+  const handleRefreshAccessQueue = useCallback(async () => {
+    setIsManualRefreshing(true);
+    setRequestsError(null);
+    if (!serverConfirmedRef.current) {
+      setAccessQueueStatus('loading');
+    }
+    try {
+      const session = await FirebaseService.waitForAuthSession();
+      setAuthSession({ ready: true, uid: session.uid, email: session.email });
+      if (!session.uid) {
+        serverConfirmedRef.current = false;
+        setAccessQueueStatus('error');
+        setRequestsError(
+          'Sessão do Firebase Auth não está ativa nesta aba. Recarregue ou entre novamente como Administrador para ler a fila no servidor.'
+        );
+        return;
+      }
+      const res = await FirebaseService.fetchAccessRequestsFromServer(NEXUS_OWNER_UID);
+      serverConfirmedRef.current = true;
+      setAccessRequests(res.requests);
+      setAccessQueueStatus('server');
+      setLastServerSyncAt(res.fetchedAt);
+      setRequestsError(null);
+      setSubscriptionRevision(r => r + 1);
+    } catch (err: any) {
+      if (!serverConfirmedRef.current) {
+        setAccessQueueStatus('error');
+      }
+      setRequestsError(
+        `Erro ao consultar fila de solicitações no servidor: ${err?.message || err?.code || 'falha de rede ou permissão'}`
+      );
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  }, []);
+
+  // Subscribe to members, verified accessRequests, and recoveryRequests ONLY after Firebase Auth session resolves
+  useEffect(() => {
+    if (!authSession.ready) {
+      setAccessQueueStatus('auth-pending');
+      return;
+    }
+
+    if (!authSession.uid) {
+      serverConfirmedRef.current = false;
+      setAccessQueueStatus('error');
+      setRequestsError(
+        'Sessão do Firebase Auth não detectada nesta aba. Faça login novamente ou clique em "Tentar Novamente" após autenticar.'
+      );
+      return;
+    }
+
+    let active = true;
+    serverConfirmedRef.current = false;
+    setAccessQueueStatus('loading');
+    setRequestsError(null);
+
+    // Explicit initial server read (bypasses empty/stale cache in fresh tabs)
+    FirebaseService.fetchAccessRequestsFromServer(NEXUS_OWNER_UID)
+      .then((res) => {
+        if (!active) return;
+        serverConfirmedRef.current = true;
+        setAccessRequests(res.requests);
+        setAccessQueueStatus('server');
+        setLastServerSyncAt(res.fetchedAt);
+        setRequestsError(null);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        if (!serverConfirmedRef.current) {
+          setAccessQueueStatus('error');
+        }
+        setRequestsError(
+          `Erro na leitura inicial do servidor: ${err?.message || err?.code || 'permissão ou rede'}`
+        );
+      });
+
     const unsubMembers = FirebaseService.subscribeMembers(
       NEXUS_OWNER_UID,
       (remoteMembers) => {
+        if (!active) return;
         if (remoteMembers) {
           setMembers(remoteMembers.length > 0 ? remoteMembers : StorageService.getMembers());
           if (remoteMembers.length > 0) {
@@ -147,18 +250,39 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
 
     const unsubAccess = FirebaseService.subscribeAccessRequests(
       NEXUS_OWNER_UID,
-      (list) => {
-        setAccessRequests(list);
-        setRequestsError(null);
+      (list, meta) => {
+        if (!active) return;
+        const fromCache = Boolean(meta?.fromCache);
+        if (!fromCache) {
+          serverConfirmedRef.current = true;
+          setAccessRequests(list);
+          setAccessQueueStatus('server');
+          setLastServerSyncAt(new Date().toISOString());
+          setRequestsError(null);
+          return;
+        }
+        // Cache snapshot received before server sync: never clobber confirmed server data
+        if (serverConfirmedRef.current) return;
+        if (list.length > 0) {
+          setAccessRequests(list);
+          setAccessQueueStatus('cache');
+        }
       },
       (err) => {
-        setRequestsError(`Erro ao carregar fila de solicitações autenticadas: ${err?.message || 'permissão ou rede'}`);
+        if (!active) return;
+        if (!serverConfirmedRef.current) {
+          setAccessQueueStatus('error');
+        }
+        setRequestsError(
+          `Erro ao assinar fila de solicitações autenticadas: ${err?.message || err?.code || 'permissão ou rede'}`
+        );
       }
     );
 
     const unsubRecovery = FirebaseService.subscribeRecoveryRequests(
       NEXUS_OWNER_UID,
       (list) => {
+        if (!active) return;
         setRecoveryRequests(prev => {
           const map = new Map<string, AccountRecoveryRequest>();
           prev.forEach(item => map.set(item.id, item));
@@ -179,13 +303,13 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
     (async () => {
       try {
         const token = await FirebaseService.getIdToken();
-        if (!token) return;
+        if (!token || !active) return;
         const res = await fetch('/api/recovery/requests', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (!res.ok) return;
+        if (!res.ok || !active) return;
         const data = await res.json().catch(() => null);
-        if (data?.requests && Array.isArray(data.requests)) {
+        if (data?.requests && Array.isArray(data.requests) && active) {
           setRecoveryRequests(prev => {
             const map = new Map<string, AccountRecoveryRequest>();
             prev.forEach(item => map.set(item.id, item));
@@ -203,11 +327,12 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
     })();
 
     return () => {
+      active = false;
       unsubMembers();
       unsubAccess();
       unsubRecovery();
     };
-  }, []);
+  }, [authSession.ready, authSession.uid, subscriptionRevision]);
 
   const getTasksMatchingDevName = (devName: string): string[] => {
     const clean = devName.trim().toLowerCase();
@@ -1086,7 +1211,19 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
         >
           <IconShieldCheck className="w-4 h-4 text-amber-400" />
           <span>Solicitações de Acesso & Suporte</span>
-          {totalPendingRequests > 0 ? (
+          {accessQueueStatus === 'error' ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono font-bold">
+              Erro
+            </span>
+          ) : accessQueueStatus === 'auth-pending' || accessQueueStatus === 'loading' ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-mono">
+              Sincronizando...
+            </span>
+          ) : accessQueueStatus === 'cache' ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/40 font-mono">
+              Cache ({accessRequests.length})
+            </span>
+          ) : totalPendingRequests > 0 ? (
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold animate-pulse">
               {totalPendingRequests} pendente(s)
             </span>
@@ -1101,6 +1238,24 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
       {/* TAB 1: MEMBERS MANAGEMENT */}
       {activeTab === 'members' && (
         <>
+          {/* Error Banner when access queue failed to load from server */}
+          {requestsError && (
+            <div className="bg-rose-950/50 border border-rose-500/50 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-rose-200 shadow-lg">
+              <div className="text-xs">
+                <p className="font-bold text-rose-300">Falha ao consultar fila de aprovações no servidor</p>
+                <p className="text-[11px] text-rose-200/80 mt-0.5">{requestsError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefreshAccessQueue}
+                disabled={isManualRefreshing}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isManualRefreshing ? 'Tentando...' : 'Tentar Novamente'}
+              </button>
+            </div>
+          )}
+
           {/* Pending Access Requests Alert Banner */}
           {totalPendingRequests > 0 && (
             <div className="bg-amber-950/40 border border-amber-500/40 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200 shadow-lg">
@@ -1520,14 +1675,25 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
       {activeTab === 'recovery' && (
         <div className="space-y-4 flex-1 flex flex-col animate-fade-in">
           {requestsError && (
-            <div className="p-3.5 rounded-2xl bg-rose-950/60 border border-rose-500/50 text-xs text-rose-200">
-              {requestsError}
+            <div className="p-3.5 rounded-2xl bg-rose-950/60 border border-rose-500/50 text-xs text-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="font-bold text-rose-300">Erro ao sincronizar fila de aprovações</p>
+                <p className="mt-0.5">{requestsError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRefreshAccessQueue}
+                disabled={isManualRefreshing}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isManualRefreshing ? 'Tentando...' : 'Tentar Novamente'}
+              </button>
             </div>
           )}
 
           {/* Section 1: Authenticated Dev Access Requests (UID-bound & Verified Email) */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <IconUsers className="w-4 h-4 text-emerald-400" />
@@ -1537,9 +1703,45 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                   Contas já existentes no Firebase Auth aguardando vinculação e liberação de demandas sem alterar suas senhas.
                 </p>
               </div>
-              <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800 shrink-0">
-                {accessRequests.length} solicitação(ões)
-              </span>
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <span
+                  className={`text-[10px] font-mono px-2.5 py-1 rounded-lg border ${
+                    accessQueueStatus === 'server'
+                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                      : accessQueueStatus === 'cache'
+                      ? 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                      : accessQueueStatus === 'error'
+                      ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                      : 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300'
+                  }`}
+                >
+                  {accessQueueStatus === 'auth-pending'
+                    ? 'Autenticando sessão...'
+                    : accessQueueStatus === 'loading'
+                    ? 'Lendo servidor...'
+                    : accessQueueStatus === 'cache'
+                    ? 'Cache local • sincronizando servidor'
+                    : accessQueueStatus === 'error'
+                    ? 'Erro ao ler servidor'
+                    : `Servidor${lastServerSyncAt ? ` (${new Date(lastServerSyncAt).toLocaleTimeString('pt-BR')})` : ''}`}
+                </span>
+
+                <span className="text-[11px] font-mono text-slate-300 bg-slate-900 px-3 py-1 rounded-lg border border-slate-800">
+                  {accessQueueStatus === 'auth-pending' || accessQueueStatus === 'loading'
+                    ? 'Carregando...'
+                    : `${accessRequests.length} solicitação(ões)`}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleRefreshAccessQueue}
+                  disabled={isManualRefreshing}
+                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+                  title="Buscar solicitações diretamente do servidor Firestore"
+                >
+                  {isManualRefreshing ? 'Atualizando...' : 'Atualizar do Servidor'}
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto custom-scrollbar">
@@ -1556,8 +1758,16 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
                 <tbody className="divide-y divide-slate-800/80">
                   {accessRequests.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500">
-                        Nenhuma solicitação autenticada pendente na fila.
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        {accessQueueStatus === 'auth-pending'
+                          ? 'Aguardando confirmação da sessão Firebase Auth nesta aba...'
+                          : accessQueueStatus === 'loading'
+                          ? 'Buscando solicitações autenticadas diretamente no servidor...'
+                          : accessQueueStatus === 'cache'
+                          ? 'Cache local vazio — aguardando resposta do servidor Firestore...'
+                          : accessQueueStatus === 'error'
+                          ? 'Não foi possível carregar a fila do servidor. Verifique o erro acima e clique em "Tentar Novamente".'
+                          : 'Nenhuma solicitação autenticada registrada na fila (confirmado no servidor).'}
                       </td>
                     </tr>
                   ) : (

@@ -10504,6 +10504,7 @@ in
 
 export default function App() {
   const [user, setUser] = useState<User | null>(StorageService.getUser());
+  const [firebaseAuthUid, setFirebaseAuthUid] = useState<string | null>(() => auth.currentUser?.uid || null);
   const [tasks, setTasks] = useState<Task[]>(() => StorageService.getTasks());
   const [devs, setDevs] = useState<Developer[]>(() => StorageService.getDevs());
   const [robots, setRobots] = useState<Robot[]>(() => StorageService.getRobots());
@@ -10761,6 +10762,7 @@ export default function App() {
     let active = true;
     const unsubAuth = FirebaseService.onAuthChange(async (fbUser) => {
       if (!active) return;
+      setFirebaseAuthUid(fbUser ? fbUser.id : null);
       if (fbUser) {
         let currentUserSnapshot = fbUser;
         if (fbUser.id !== NEXUS_OWNER_UID && !fbUser.id.startsWith('guest-') && !fbUser.emailVerified) {
@@ -10973,7 +10975,7 @@ export default function App() {
       unsubSprints();
       unsubMembers();
     };
-  }, [user?.id, user?.status, user?.mustChangePassword]);
+  }, [user?.id, user?.status, user?.mustChangePassword, firebaseAuthUid]);
 
   const [isManageDevsOpen, setIsManageDevsOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);

@@ -20,6 +20,7 @@ import {
   collection, 
   doc, 
   getDocs, 
+  getDocsFromServer,
   getDoc,
   setDoc, 
   deleteDoc, 
@@ -306,6 +307,47 @@ export const FirebaseService = {
         callback(null);
       }
     });
+  },
+
+  // Subscribe to raw Firebase Auth session readiness (resolved after persistence hydration)
+  subscribeAuthSession: (
+    callback: (session: { ready: boolean; uid: string | null; email: string | null }) => void
+  ) => {
+    let active = true;
+    if (typeof auth.authStateReady === 'function') {
+      auth.authStateReady()
+        .then(() => {
+          if (!active) return;
+          callback({
+            ready: true,
+            uid: auth.currentUser?.uid || null,
+            email: auth.currentUser?.email || null
+          });
+        })
+        .catch(() => {});
+    }
+    const unsub = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
+      if (!active) return;
+      callback({
+        ready: true,
+        uid: fbUser?.uid || null,
+        email: fbUser?.email || null
+      });
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  },
+
+  waitForAuthSession: async (): Promise<{ uid: string | null; email: string | null }> => {
+    if (typeof auth.authStateReady === 'function') {
+      await auth.authStateReady();
+    }
+    return {
+      uid: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null
+    };
   },
 
   // --- Real-time Firestore Sync & Persistence ---
@@ -1490,22 +1532,65 @@ export const FirebaseService = {
   },
 
   // --- Authenticated Dev Access Requests Queue (Strict UID-bound & Verified Email) ---
+  fetchAccessRequestsFromServer: async (
+    ownerUid: string
+  ): Promise<{ requests: AccessRequest[]; source: 'server'; fetchedAt: string }> => {
+    await FirebaseService.waitForAuthSession();
+    if (ownerUid?.startsWith('guest-')) {
+      return { requests: [], source: 'server', fetchedAt: new Date().toISOString() };
+    }
+    if (!auth.currentUser) {
+      const err: any = new Error(
+        'Sessão do Firebase Auth não está ativa nesta aba. Faça login novamente para consultar a fila no servidor.'
+      );
+      err.code = 'auth/unauthenticated';
+      throw err;
+    }
+    // Ensure a valid token is available before hitting server rules
+    await auth.currentUser.getIdToken(false);
+    const colRef = collection(db, 'users', ownerUid, 'accessRequests');
+    const snapshot = await getDocsFromServer(colRef);
+    const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as AccessRequest) }));
+    list.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
+    return {
+      requests: list,
+      source: 'server',
+      fetchedAt: new Date().toISOString()
+    };
+  },
+
   subscribeAccessRequests: (
     ownerUid: string,
-    callback: (requests: AccessRequest[]) => void,
+    callback: (
+      requests: AccessRequest[],
+      meta?: { fromCache: boolean; hasPendingWrites: boolean }
+    ) => void,
     onError?: (error: any) => void
   ) => {
-    if (isGuestUserId(ownerUid)) {
-      callback([]);
+    if (ownerUid?.startsWith('guest-')) {
+      callback([], { fromCache: false, hasPendingWrites: false });
+      return () => {};
+    }
+    if (!auth.currentUser) {
+      const err: any = new Error(
+        'Sessão Firebase Auth ainda não autenticada para assinar a fila de aprovações em tempo real.'
+      );
+      err.code = 'auth/unauthenticated';
+      console.warn('[Firebase] subscribeAccessRequests blocked: auth.currentUser is null');
+      if (onError) onError(err);
       return () => {};
     }
     const colRef = collection(db, 'users', ownerUid, 'accessRequests');
     return onSnapshot(
       colRef,
+      { includeMetadataChanges: true },
       (snapshot) => {
         const list = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as AccessRequest) }));
         list.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
-        callback(list);
+        callback(list, {
+          fromCache: snapshot.metadata.fromCache,
+          hasPendingWrites: snapshot.metadata.hasPendingWrites
+        });
       },
       (err) => {
         console.warn('[Firebase] subscribeAccessRequests error:', err);
