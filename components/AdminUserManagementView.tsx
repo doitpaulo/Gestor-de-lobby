@@ -11,7 +11,8 @@ import {
   AccountRecoveryRequest,
   NEXUS_OWNER_UID,
   DEFAULT_ADM_PERMISSIONS,
-  DEFAULT_COLLABORATOR_PERMISSIONS
+  DEFAULT_COLLABORATOR_PERMISSIONS,
+  sanitizeMemberPermissions
 } from '../types';
 import { OWNER_EMAIL, StorageService } from '../services/storageService';
 import { FirebaseService } from '../services/firebase';
@@ -550,13 +551,84 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
     setIsSubmittingModal(true);
     const tempPasswordInFlight = formTempPassword;
 
+    const executeDirectFirestoreApproval = async () => {
+      const sanitizedPermissions = sanitizeMemberPermissions(formRole, formPermissions);
+      const result = await FirebaseService.approveMemberDirectlyViaFirestore({
+        ownerUid: NEXUS_OWNER_UID,
+        targetUid: resolvedUid,
+        email: cleanEmail,
+        name: cleanName,
+        role: formRole,
+        status: formStatus,
+        permissions: sanitizedPermissions,
+        assignedTaskIds: formRole === 'ADM' ? [] : formAssignedTasks,
+        linkedDevId: selectedDev?.id || editingMember?.linkedDevId,
+        linkedDevName: selectedDev?.name || editingMember?.linkedDevName,
+        previousMemberId: editingMember?.id,
+        existingMember: editingMember,
+        originatingAccessRequestUid: originatingAccessRequestUid || resolvedUid,
+        invitedBy: currentUser.email || currentUser.id
+      });
+
+      const approvedMember = result.member;
+      const currentList = StorageService.getMembers().filter(
+        m =>
+          m.id !== approvedMember.id &&
+          m.uid !== approvedMember.uid &&
+          m.id !== editingMember?.id &&
+          m.email.trim().toLowerCase() !== cleanEmail
+      );
+      StorageService.setMembersInMemory([...currentList, approvedMember]);
+      reloadMembers();
+
+      if (originatingAccessRequestUid) {
+        setOriginatingAccessRequestUid(null);
+      }
+
+      if (originatingRecoveryId) {
+        await handleUpdateRecoveryStatus(originatingRecoveryId, 'resolved').catch(() => {});
+        setOriginatingRecoveryId(null);
+      }
+
+      closeAndScrubModal();
+      const missingNote =
+        result.missingTaskIds.length > 0
+          ? ` (${result.missingTaskIds.length} demanda(s) ausente(s) ignorada(s))`
+          : '';
+      triggerToast(
+        'success',
+        `Acesso de ${cleanName} aprovado via Firestore e ${result.addedTasksCount} demanda(s) sincronizada(s)!${missingNote}`
+      );
+    };
+
     try {
-      const idToken = await FirebaseService.getIdToken(true);
       const effectiveMode = editingMember ? 'link-existing' : provisionMode;
+      const sanitizedPermissions = sanitizeMemberPermissions(formRole, formPermissions);
+
+      if (editingMember && !resolvedUid && effectiveMode === 'link-existing') {
+        const updatedUnlinked: WorkspaceMember = {
+          ...editingMember,
+          email: cleanEmail,
+          name: cleanName,
+          role: formRole,
+          status: editingMember.status === 'inactive' || formStatus === 'inactive' ? 'inactive' : 'pending',
+          permissions: sanitizedPermissions,
+          assignedTaskIds: formRole === 'ADM' ? [] : formAssignedTasks,
+          linkedDevId: selectedDev?.id || editingMember.linkedDevId,
+          linkedDevName: selectedDev?.name || editingMember.linkedDevName,
+          workspaceOwnerUid: NEXUS_OWNER_UID
+        };
+        await StorageService.saveMemberAsync(updatedUnlinked, NEXUS_OWNER_UID);
+        reloadMembers();
+        closeAndScrubModal();
+        triggerToast('success', `Pré-autorização de ${cleanName} salva (aguardando UID).`);
+        return;
+      }
 
       if (effectiveMode === 'create-with-temp-password' || resolvedUid || !editingMember) {
+        const idToken = await FirebaseService.getIdToken(true);
         if (!idToken) {
-          throw new Error('Sessão Firebase inválida para chamar o provisionamento no servidor. Faça login novamente.');
+          throw new Error('Sessão Firebase inválida para aprovar ou provisionar usuário. Faça login novamente.');
         }
 
         const payload = {
@@ -570,7 +642,7 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
           linkedDevName: selectedDev?.name || editingMember?.linkedDevName,
           existingUid: resolvedUid || undefined,
           previousMemberId: editingMember?.id,
-          permissions: formPermissions,
+          permissions: sanitizedPermissions,
           assignedTaskIds: formRole === 'ADM' ? [] : formAssignedTasks,
           workspaceOwnerUid: NEXUS_OWNER_UID
         };
@@ -578,56 +650,34 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
         // Immediately clear password from React input state
         setFormTempPassword('');
 
-        const res = await fetch('/api/admin/provision-dev', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`
-          },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await res.json().catch(() => ({}));
+        let res: Response | null = null;
+        let data: any = {};
+        try {
+          res = await fetch('/api/admin/provision-dev', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${idToken}`
+            },
+            body: JSON.stringify(payload)
+          });
+          data = await res.json().catch(() => ({}));
+        } catch (networkErr: any) {
+          // If backend endpoint is unreachable in static preview AND we already have verified UID, fallback directly to authenticated Firestore
+          if (effectiveMode === 'link-existing' && resolvedUid) {
+            await executeDirectFirestoreApproval();
+            return;
+          }
+          throw networkErr;
+        }
 
         if (!res.ok) {
-          // If editing existing unlinked member (or updating an existing UID member) and Admin SDK is not configured locally,
-          // allow fallback ONLY for link-existing edits, NEVER for create-with-temp-password!
-          if (
-            editingMember &&
-            effectiveMode === 'link-existing' &&
-            data?.code === 'ADMIN_SDK_UNAVAILABLE'
-          ) {
-            const previousTaskIds = editingMember.assignedTaskIds || [];
-            const fallbackMember: WorkspaceMember = {
-              ...editingMember,
-              id: resolvedUid || editingMember.id,
-              uid: resolvedUid || editingMember.uid,
-              email: cleanEmail,
-              name: cleanName,
-              role: formRole,
-              status: formStatus,
-              permissions: formPermissions,
-              assignedTaskIds: formRole === 'ADM' ? [] : formAssignedTasks,
-              linkedDevId: selectedDev?.id || editingMember.linkedDevId,
-              linkedDevName: selectedDev?.name || editingMember.linkedDevName,
-              workspaceOwnerUid: NEXUS_OWNER_UID,
-              activatedAt:
-                formStatus === 'active'
-                  ? editingMember.activatedAt || new Date().toISOString()
-                  : editingMember.activatedAt
-            };
-            const saved = await StorageService.saveMemberAsync(fallbackMember, NEXUS_OWNER_UID);
-            if (saved.uid) {
-              await FirebaseService.syncMemberTaskAuthorization(
-                NEXUS_OWNER_UID,
-                saved.uid,
-                saved.assignedTaskIds,
-                previousTaskIds
-              );
-            }
-            reloadMembers();
-            closeAndScrubModal();
-            triggerToast('success', `Permissões e demandas de ${cleanName} atualizadas!`);
+          // When Admin SDK is unavailable on the server and we have an already-authenticated UID (new AccessRequest or edit),
+          // allow direct authenticated Firestore approval WITHOUT widening permissions and NEVER for create-with-temp-password!
+          const isAdminSdkUnavailable =
+            data?.code === 'ADMIN_SDK_UNAVAILABLE' || res.status === 503 || res.status === 501 || res.status === 404;
+          if (effectiveMode === 'link-existing' && resolvedUid && isAdminSdkUnavailable) {
+            await executeDirectFirestoreApproval();
             return;
           }
 
@@ -642,7 +692,10 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
           }
 
           setModalError({
-            message: data?.message || 'Não foi possível provisionar o desenvolvedor no servidor.',
+            message:
+              effectiveMode === 'link-existing' && !resolvedUid && isAdminSdkUnavailable
+                ? 'Sem chave Admin SDK no servidor, selecione uma solicitação autenticada (com UID) ou informe o UID do colaborador para aprovar diretamente pelo Firestore.'
+                : data?.message || 'Não foi possível provisionar o desenvolvedor no servidor.',
             existingUid: data?.existingUid || data?.createdUid,
             partialFailure: Boolean(data?.partialFailure)
           });
@@ -687,8 +740,17 @@ export const AdminUserManagementView: React.FC<AdminUserManagementViewProps> = (
       }
     } catch (err: any) {
       setFormTempPassword('');
+      if (err?.member) {
+        const updatedMem = err.member as WorkspaceMember;
+        const existing = StorageService.getMembers().filter(
+          m => m.id !== updatedMem.id && m.uid !== updatedMem.uid && m.id !== editingMember?.id
+        );
+        StorageService.setMembersInMemory([...existing, updatedMem]);
+        reloadMembers();
+      }
       setModalError({
-        message: err?.message || 'Erro inesperado ao salvar provisionamento.'
+        message: err?.message || 'Erro inesperado ao salvar provisionamento.',
+        partialFailure: Boolean(err?.partialFailure)
       });
     } finally {
       setIsSubmittingModal(false);

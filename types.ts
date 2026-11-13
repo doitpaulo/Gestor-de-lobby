@@ -279,6 +279,49 @@ export const DEFAULT_COLLABORATOR_PERMISSIONS: UserPermissions = {
   canManageSprints: false
 };
 
+export function sanitizeMemberPermissions(
+  role: UserRole,
+  raw?: Partial<UserPermissions>
+): UserPermissions {
+  if (role === 'ADM') {
+    return JSON.parse(JSON.stringify(DEFAULT_ADM_PERMISSIONS));
+  }
+  const base = DEFAULT_COLLABORATOR_PERMISSIONS;
+  const rawModules = (raw?.modules || {}) as Record<string, any>;
+  const rawActions = (raw?.actions || {}) as Record<string, any>;
+
+  return {
+    modules: {
+      dashboard: rawModules.dashboard !== undefined ? Boolean(rawModules.dashboard) : base.modules.dashboard,
+      projects: rawModules.projects !== undefined ? Boolean(rawModules.projects) : base.modules.projects,
+      esteira: rawModules.esteira !== undefined ? Boolean(rawModules.esteira) : base.modules.esteira,
+      sprints: rawModules.sprints !== undefined ? Boolean(rawModules.sprints) : base.modules.sprints,
+      projectReport: rawModules.projectReport !== undefined ? Boolean(rawModules.projectReport) : base.modules.projectReport,
+      kanban: rawModules.kanban !== undefined ? Boolean(rawModules.kanban) : base.modules.kanban,
+      list: rawModules.list !== undefined ? Boolean(rawModules.list) : base.modules.list,
+      gantt: rawModules.gantt !== undefined ? Boolean(rawModules.gantt) : base.modules.gantt,
+      robots: rawModules.robots !== undefined ? Boolean(rawModules.robots) : base.modules.robots,
+      totem: rawModules.totem !== undefined ? Boolean(rawModules.totem) : base.modules.totem,
+      reports: rawModules.reports !== undefined ? Boolean(rawModules.reports) : base.modules.reports
+    },
+    actions: {
+      view: rawActions.view !== undefined ? Boolean(rawActions.view) : base.actions.view,
+      create: rawActions.create !== undefined ? Boolean(rawActions.create) : base.actions.create,
+      edit: rawActions.edit !== undefined ? Boolean(rawActions.edit) : base.actions.edit,
+      comment: rawActions.comment !== undefined ? Boolean(rawActions.comment) : base.actions.comment,
+      attach: rawActions.attach !== undefined ? Boolean(rawActions.attach) : base.actions.attach,
+      export: rawActions.export !== undefined ? Boolean(rawActions.export) : base.actions.export
+    },
+    canAssign: false,
+    canReorganize: false,
+    canDelete: false,
+    canImport: false,
+    canManageUsers: false,
+    canManageIntegrations: false,
+    canManageSprints: Boolean(raw?.canManageSprints)
+  };
+}
+
 export const NEXUS_OWNER_UID = 'pM6ApHmKYfW2nMFRmUFGCtfjCEx1';
 
 export interface AccountRecoveryRequest {

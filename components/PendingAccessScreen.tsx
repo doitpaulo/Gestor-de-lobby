@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { User, AccessRequest, NEXUS_OWNER_UID } from '../types';
-import { FirebaseService } from '../services/firebase';
+import { FirebaseService, auth } from '../services/firebase';
 import { IconShieldCheck, IconClock, IconUsers, IconCheck } from './Icons';
 
 interface PendingAccessScreenProps {
@@ -27,43 +27,153 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
   const [isSendingVerify, setIsSendingVerify] = useState(false);
   const [verifyFeedback, setVerifyFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const autoEnqueueUidRef = useRef<string | null>(null);
+  const lastFocusRefreshRef = useRef<number>(0);
+
   const isInactive = user.status === 'inactive';
   const isEmailUnverified = user.emailVerified === false || user.pendingReason === 'EMAIL_UNVERIFIED';
   const isUidUnlinked = user.pendingReason === 'UID_UNLINKED';
 
+  const submitAccessRequest = useCallback(async (uid: string, email: string, name?: string, hint?: string) => {
+    setIsNotifying(true);
+    setNotifyError(null);
+    try {
+      const reqData: AccessRequest = {
+        id: uid,
+        uid,
+        email: (email || '').trim().toLowerCase(),
+        name: (name || '').trim().slice(0, 120) || undefined,
+        department: `Solicitação autenticada (UID: ${uid})`.slice(0, 160),
+        devNameHint: (hint || '').trim().slice(0, 120) || undefined,
+        requestedAt: new Date().toISOString(),
+        status: 'pending'
+      };
+
+      const res = await FirebaseService.saveAccessRequest(NEXUS_OWNER_UID, reqData);
+      setExistingRequest(res.request);
+      if (res.request.status === 'pending') {
+        setNotifySuccess(true);
+      }
+    } catch (e: any) {
+      console.error('Error sending access request:', e);
+      setNotifySuccess(false);
+      setNotifyError(
+        e?.message ||
+          'Falha ao persistir solicitação de acesso no Firestore. Clique em "Tentar Novamente" ou informe seu UID ao Administrador.'
+      );
+    } finally {
+      setIsNotifying(false);
+    }
+  }, []);
+
+  // Automatically reload Firebase Auth user & token when returning to the tab while email verification is pending
+  useEffect(() => {
+    if (isInactive || !isEmailUnverified || !user?.id || user.id.startsWith('guest-')) {
+      return;
+    }
+
+    let cancelled = false;
+    const runVerificationSync = async () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < 2000) return;
+      lastFocusRefreshRef.current = now;
+      try {
+        await onRefresh();
+      } catch (err: any) {
+        if (!cancelled) {
+          setVerifyFeedback({
+            type: 'error',
+            message: err?.message || 'Não foi possível atualizar seu status de verificação agora. Tente novamente.'
+          });
+        }
+      }
+    };
+
+    void runVerificationSync();
+
+    const handleFocus = () => {
+      void runVerificationSync();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void runVerificationSync();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [isInactive, isEmailUnverified, user?.id, onRefresh]);
+
+  // Reset auto-enqueue guard if user changes or becomes unverified again
+  useEffect(() => {
+    if (isEmailUnverified) {
+      autoEnqueueUidRef.current = null;
+    }
+  }, [user?.id, isEmailUnverified]);
+
+  // Automatic idempotent submission into accessRequests/{uid} as soon as user is verified
   useEffect(() => {
     let active = true;
-    if (!user?.id || isInactive) return;
+    if (!user?.id || isInactive || isEmailUnverified) return;
 
-    FirebaseService.fetchMyAccessRequest(NEXUS_OWNER_UID, user.id)
-      .then((req) => {
+    (async () => {
+      try {
+        const req = await FirebaseService.fetchMyAccessRequest(NEXUS_OWNER_UID, user.id);
         if (!active) return;
-        setExistingRequest(req);
-        if (req && req.status === 'pending') {
-          setNotifySuccess(true);
+        if (req) {
+          setExistingRequest(req);
+          if (req.status === 'pending') {
+            setNotifySuccess(true);
+            setNotifyError(null);
+          }
+          return;
         }
-      })
-      .catch((err: any) => {
+
+        if (autoEnqueueUidRef.current !== user.id) {
+          autoEnqueueUidRef.current = user.id;
+          await submitAccessRequest(user.id, user.email, user.name, devNameHint || user.name);
+        }
+      } catch (err: any) {
         if (!active) return;
-        console.warn('Could not read access request status:', err);
-      });
+        console.warn('Could not read/enqueue access request status:', err);
+        setNotifyError(
+          err?.message ||
+            'Falha ao consultar ou registrar sua solicitação de acesso no Firestore. Clique em "Tentar Novamente".'
+        );
+      }
+    })();
 
     return () => {
       active = false;
     };
-  }, [user?.id, isInactive]);
+  }, [user?.id, user?.email, user?.name, isInactive, isEmailUnverified, submitAccessRequest]);
 
   const handleCheckAgain = async () => {
     setIsChecking(true);
     setNotifyError(null);
     setVerifyFeedback(null);
     try {
-      await FirebaseService.reloadCurrentUser().catch(() => null);
       await onRefresh();
+      if (isEmailUnverified && auth.currentUser && !auth.currentUser.emailVerified) {
+        setVerifyFeedback({
+          type: 'error',
+          message:
+            'Seu e-mail ainda consta como não verificado no Firebase. Abra o link enviado para sua caixa de entrada (ou reenvie) e tente novamente.'
+        });
+      }
     } catch (e: any) {
-      setNotifyError(e?.message || 'Não foi possível verificar o status atualizado no servidor.');
+      const msg = e?.message || 'Não foi possível verificar o status atualizado no servidor.';
+      setNotifyError(msg);
+      if (isEmailUnverified) {
+        setVerifyFeedback({ type: 'error', message: msg });
+      }
     } finally {
-      setTimeout(() => setIsChecking(false), 400);
+      setTimeout(() => setIsChecking(false), 300);
     }
   };
 
@@ -71,10 +181,15 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
     setIsSendingVerify(true);
     setVerifyFeedback(null);
     try {
+      const reloaded = await FirebaseService.reloadCurrentUser().catch(() => null);
+      if (reloaded?.emailVerified) {
+        await onRefresh();
+        return;
+      }
       await FirebaseService.sendVerificationEmail();
       setVerifyFeedback({
         type: 'success',
-        message: `E-mail de verificação enviado para ${user.email}. Abra o link recebido e depois clique em "Já verifiquei meu e-mail".`
+        message: `E-mail de verificação enviado para ${user.email}. Abra o link recebido e clique em "Já verifiquei meu e-mail" (ou volte para esta aba).`
       });
     } catch (e: any) {
       setVerifyFeedback({
@@ -87,35 +202,14 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
   };
 
   const handleSendAdminNotification = async () => {
-    setIsNotifying(true);
-    setNotifyError(null);
-    try {
-      if (isEmailUnverified) {
-        throw new Error('Confirme seu e-mail primeiro usando o link enviado pelo Firebase antes de registrar a solicitação.');
-      }
-      const reqData: AccessRequest = {
-        id: user.id,
-        uid: user.id,
-        email: (user.email || '').trim().toLowerCase(),
-        name: (user.name || '').trim().slice(0, 120) || undefined,
-        department: `Solicitação autenticada (UID: ${user.id})`.slice(0, 160),
-        devNameHint: devNameHint.trim().slice(0, 120) || undefined,
-        requestedAt: new Date().toISOString(),
-        status: 'pending'
-      };
-
-      await FirebaseService.saveAccessRequest(NEXUS_OWNER_UID, reqData);
-      setExistingRequest(reqData);
-      setNotifySuccess(true);
-    } catch (e: any) {
-      console.error('Error sending access request:', e);
+    if (isEmailUnverified) {
       setNotifyError(
-        e?.message ||
-          'Falha ao persistir solicitação de acesso no Firestore. Verifique sua conexão ou informe seu UID diretamente ao Administrador.'
+        'Confirme seu e-mail primeiro usando o link enviado pelo Firebase antes de registrar a solicitação.'
       );
-    } finally {
-      setIsNotifying(false);
+      return;
     }
+    autoEnqueueUidRef.current = user.id;
+    await submitAccessRequest(user.id, user.email, user.name, devNameHint);
   };
 
   const handleCopyId = () => {
@@ -193,7 +287,7 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
             </p>
           ) : isEmailUnverified ? (
             <p>
-              Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Para segurança da workspace, é necessário verificar seu endereço de e-mail antes de enviar sua solicitação de acesso ou solicitar ao administrador a vinculação direta da sua conta.
+              Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Para segurança da workspace, é necessário verificar seu endereço de e-mail para registrar automaticamente sua solicitação ao Administrador.
             </p>
           ) : isUidUnlinked ? (
             <>
@@ -201,16 +295,16 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
                 Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Seu e-mail já possui registro prévio, mas aguarda vinculação do seu identificador <span className="text-indigo-300 font-semibold">UID</span> pelo Administrador.
               </p>
               <p className="text-xs text-indigo-300/90 bg-indigo-950/40 border border-indigo-500/30 p-2.5 rounded-xl">
-                Informe o UID abaixo ao Administrador ou envie a solicitação autenticada para agilizar a liberação das suas demandas.
+                Sua solicitação autenticada já é enviada automaticamente após a verificação. Se necessário, informe o UID abaixo ao Administrador.
               </p>
             </>
           ) : (
             <>
               <p>
-                Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Sua conta está autenticada, mas ainda <span className="text-amber-400 font-semibold">aguarda provisionamento e aprovação</span> pelo Administrador do Nexus.
+                Olá, <strong className="text-white">{user.name || 'Colaborador'}</strong>! Sua conta está autenticada, mas ainda <span className="text-amber-400 font-semibold">aguarda aprovação e liberação de demandas</span> pelo Administrador do Nexus.
               </p>
               <p className="text-xs text-slate-400">
-                O cadastro na lista de Devs do dashboard não libera login automaticamente: o ADM precisa vincular seu UID, definir seus módulos (ex: Lista/Kanban) e selecionar suas demandas autorizadas.
+                O cadastro na lista de Devs do dashboard não libera login automaticamente: o ADM precisa aprovar seu acesso, definir seus módulos (ex: Lista/Kanban) e selecionar suas demandas autorizadas.
               </p>
             </>
           )}
@@ -268,7 +362,7 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
               Etapa 1: Verificação de E-mail Obrigatória
             </p>
             <p className="text-[11px] text-slate-300 leading-relaxed">
-              Para enviar sua solicitação autenticada à fila do Administrador, confirme o link enviado para <strong>{user.email}</strong>. Se preferir, envie seu UID acima ao Administrador para vinculação manual direta.
+              Para enviar sua solicitação autenticada à fila do Administrador, confirme o link enviado para <strong>{user.email}</strong>. Ao voltar para esta tela (ou clicar abaixo), a solicitação será enviada automaticamente.
             </p>
             {verifyFeedback && (
               <div className={`p-2.5 rounded-xl border text-[11px] ${
@@ -294,7 +388,7 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
                 disabled={isChecking}
                 className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
               >
-                Já Verifiquei Meu E-mail
+                {isChecking ? 'Verificando...' : 'Já Verifiquei Meu E-mail'}
               </button>
             </div>
           </div>
@@ -303,13 +397,13 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
         {/* Authenticated Access Request Submission */}
         {!isInactive && !isEmailUnverified && (
           <div className="mb-6 p-4 bg-indigo-950/40 border border-indigo-500/40 rounded-2xl text-left space-y-3">
-            {notifySuccess || existingRequest?.status === 'pending' ? (
+            {(notifySuccess || existingRequest?.status === 'pending') && !notifyError ? (
               <div className="flex items-start gap-2.5 text-xs font-semibold text-emerald-300">
                 <IconCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <p>Solicitação persistida na fila de aprovações do Administrador!</p>
                   <p className="text-[11px] font-normal text-emerald-200/80 mt-0.5">
-                    Seu UID e e-mail verificado estão aguardando análise. Assim que o ADM aprovar e liberar suas demandas, clique em "Verificar Acesso Novamente".
+                    Seu UID e e-mail verificado estão aguardando aprovação. Assim que o ADM liberar suas demandas, clique em "Verificar Acesso Novamente".
                   </p>
                 </div>
               </div>
@@ -349,14 +443,26 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
                   disabled={isNotifying}
                   className="w-full py-2.5 px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
-                  {isNotifying ? 'Registrando no Firestore...' : 'Enviar Solicitação ao Administrador'}
+                  {isNotifying
+                    ? 'Registrando no Firestore...'
+                    : notifyError
+                    ? 'Tentar Novamente Enviar Solicitação'
+                    : 'Enviar Solicitação ao Administrador'}
                 </button>
               </>
             )}
 
             {notifyError && (
-              <div className="p-2.5 rounded-xl bg-rose-950/70 border border-rose-500/50 text-[11px] text-rose-200 leading-relaxed">
-                {notifyError}
+              <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/50 text-[11px] text-rose-200 leading-relaxed space-y-2">
+                <p>{notifyError}</p>
+                <button
+                  type="button"
+                  onClick={handleSendAdminNotification}
+                  disabled={isNotifying}
+                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isNotifying ? 'Reenviando...' : 'Tentar Novamente'}
+                </button>
               </div>
             )}
           </div>
@@ -406,7 +512,7 @@ export const PendingAccessScreen: React.FC<PendingAccessScreenProps> = ({
         )}
 
         <p className="text-[11px] text-slate-500 mt-4 italic">
-          * Assim que o administrador provisionar ou vincular seu perfil no painel de Administração, seu acesso será liberado instantaneamente.
+          * Assim que o administrador aprovar sua conta no painel de Administração, seu acesso será liberado instantaneamente.
         </p>
       </div>
     </div>

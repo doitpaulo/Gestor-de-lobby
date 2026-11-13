@@ -8427,32 +8427,47 @@ const AuthPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
                     StorageService.updateUser(fbUser);
 
                     // Send Firebase email verification link cleanly; accessRequests require emailVerified == true
-                    try {
-                        await FirebaseService.sendVerificationEmail();
-                    } catch (verifyErr) {
-                        console.warn('Notice: Could not send verification email immediately:', verifyErr);
+                    let verificationEmailFailed = false;
+                    if (!fbUser.emailVerified) {
+                        try {
+                            await FirebaseService.sendVerificationEmail();
+                        } catch (verifyErr) {
+                            verificationEmailFailed = true;
+                            console.warn('Notice: Could not send verification email immediately:', verifyErr);
+                        }
                     }
 
-                    if (fbUser.emailVerified) {
+                    // Reload user state before routing in case provider already verified email
+                    const hydratedUser = (await FirebaseService.reloadCurrentUser().catch(() => null)) || fbUser;
+                    StorageService.updateUser(hydratedUser);
+
+                    if (hydratedUser.emailVerified) {
                         try {
                             await FirebaseService.saveAccessRequest(NEXUS_OWNER_UID, {
-                                id: fbUser.id,
-                                uid: fbUser.id,
+                                id: hydratedUser.id,
+                                uid: hydratedUser.id,
                                 email: cleanEmail,
                                 name: cleanName,
-                                department: `Primeiro Acesso Concluído (UID: ${fbUser.id})`,
+                                department: `Primeiro Acesso Concluído (UID: ${hydratedUser.id})`,
+                                devNameHint: cleanName,
                                 requestedAt: new Date().toISOString(),
                                 status: 'pending'
                             });
                         } catch (queueErr) {
-                            console.warn('Notice: Could not auto-queue access request:', queueErr);
+                            console.warn('Notice: Could not auto-queue access request immediately (PendingAccessScreen will retry):', queueErr);
                         }
                     }
 
-                    setSuccessMessage('Conta criada com sucesso! Verifique seu e-mail para enviar sua solicitação ao ADM ou aguarde a vinculação.');
+                    setSuccessMessage(
+                        hydratedUser.emailVerified
+                            ? 'Conta criada! Sua solicitação autenticada foi encaminhada ao Administrador.'
+                            : verificationEmailFailed
+                            ? 'Conta criada! Não foi possível enviar o e-mail automaticamente — use "Reenviar E-mail de Verificação" na próxima tela.'
+                            : 'Conta criada! Verifique o link enviado para o seu e-mail para registrar sua solicitação automaticamente.'
+                    );
                     setTimeout(() => {
-                        onLogin(fbUser);
-                    }, 400);
+                        onLogin(hydratedUser);
+                    }, 300);
                 } catch (fbErr: any) {
                     if (fbErr.code === 'auth/email-already-in-use') {
                         setError('Este e-mail já possui conta criada. Utilize a aba "Entrar" (inclusive se o ADM forneceu uma senha temporária) ou solicite ajuda ao administrador.');
@@ -10747,16 +10762,21 @@ export default function App() {
     const unsubAuth = FirebaseService.onAuthChange(async (fbUser) => {
       if (!active) return;
       if (fbUser) {
+        let currentUserSnapshot = fbUser;
+        if (fbUser.id !== NEXUS_OWNER_UID && !fbUser.id.startsWith('guest-') && !fbUser.emailVerified) {
+          currentUserSnapshot = (await FirebaseService.reloadCurrentUser().catch(() => fbUser)) || fbUser;
+        }
+        if (!active) return;
         let memberDoc: WorkspaceMember | null = null;
-        if (fbUser.id !== NEXUS_OWNER_UID && !fbUser.id.startsWith('guest-')) {
+        if (currentUserSnapshot.id !== NEXUS_OWNER_UID && !currentUserSnapshot.id.startsWith('guest-')) {
           try {
-            memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, fbUser.id);
+            memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, currentUserSnapshot.id);
           } catch (e) {
             console.warn('Notice reading member record on auth change:', e);
           }
         }
         if (!active) return;
-        const resolved = StorageService.resolveUserMembership(fbUser, memberDoc);
+        const resolved = StorageService.resolveUserMembership(currentUserSnapshot, memberDoc);
         setUser(resolved);
         StorageService.updateUser(resolved);
       }
@@ -11681,8 +11701,13 @@ export default function App() {
   };
   const refreshUserAccess = async () => {
     if (!user) return;
-    const reloaded = await FirebaseService.reloadCurrentUser().catch(() => null);
-    const baseUser = reloaded || user;
+    let baseUser: User = user;
+    if (!user.id.startsWith('guest-')) {
+      const reloaded = await FirebaseService.reloadCurrentUser();
+      if (reloaded) {
+        baseUser = reloaded;
+      }
+    }
     let memberDoc: WorkspaceMember | null = null;
     if (baseUser.id !== NEXUS_OWNER_UID && !baseUser.id.startsWith('guest-')) {
       memberDoc = await FirebaseService.fetchMyMemberRecord(NEXUS_OWNER_UID, baseUser.id);

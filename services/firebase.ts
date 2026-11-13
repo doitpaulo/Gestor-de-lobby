@@ -27,6 +27,7 @@ import {
   onSnapshot,
   arrayUnion,
   arrayRemove,
+  deleteField,
   updateDoc,
   query,
   where
@@ -41,10 +42,14 @@ import {
   DocumentConfig, 
   DevOpsConfig, 
   User, 
+  UserRole,
+  UserStatus,
+  UserPermissions,
   WorkspaceMember,
   AccountRecoveryRequest,
   AccessRequest,
-  NEXUS_OWNER_UID
+  NEXUS_OWNER_UID,
+  sanitizeMemberPermissions
 } from '../types';
 import { StorageService } from './storageService';
 
@@ -1204,39 +1209,63 @@ export const FirebaseService = {
     targetUid: string,
     assignedTaskIds: string[],
     previousTaskIds: string[] = []
-  ): Promise<void> => {
-    if (isGuestUserId(ownerUid) || !targetUid) return;
+  ): Promise<{ addedCount: number; removedCount: number; missingTaskIds: string[] }> => {
+    if (isGuestUserId(ownerUid) || !targetUid) {
+      return { addedCount: 0, removedCount: 0, missingTaskIds: [] };
+    }
     const cleanTarget = targetUid.trim();
     const desired = Array.from(new Set((assignedTaskIds || []).map(x => String(x || '').trim()).filter(Boolean)));
-    const removed = (previousTaskIds || [])
-      .map(x => String(x || '').trim())
-      .filter(id => id && !desired.includes(id));
+    const removed = Array.from(
+      new Set(
+        (previousTaskIds || [])
+          .map(x => String(x || '').trim())
+          .filter(id => id && !desired.includes(id))
+      )
+    );
 
     const ops: Array<{ ref: any; payload: Record<string, any> }> = [];
+    const missingTaskIds: string[] = [];
     const nowIso = new Date().toISOString();
+    let addedCount = 0;
+    let removedCount = 0;
 
     for (const taskId of desired) {
       const safeTaskId = taskId.replace(/\//g, '_').trim();
+      if (!safeTaskId) continue;
       const ref = doc(db, 'users', ownerUid, 'tasks', safeTaskId);
-      ops.push({
-        ref,
-        payload: {
-          allowedUids: arrayUnion(cleanTarget),
-          updatedAt: nowIso
-        }
-      });
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        missingTaskIds.push(taskId);
+        continue;
+      }
+      const data = snap.data() || {};
+      const payload: Record<string, any> = {
+        allowedUids: arrayUnion(cleanTarget),
+        updatedAt: nowIso
+      };
+      if (!data.assignedUid) {
+        payload.assignedUid = cleanTarget;
+      }
+      ops.push({ ref, payload });
+      addedCount++;
     }
 
     for (const taskId of removed) {
       const safeTaskId = taskId.replace(/\//g, '_').trim();
+      if (!safeTaskId) continue;
       const ref = doc(db, 'users', ownerUid, 'tasks', safeTaskId);
-      ops.push({
-        ref,
-        payload: {
-          allowedUids: arrayRemove(cleanTarget),
-          updatedAt: nowIso
-        }
-      });
+      const snap = await getDoc(ref);
+      if (!snap.exists()) continue;
+      const data = snap.data() || {};
+      const payload: Record<string, any> = {
+        allowedUids: arrayRemove(cleanTarget),
+        updatedAt: nowIso
+      };
+      if (data.assignedUid === cleanTarget) {
+        payload.assignedUid = deleteField();
+      }
+      ops.push({ ref, payload });
+      removedCount++;
     }
 
     const chunkSize = 400;
@@ -1245,6 +1274,8 @@ export const FirebaseService = {
       ops.slice(i, i + chunkSize).forEach(op => batch.set(op.ref, op.payload, { merge: true }));
       await batch.commit();
     }
+
+    return { addedCount, removedCount, missingTaskIds };
   },
 
   deleteMember: async (ownerUid: string, memberId: string): Promise<void> => {
@@ -1263,6 +1294,199 @@ export const FirebaseService = {
       return { id: snap.id, ...(snap.data() as WorkspaceMember) };
     }
     return null;
+  },
+
+  // Approve and synchronize an already-authenticated member directly via Firestore (no Admin SDK key required)
+  approveMemberDirectlyViaFirestore: async (params: {
+    ownerUid?: string;
+    targetUid: string;
+    email: string;
+    name: string;
+    role?: UserRole;
+    status?: UserStatus;
+    permissions?: Partial<UserPermissions>;
+    assignedTaskIds?: string[];
+    linkedDevId?: string;
+    linkedDevName?: string;
+    previousMemberId?: string;
+    existingMember?: WorkspaceMember | null;
+    originatingAccessRequestUid?: string | null;
+    invitedBy?: string;
+  }): Promise<{
+    member: WorkspaceMember;
+    addedTasksCount: number;
+    removedTasksCount: number;
+    missingTaskIds: string[];
+    linkedDevUpdated: boolean;
+    accessRequestResolved: boolean;
+  }> => {
+    const ownerUid = params.ownerUid || NEXUS_OWNER_UID;
+    if (isGuestUserId(ownerUid) || !auth.currentUser) {
+      throw new Error('Sessão Firebase inválida para aprovar colaborador.');
+    }
+
+    const callerUid = auth.currentUser.uid;
+    const isRootOwner = callerUid === NEXUS_OWNER_UID && ownerUid === NEXUS_OWNER_UID;
+
+    if (!isRootOwner) {
+      const callerMember = await FirebaseService.fetchMember(ownerUid, callerUid);
+      const isActiveAdm =
+        Boolean(callerMember) &&
+        callerMember?.status === 'active' &&
+        callerMember?.role === 'ADM' &&
+        callerMember?.mustChangePassword !== true;
+      if (!isActiveAdm) {
+        const err: any = new Error('Apenas o proprietário ou administradores ativos podem aprovar acessos.');
+        err.code = 'FORBIDDEN_NOT_ADMIN';
+        throw err;
+      }
+    }
+
+    const targetUid = String(params.targetUid || '').trim();
+    if (!targetUid || targetUid.startsWith('guest-')) {
+      throw new Error('UID do usuário autenticado é obrigatório para aprovação direta.');
+    }
+
+    const cleanEmail = String(params.email || '').trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || cleanEmail.length > 160) {
+      throw new Error('E-mail corporativo inválido.');
+    }
+
+    const cleanName = String(params.name || cleanEmail.split('@')[0] || '').trim().slice(0, 120);
+    if (!cleanName) {
+      throw new Error('Nome do colaborador é obrigatório.');
+    }
+
+    const targetRole: UserRole = params.role === 'ADM' ? 'ADM' : 'Colaborador';
+    if (targetRole === 'ADM' && !isRootOwner) {
+      const err: any = new Error('Apenas o proprietário raiz pode promover usuários ao perfil ADM.');
+      err.code = 'FORBIDDEN_OWNER_ONLY_ADM';
+      throw err;
+    }
+
+    if (targetUid === NEXUS_OWNER_UID && !isRootOwner) {
+      const err: any = new Error('Não é permitido alterar o registro do proprietário raiz.');
+      err.code = 'FORBIDDEN_OWNER_PROTECTED';
+      throw err;
+    }
+
+    const existingFromUid = await FirebaseService.fetchMember(ownerUid, targetUid);
+    const existingFromPrev =
+      params.previousMemberId && params.previousMemberId !== targetUid
+        ? await FirebaseService.fetchMember(ownerUid, params.previousMemberId)
+        : null;
+    const prior = existingFromUid || existingFromPrev || params.existingMember || null;
+
+    if (!isRootOwner && prior?.role === 'ADM') {
+      const err: any = new Error('Apenas o proprietário raiz pode alterar um administrador existente.');
+      err.code = 'FORBIDDEN_OWNER_ONLY_ADM';
+      throw err;
+    }
+
+    const sanitizedPermissions = sanitizeMemberPermissions(targetRole, params.permissions);
+    const sanitizedAssignedTaskIds =
+      targetRole === 'ADM'
+        ? []
+        : Array.from(new Set((params.assignedTaskIds || []).map(x => String(x || '').trim()).filter(Boolean)));
+    const targetStatus: UserStatus =
+      params.status === 'inactive' || params.status === 'pending' ? params.status : 'active';
+
+    const previousTaskIds = Array.from(
+      new Set([
+        ...(existingFromUid?.assignedTaskIds || []),
+        ...(existingFromPrev?.assignedTaskIds || []),
+        ...(params.existingMember?.assignedTaskIds || [])
+      ].map(x => String(x || '').trim()).filter(Boolean))
+    );
+
+    const nowIso = new Date().toISOString();
+    const memberPayload: WorkspaceMember = {
+      id: targetUid,
+      uid: targetUid,
+      email: cleanEmail,
+      name: cleanName,
+      role: targetRole,
+      status: targetStatus,
+      permissions: sanitizedPermissions,
+      assignedTaskIds: sanitizedAssignedTaskIds,
+      workspaceOwnerUid: ownerUid,
+      linkedDevId: params.linkedDevId ?? prior?.linkedDevId,
+      linkedDevName: params.linkedDevName ?? prior?.linkedDevName,
+      mustChangePassword: Boolean(prior?.mustChangePassword),
+      invitedAt: prior?.invitedAt || nowIso,
+      activatedAt: targetStatus === 'active' ? (prior?.activatedAt || nowIso) : prior?.activatedAt,
+      invitedBy: prior?.invitedBy || params.invitedBy || auth.currentUser.email || callerUid
+    };
+
+    const savedMember = await FirebaseService.saveMember(ownerUid, memberPayload);
+
+    if (params.previousMemberId && params.previousMemberId !== targetUid) {
+      await FirebaseService.deleteMember(ownerUid, params.previousMemberId).catch(() => {});
+    }
+
+    let taskSyncResult: { addedCount: number; removedCount: number; missingTaskIds: string[] };
+    try {
+      taskSyncResult = await FirebaseService.syncMemberTaskAuthorization(
+        ownerUid,
+        targetUid,
+        sanitizedAssignedTaskIds,
+        previousTaskIds
+      );
+    } catch (syncErr: any) {
+      syncErr.partialFailure = true;
+      syncErr.member = savedMember;
+      throw syncErr;
+    }
+
+    let linkedDevUpdated = false;
+    if (memberPayload.linkedDevId) {
+      const safeDevId = String(memberPayload.linkedDevId).replace(/\//g, '_').trim();
+      if (safeDevId) {
+        try {
+          const devRef = doc(db, 'users', ownerUid, 'devs', safeDevId);
+          const devSnap = await getDoc(devRef);
+          if (devSnap.exists()) {
+            await setDoc(
+              devRef,
+              cleanForFirestore({
+                linkedUid: targetUid,
+                linkedMemberId: targetUid
+              }),
+              { merge: true }
+            );
+            linkedDevUpdated = true;
+          }
+        } catch (devErr) {
+          console.warn('Notice updating linkedDev metadata during direct approval:', devErr);
+        }
+      }
+    }
+
+    let accessRequestResolved = false;
+    const reqUidToResolve = (params.originatingAccessRequestUid || targetUid).trim();
+    if (reqUidToResolve) {
+      try {
+        const reqRef = doc(db, 'users', ownerUid, 'accessRequests', reqUidToResolve);
+        const reqSnap = await getDoc(reqRef);
+        if (reqSnap.exists() && reqSnap.data()?.status !== 'resolved') {
+          await FirebaseService.updateAccessRequestStatus(ownerUid, reqUidToResolve, 'resolved', callerUid);
+          accessRequestResolved = true;
+        }
+      } catch (reqErr: any) {
+        reqErr.partialFailure = true;
+        reqErr.member = savedMember;
+        throw reqErr;
+      }
+    }
+
+    return {
+      member: savedMember,
+      addedTasksCount: taskSyncResult.addedCount,
+      removedTasksCount: taskSyncResult.removedCount,
+      missingTaskIds: taskSyncResult.missingTaskIds,
+      linkedDevUpdated,
+      accessRequestResolved
+    };
   },
 
   // --- Authenticated Dev Access Requests Queue (Strict UID-bound & Verified Email) ---
@@ -1298,7 +1522,10 @@ export const FirebaseService = {
     return { id: snap.id, ...(snap.data() as AccessRequest) };
   },
 
-  saveAccessRequest: async (ownerUid: string, req: AccessRequest): Promise<void> => {
+  saveAccessRequest: async (
+    ownerUid: string,
+    req: AccessRequest
+  ): Promise<{ status: 'created' | 'already-exists'; request: AccessRequest }> => {
     if (isGuestUserId(ownerUid)) {
       throw new Error('Sessão não autenticada no Firebase.');
     }
@@ -1306,16 +1533,24 @@ export const FirebaseService = {
     if (!current || current.uid !== req.uid) {
       throw new Error('UID da solicitação não coincide com a conta autenticada.');
     }
+    // Reload auth user and force-refresh ID token so Firestore Security Rules observe email_verified == true
+    await current.reload();
     if (!current.emailVerified) {
       throw new Error('Verifique seu e-mail antes de enviar a solicitação de acesso.');
     }
+    await current.getIdToken(true);
+
     const docRef = doc(db, 'users', ownerUid, 'accessRequests', current.uid);
     const existingSnap = await getDoc(docRef);
     if (existingSnap.exists()) {
-      // Request already persisted for this UID - return cleanly without violating !exists() create rule
-      return;
+      // Request already persisted for this UID - return idempotently without violating !exists() create rule
+      return {
+        status: 'already-exists',
+        request: { id: existingSnap.id, ...(existingSnap.data() as AccessRequest) }
+      };
     }
-    const payload = cleanForFirestore({
+
+    const requestRecord: AccessRequest = {
       id: current.uid,
       uid: current.uid,
       email: (current.email || req.email).trim().toLowerCase(),
@@ -1324,8 +1559,11 @@ export const FirebaseService = {
       devNameHint: req.devNameHint ? req.devNameHint.trim().slice(0, 120) : undefined,
       status: 'pending',
       requestedAt: req.requestedAt || new Date().toISOString()
-    });
+    };
+
+    const payload = cleanForFirestore(requestRecord);
     await setDoc(docRef, payload);
+    return { status: 'created', request: requestRecord };
   },
 
   updateAccessRequestStatus: async (
