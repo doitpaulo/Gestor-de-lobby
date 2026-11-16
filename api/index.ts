@@ -3,7 +3,22 @@ import fs from "fs";
 import path from "path";
 import { PowerBIService } from "../services/powerbiService.js";
 import { powerBiBasicKey } from "../services/powerbiAuth.js";
-import { AdminProvisioningService } from "../services/adminProvisioningService.js";
+
+let adminProvisioningServicePromise:
+  | Promise<(typeof import("../services/adminProvisioningService.js"))["AdminProvisioningService"]>
+  | null = null;
+
+async function getAdminProvisioningService() {
+  if (!adminProvisioningServicePromise) {
+    adminProvisioningServicePromise = import("../services/adminProvisioningService.js")
+      .then((mod) => mod.AdminProvisioningService)
+      .catch((err) => {
+        adminProvisioningServicePromise = null;
+        throw err;
+      });
+  }
+  return adminProvisioningServicePromise;
+}
 
 const app = express();
 
@@ -588,6 +603,7 @@ router.post("/admin/generate-password-reset-link", async (req: express.Request, 
 router.post("/admin/provision-dev", async (req: express.Request, res: express.Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
+    const AdminProvisioningService = await getAdminProvisioningService();
     const result = await AdminProvisioningService.provisionDeveloper(
       req.headers["authorization"] as string | undefined,
       req.body
@@ -616,6 +632,7 @@ router.post("/admin/provision-dev", async (req: express.Request, res: express.Re
 router.post("/auth/complete-first-password-change", async (req: express.Request, res: express.Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
+    const AdminProvisioningService = await getAdminProvisioningService();
     const result = await AdminProvisioningService.completeFirstPasswordChange(
       req.headers["authorization"] as string | undefined
     );
