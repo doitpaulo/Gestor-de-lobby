@@ -983,12 +983,15 @@ export const FirebaseService = {
     const uid = userId || auth.currentUser?.uid;
     if (!uid || isGuestUserId(uid)) return false;
     try {
-      const cleanConfig = {
+      const cleanConfig: DevOpsConfig = {
         organization: String(config.organization || '').trim(),
         project: String(config.project || '').trim(),
         pat: String(config.pat || '').trim(),
         isActive: Boolean(config.isActive),
-        defaultIterationPath: String(config.defaultIterationPath || '').trim()
+        defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+        ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
+        ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
+        ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
       };
       const payload = {
         value: cleanConfig,
@@ -1045,13 +1048,23 @@ export const FirebaseService = {
       const pat = String(target.pat || raw.pat || '').trim();
       const path = String(target.defaultIterationPath || raw.defaultIterationPath || '').trim();
       const active = target.isActive !== undefined ? Boolean(target.isActive) : (raw.isActive !== undefined ? Boolean(raw.isActive) : false);
+      const startDateField = target.startDateField !== undefined ? String(target.startDateField || '').trim() : (raw.startDateField !== undefined ? String(raw.startDateField || '').trim() : undefined);
+      const targetDateField = target.targetDateField !== undefined ? String(target.targetDateField || '').trim() : (raw.targetDateField !== undefined ? String(raw.targetDateField || '').trim() : undefined);
+      const verifiedTaskFields = Array.isArray(target.verifiedTaskFields)
+        ? target.verifiedTaskFields.map(String)
+        : Array.isArray(raw.verifiedTaskFields)
+        ? raw.verifiedTaskFields.map(String)
+        : undefined;
       if (org || pat || proj) {
         return {
           organization: org,
           project: proj,
           pat,
           isActive: active,
-          defaultIterationPath: path
+          defaultIterationPath: path,
+          ...(startDateField !== undefined ? { startDateField } : {}),
+          ...(targetDateField !== undefined ? { targetDateField } : {}),
+          ...(verifiedTaskFields !== undefined ? { verifiedTaskFields } : {})
         };
       }
       return null;

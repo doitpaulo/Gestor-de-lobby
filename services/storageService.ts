@@ -1080,7 +1080,10 @@ export const StorageService = {
       project: String(config.project || '').trim(),
       pat: String(config.pat || '').trim(),
       isActive: Boolean(config.isActive),
-      defaultIterationPath: String(config.defaultIterationPath || '').trim()
+      defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+      ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
+      ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
+      ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
     };
     try {
       localStorage.setItem(DEVOPS_PERSISTENT_KEY, JSON.stringify(inMemoryDevOps));
@@ -1095,7 +1098,10 @@ export const StorageService = {
       project: String(config.project || '').trim(),
       pat: String(config.pat || '').trim(),
       isActive: Boolean(config.isActive),
-      defaultIterationPath: String(config.defaultIterationPath || '').trim()
+      defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+      ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
+      ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
+      ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
     };
 
     // 1. Save locally for instantaneous offline availability
@@ -1175,7 +1181,10 @@ export const StorageService = {
             project: srv.project || '',
             pat: srv.pat || '',
             isActive: Boolean(srv.isActive),
-            defaultIterationPath: srv.defaultIterationPath || ''
+            defaultIterationPath: srv.defaultIterationPath || '',
+            ...(srv.startDateField !== undefined ? { startDateField: String(srv.startDateField || '').trim() } : {}),
+            ...(srv.targetDateField !== undefined ? { targetDateField: String(srv.targetDateField || '').trim() } : {}),
+            ...(Array.isArray(srv.verifiedTaskFields) ? { verifiedTaskFields: srv.verifiedTaskFields.map(String) } : {})
           };
           inMemoryDevOps = cfg;
           try {

@@ -23,8 +23,9 @@ import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScree
 import { AccountHelpModal } from './components/AccountHelpModal';
 import { NotificationService } from './services/notificationService';
 import { OWNER_EMAIL, isUserAdmin, isOwnerUser, isTaskAuthorized, getUserPermissions } from './services/storageService';
-import { NEXUS_OWNER_UID, Task, SubTask, Developer, User, WorkspaceMember, UserRole, UserStatus, UserPermissions, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, isValidDurationString, parseDuration, getTaskSprintId, getTaskSprint } from './types';
+import { NEXUS_OWNER_UID, Task, SubTask, Developer, User, WorkspaceMember, UserRole, UserStatus, UserPermissions, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, getTodayCivilString, isValidDurationString, parseDuration, getTaskSprintId, getTaskSprint } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle, IconBot, IconCode, IconKey } from './components/Icons';
+import { DEFAULT_PLANNING_CONFIG, PlanningDriver, addCalendarDaysIso, applyPlanningFieldChange, calculateBusinessHoursBetween, calculateEndDateFromHours, formatHoursAsDuration, getTaskPlanningMetrics, roundPlanningHours } from './services/planningUtils';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
@@ -2811,10 +2812,14 @@ const ListView = ({
   );
 };
 
-const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
+const GanttView = ({ tasks, devs, onEditTask, onUpdateTask }: { tasks: Task[], devs: Developer[], onEditTask?: (task: Task) => void, onUpdateTask?: (task: Task) => void }) => {
     const [filters, setFilters] = useState<{search: string, type: string[], priority: string[], status: string[], assignee: string[]}>({ search: '', type: [], priority: [], status: [], assignee: [] });
     const [viewMode, setViewMode] = useState<'Day' | 'Week' | 'Month'>('Day');
     const [startDate, setStartDate] = useState(new Date());
+    const [dragPreview, setDragPreview] = useState<{ taskId: string; deltaDays: number } | null>(null);
+    const dragRef = useRef<{ task: Task; startX: number; moved: boolean; deltaDays: number } | null>(null);
+
+    const todayStr = getTodayCivilString();
 
     const ganttTasks = useMemo(() => {
         return tasks.filter(t => {
@@ -2830,7 +2835,11 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                  else { matchesAssignee = !!t.assignee && filters.assignee.includes(t.assignee); }
              }
              return matchesSearch && matchesType && matchesPriority && matchesStatus && matchesAssignee;
-        }).sort((a, b) => new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime());
+        }).sort((a, b) => {
+             const ta = parseCivilDate(a.startDate!)?.getTime() || 0;
+             const tb = parseCivilDate(b.startDate!)?.getTime() || 0;
+             return ta - tb;
+        });
     }, [tasks, filters]);
 
     const { dates, columnWidth, totalWidth } = useMemo(() => {
@@ -2845,6 +2854,55 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
         }
         return { dates: datesArr, columnWidth: colW, totalWidth: datesArr.length * colW };
     }, [startDate, viewMode]);
+
+    const pixelsPerDay = viewMode === 'Day' ? columnWidth : viewMode === 'Week' ? columnWidth / 7 : columnWidth / 30;
+
+    const handleShiftTaskDates = useCallback((task: Task, deltaDays: number) => {
+        if (!onUpdateTask || !task.startDate || !task.endDate || deltaDays === 0) return;
+        const nextStart = addCalendarDaysIso(task.startDate, deltaDays);
+        const nextEnd = addCalendarDaysIso(task.endDate, deltaDays);
+        if (!nextStart || !nextEnd) return;
+        const calc = calculateBusinessHoursBetween(nextStart, nextEnd, DEFAULT_PLANNING_CONFIG);
+        const nextEstimate = calc.valid && calc.hours > 0 ? formatHoursAsDuration(calc.hours) : task.estimatedTime;
+        onUpdateTask({
+            ...task,
+            startDate: nextStart,
+            endDate: nextEnd,
+            estimatedTime: nextEstimate
+        });
+    }, [onUpdateTask]);
+
+    useEffect(() => {
+        const handleWindowMouseMove = (e: MouseEvent) => {
+            if (!dragRef.current) return;
+            const dx = e.clientX - dragRef.current.startX;
+            if (Math.abs(dx) > 6) {
+                dragRef.current.moved = true;
+            }
+            const deltaDays = Math.round(dx / Math.max(1, pixelsPerDay));
+            if (deltaDays !== dragRef.current.deltaDays) {
+                dragRef.current.deltaDays = deltaDays;
+                setDragPreview({ taskId: dragRef.current.task.id, deltaDays });
+            }
+        };
+        const handleWindowMouseUp = () => {
+            if (!dragRef.current) return;
+            const { task, moved, deltaDays } = dragRef.current;
+            dragRef.current = null;
+            setDragPreview(null);
+            if (moved && deltaDays !== 0) {
+                handleShiftTaskDates(task, deltaDays);
+            } else if (!moved && onEditTask) {
+                onEditTask(task);
+            }
+        };
+        window.addEventListener('mousemove', handleWindowMouseMove);
+        window.addEventListener('mouseup', handleWindowMouseUp);
+        return () => {
+            window.removeEventListener('mousemove', handleWindowMouseMove);
+            window.removeEventListener('mouseup', handleWindowMouseUp);
+        };
+    }, [pixelsPerDay, handleShiftTaskDates, onEditTask]);
 
     const handleShiftDate = (dir: number) => { const newDate = new Date(startDate); if (viewMode === 'Day') newDate.setDate(newDate.getDate() + (dir * 7)); if (viewMode === 'Week') newDate.setDate(newDate.getDate() + (dir * 28)); if (viewMode === 'Month') newDate.setMonth(newDate.getMonth() + (dir * 3)); setStartDate(newDate); }
     const getTaskPosition = (task: Task) => {
@@ -2865,15 +2923,22 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
     }
 
     const handleExportExcel = () => {
-        const exportData = ganttTasks.map((t: Task) => ({
-            'ID': t.id,
-            'Tipo': t.type,
-            'Tarefa': t.summary,
-            'Responsável': t.assignee || 'N/A',
-            'Início': formatDateSafely(t.startDate),
-            'Fim': formatDateSafely(t.endDate),
-            'Status': t.status
-        }));
+        const exportData = ganttTasks.map((t: Task) => {
+            const metrics = getTaskPlanningMetrics(t, todayStr, DEFAULT_PLANNING_CONFIG);
+            return {
+                'ID': t.id,
+                'Tipo': t.type,
+                'Tarefa': t.summary,
+                'Responsável': t.assignee || 'N/A',
+                'Início': formatDateSafely(t.startDate),
+                'Fim': formatDateSafely(t.endDate),
+                'Dias Úteis': metrics.businessDays,
+                'Esforço Estimado': t.estimatedTime || `${metrics.estimatedHours}h`,
+                'Esforço Realizado': t.actualTime || `${metrics.actualHours}h`,
+                'Status': t.status,
+                'Atrasada': metrics.isOverdue ? 'Sim' : 'Não'
+            };
+        });
         const ws = XLSX.utils.json_to_sheet(exportData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Cronograma Gantt");
@@ -2889,12 +2954,13 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
         slide.addText(`Gerado em: ${formatDateSafely(new Date())}`, { x: 0.5, y: 1.0, fontSize: 14, color: '94a3b8' });
 
         const tableData: any[] = [
-            ['ID', 'Tarefa', 'Início', 'Fim', 'Status'].map(h => ({ text: h, options: { bold: true, fill: '1e293b', color: 'ffffff' } })),
+            ['ID', 'Tarefa', 'Início', 'Fim', 'Est. / Real', 'Status'].map(h => ({ text: h, options: { bold: true, fill: '1e293b', color: 'ffffff' } })),
             ...ganttTasks.map(t => [
                 t.id, 
                 t.summary, 
                 formatDateSafely(t.startDate), 
                 formatDateSafely(t.endDate),
+                `${t.estimatedTime || '0h'} / ${t.actualTime || '0h'}`,
                 t.status
             ])
         ];
@@ -2907,7 +2973,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                  slide.addText("Cronograma (Cont.)", { x: 0.5, y: 0.5, fontSize: 18, color: 'FFFFFF', bold: true });
             }
             const chunk = [tableData[0], ...tableData.slice(i + 1, i + 1 + ROWS_PER_SLIDE)];
-            slide.addTable(chunk as any, { x: 0.5, y: 1.5, w: '90%', colW: [1.5, 5, 1.5, 1.5, 2], color: 'cbd5e1', fontSize: 10, border: { type: 'solid', color: '334155', pt: 0.5 } });
+            slide.addTable(chunk as any, { x: 0.5, y: 1.5, w: '90%', colW: [1.3, 4.5, 1.3, 1.3, 1.4, 1.7], color: 'cbd5e1', fontSize: 10, border: { type: 'solid', color: '334155', pt: 0.5 } });
         }
 
         if (ganttTasks.length > 0) {
@@ -2915,16 +2981,16 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
              visualSlide.background = { color: "0f172a" };
              visualSlide.addText("Linha do Tempo (Visual - Top 15)", { x: 0.5, y: 0.5, fontSize: 20, color: 'FFFFFF', bold: true });
              const tasksToDraw = ganttTasks.slice(0, 15);
-             const minDate = new Date(Math.min(...tasksToDraw.map(t => new Date(t.startDate!).getTime())));
-             const maxDate = new Date(Math.max(...tasksToDraw.map(t => new Date(t.endDate!).getTime())));
+             const minDate = new Date(Math.min(...tasksToDraw.map(t => (parseCivilDate(t.startDate!)?.getTime() || Date.now()))));
+             const maxDate = new Date(Math.max(...tasksToDraw.map(t => (parseCivilDate(t.endDate!)?.getTime() || Date.now()))));
              const buffer = (maxDate.getTime() - minDate.getTime()) * 0.1; 
              const totalDuration = (maxDate.getTime() - minDate.getTime()) + buffer || 1;
              const chartX = 0.5; const chartW = 12;
              tasksToDraw.forEach((task, idx) => {
-                 const start = new Date(task.startDate!).getTime();
-                 const end = new Date(task.endDate!).getTime();
+                 const start = parseCivilDate(task.startDate!)?.getTime() || minDate.getTime();
+                 const end = parseCivilDate(task.endDate!)?.getTime() || maxDate.getTime();
                  const offset = start - minDate.getTime();
-                 const duration = end - start;
+                 const duration = Math.max(86400000, end - start);
                  const xPos = chartX + (offset / totalDuration) * chartW;
                  const width = Math.max(0.1, (duration / totalDuration) * chartW);
                  const yPos = 1.5 + (idx * 0.4);
@@ -2944,7 +3010,7 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
     return (
       <div className="h-full flex flex-col space-y-4">
            <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-4 bg-slate-800 p-4 rounded-xl border border-slate-700">
-              <div><h2 className="text-xl font-bold text-white">Cronograma Interativo</h2><p className="text-sm text-slate-400">Linha do tempo dinâmica com filtros</p></div>
+              <div><h2 className="text-xl font-bold text-white">Cronograma Interativo</h2><p className="text-sm text-slate-400">Linha do tempo dinâmica com esforço em dias úteis (8h/dia)</p></div>
               <div className="flex gap-2 bg-slate-900/50 p-1 rounded-lg border border-slate-700">{['Day', 'Week', 'Month'].map((m) => (<button key={m} onClick={() => setViewMode(m as any)} className={`px-4 py-1.5 rounded text-xs font-medium transition-all ${viewMode === m ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>{m === 'Day' ? 'Dia' : m === 'Week' ? 'Semana' : 'Mês'}</button>))}</div>
               <div className="flex items-center gap-2">
                   <Button onClick={handleExportExcel} variant="success" className="px-3 py-1 text-xs"><IconDownload className="w-3 h-3" /> Excel</Button>
@@ -2955,10 +3021,23 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
           </div>
           <FilterBar filters={filters} setFilters={setFilters} devs={devs} />
           <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-700 overflow-hidden flex flex-col md:flex-row">
-               <div className="w-64 flex-shrink-0 border-r border-slate-700 bg-slate-800/30 flex flex-col">
-                   <div className="h-10 border-b border-slate-700 flex items-center px-4 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">Tarefas</div>
+               <div className="w-72 flex-shrink-0 border-r border-slate-700 bg-slate-800/30 flex flex-col">
+                   <div className="h-10 border-b border-slate-700 flex items-center justify-between px-4 bg-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider"><span>Tarefas</span><span className="text-[10px] font-normal text-slate-500">Dias úteis / Horas</span></div>
                    <div className="overflow-y-hidden flex-1 relative"><div className="absolute inset-0 overflow-y-auto custom-scrollbar no-scrollbar-vertical-sync"> 
-                             {ganttTasks.map((task, i) => (<div key={task.id} className="h-10 border-b border-slate-700/50 flex items-center px-4 hover:bg-slate-800/50 transition-colors group cursor-pointer" title={task.summary}><div className="truncate text-xs font-medium text-slate-300 group-hover:text-white w-full"><span className="text-slate-500 mr-2 opacity-50">{i+1}.</span>{task.summary}</div></div>))}
+                             {ganttTasks.map((task, i) => {
+                               const metrics = getTaskPlanningMetrics(task, todayStr, DEFAULT_PLANNING_CONFIG);
+                               return (
+                                 <div key={task.id} onClick={() => onEditTask?.(task)} className={`h-10 border-b border-slate-700/50 flex items-center justify-between gap-2 px-3 hover:bg-slate-800/50 transition-colors group cursor-pointer ${metrics.isOverdue ? 'bg-rose-950/20' : ''}`} title={`${task.summary} (${task.status})`}>
+                                   <div className="truncate text-xs font-medium text-slate-300 group-hover:text-white min-w-0 flex-1">
+                                     <span className="text-slate-500 mr-1.5 opacity-60">{i+1}.</span>{task.summary}
+                                   </div>
+                                   <div className="flex items-center gap-1.5 shrink-0">
+                                     <span className="text-[10px] font-mono text-slate-400">{metrics.businessDays}du</span>
+                                     {metrics.isOverdue && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">Atrasada</span>}
+                                   </div>
+                                 </div>
+                               );
+                             })}
                         </div></div>
                </div>
                <div className="flex-1 overflow-x-auto custom-scrollbar bg-slate-900 relative flex flex-col">
@@ -2970,11 +3049,56 @@ const GanttView = ({ tasks, devs }: { tasks: Task[], devs: Developer[] }) => {
                          <div className="absolute inset-0">
                              {ganttTasks.map((task) => {
                                  const pos = getTaskPosition(task);
+                                 const metrics = getTaskPlanningMetrics(task, todayStr, DEFAULT_PLANNING_CONFIG);
+                                 const isDraggingThis = dragPreview?.taskId === task.id;
+                                 const previewOffsetPx = isDraggingThis ? dragPreview!.deltaDays * pixelsPerDay : 0;
+
                                  let color = "bg-indigo-600 border-indigo-500";
-                                 if (['Concluído', 'Resolvido'].includes(task.status)) color = "bg-emerald-600 border-emerald-500 opacity-60";
+                                 if (isCompletedStatus(task.status)) color = "bg-emerald-600 border-emerald-500 opacity-70";
+                                 else if (isCancelledStatus(task.status)) color = "bg-slate-600 border-slate-500 opacity-50";
+                                 else if (metrics.isOverdue) color = "bg-rose-600 border-rose-300 ring-1 ring-rose-400/70";
                                  else if (task.priority === '1 - Crítica') color = "bg-rose-600 border-rose-500";
                                  else if (task.type === 'Melhoria') color = "bg-teal-600 border-teal-500";
-                                 return (<div key={task.id} className="h-10 border-b border-slate-700/30 relative w-full group hover:bg-white/5 transition-colors">{pos && (<div className={`absolute top-2 h-6 rounded-md shadow-lg border ${color} bg-opacity-90 hover:bg-opacity-100 transition-all cursor-pointer z-10 flex items-center px-2 overflow-hidden`} style={{ left: pos.left, width: pos.width }}><span className="text-[10px] font-bold text-white whitespace-nowrap sticky left-2 drop-shadow-md">{task.assignee ? `${task.assignee.split(' ')[0]}: ` : ''}{task.summary}</span><div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-800 border border-slate-600 text-white text-xs p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none w-max z-50"><p className="font-bold">{task.summary}</p><p className="text-[10px] text-slate-400">{formatDateSafely(task.startDate)} - {formatDateSafely(task.endDate)}</p></div></div>)}</div>)
+
+                                 const estDisplay = task.estimatedTime || (metrics.estimatedHours > 0 ? formatHoursAsDuration(metrics.estimatedHours) : '0h');
+                                 const actDisplay = task.actualTime || (metrics.actualHours > 0 ? formatHoursAsDuration(metrics.actualHours) : '0h');
+
+                                 return (
+                                   <div key={task.id} className="h-10 border-b border-slate-700/30 relative w-full group hover:bg-white/5 transition-colors">
+                                     {pos && (
+                                       <div
+                                         onMouseDown={(e) => {
+                                           if (e.button !== 0) return;
+                                           dragRef.current = { task, startX: e.clientX, moved: false, deltaDays: 0 };
+                                         }}
+                                         className={`absolute top-2 h-6 rounded-md shadow-lg border ${color} bg-opacity-90 hover:bg-opacity-100 transition-all ${onUpdateTask ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} z-10 flex items-center justify-between gap-2 px-2 overflow-visible select-none`}
+                                         style={{ left: pos.left + previewOffsetPx, width: pos.width }}
+                                       >
+                                         <span className="text-[10px] font-bold text-white whitespace-nowrap truncate drop-shadow-md">
+                                           {metrics.isOverdue ? '⚠ ' : ''}{task.assignee ? `${task.assignee.split(' ')[0]}: ` : ''}{task.summary}
+                                         </span>
+                                         <span className="text-[9px] font-mono text-white/90 whitespace-nowrap shrink-0 hidden sm:inline">
+                                           {metrics.businessDays}du • {estDisplay}
+                                         </span>
+                                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-800 border border-slate-600 text-white text-xs p-2.5 rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none w-max max-w-xs z-50 space-y-1">
+                                           <div className="flex items-center gap-2">
+                                             <p className="font-bold text-white truncate max-w-[220px]">{task.summary}</p>
+                                             {metrics.isOverdue && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">Atrasada</span>}
+                                           </div>
+                                           <p className="text-[11px] text-slate-300 font-mono">
+                                             {formatDateSafely(task.startDate)} → {formatDateSafely(task.endDate)} ({metrics.businessDays} {metrics.businessDays === 1 ? 'dia útil' : 'dias úteis'})
+                                           </p>
+                                           <p className="text-[11px] text-indigo-300">
+                                             Estimado: <strong>{estDisplay}</strong> • Realizado: <strong className="text-emerald-300">{actDisplay}</strong>
+                                           </p>
+                                           <p className="text-[10px] text-slate-400">
+                                             Status: <span className="text-slate-200">{task.status}</span>{onUpdateTask ? ' • Arraste para mover ou clique para editar' : ''}
+                                           </p>
+                                         </div>
+                                       </div>
+                                     )}
+                                   </div>
+                                 );
                              })}
                          </div>
                     </div>
@@ -7520,6 +7644,8 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
     const [isSavingDevops, setIsSavingDevops] = useState(false);
     const [devopsSavedFeedback, setDevopsSavedFeedback] = useState(false);
+    const [isInspectingFields, setIsInspectingFields] = useState(false);
+    const [devopsFieldsInfo, setDevopsFieldsInfo] = useState<{ status: 'idle' | 'ok' | 'error'; message: string; candidates?: Array<{ referenceName: string; name: string }> }>({ status: 'idle', message: '' });
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
     const [resetSuccessMessage, setResetSuccessMessage] = useState('');
@@ -7699,6 +7825,87 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
                   Caminho padrão da iteração / Sprint no Azure DevOps (campo System.IterationPath). Novas demandas herdarão este caminho caso não especificado individualmente.
                 </p>
               </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Campo Data Início na Task (Opcional)</label>
+                <input
+                  value={devopsConfig.startDateField || ''}
+                  onChange={e => setDevopsConfig({ ...devopsConfig, startDateField: e.target.value })}
+                  list="devops-date-field-options"
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs"
+                  placeholder="Automático (se habilitado no DevOps)"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-medium">Campo Data Fim Prevista na Task (Opcional)</label>
+                <input
+                  value={devopsConfig.targetDateField || ''}
+                  onChange={e => setDevopsConfig({ ...devopsConfig, targetDateField: e.target.value })}
+                  list="devops-date-field-options"
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs"
+                  placeholder="Automático (se habilitado no DevOps)"
+                />
+                <datalist id="devops-date-field-options">
+                  <option value="Microsoft.VSTS.Scheduling.StartDate" />
+                  <option value="Microsoft.VSTS.Scheduling.TargetDate" />
+                  <option value="Microsoft.VSTS.Scheduling.FinishDate" />
+                  <option value="none" />
+                  {(devopsFieldsInfo.candidates || []).map(c => (
+                    <option key={c.referenceName} value={c.referenceName}>{c.name}</option>
+                  ))}
+                </datalist>
+              </div>
+              <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-700/60">
+                <span className="text-[11px] text-slate-400">
+                  Deixe em branco para detectar automaticamente ou use <code className="text-slate-300">none</code> para não enviar datas.
+                </span>
+                <button
+                  type="button"
+                  disabled={isInspectingFields || !devopsConfig.organization || !devopsConfig.project || !devopsConfig.pat}
+                  onClick={async () => {
+                    setIsInspectingFields(true);
+                    setDevopsFieldsInfo({ status: 'idle', message: '' });
+                    try {
+                      const res = await fetch('/api/devops/task-fields', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          organization: devopsConfig.organization,
+                          project: devopsConfig.project,
+                          pat: devopsConfig.pat,
+                          forceRefresh: true
+                        })
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Erro ao consultar campos');
+                      const startRec = data.recommendedStartDateField || '';
+                      const targetRec = data.recommendedTargetDateField || '';
+                      setDevopsConfig(prev => ({
+                        ...prev,
+                        startDateField: prev.startDateField || startRec || 'none',
+                        targetDateField: prev.targetDateField || targetRec || 'none',
+                        verifiedTaskFields: (data.dateFieldCandidates || []).map((c: any) => c.referenceName)
+                      }));
+                      setDevopsFieldsInfo({
+                        status: 'ok',
+                        candidates: data.dateFieldCandidates || [],
+                        message: `Campos verificados (${data.totalFields} campos). OriginalEstimate: ${data.effortFields?.hasOriginalEstimate ? 'OK' : 'ausente'}, CompletedWork: ${data.effortFields?.hasCompletedWork ? 'OK' : 'ausente'}. Datas detectadas: Início=${startRec || 'não disponível'}, Fim=${targetRec || 'não disponível'}.`
+                      });
+                    } catch (e: any) {
+                      setDevopsFieldsInfo({ status: 'error', message: e?.message || 'Não foi possível verificar campos no Azure DevOps.' });
+                    } finally {
+                      setIsInspectingFields(false);
+                    }
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 font-medium disabled:opacity-50 cursor-pointer"
+                >
+                  {isInspectingFields ? 'Verificando Campos...' : 'Verificar Campos da Task no DevOps'}
+                </button>
+              </div>
+              {devopsFieldsInfo.status !== 'idle' && (
+                <div className={`md:col-span-2 p-2.5 rounded-lg text-xs border ${devopsFieldsInfo.status === 'ok' ? 'bg-sky-950/50 border-sky-500/30 text-sky-200' : 'bg-rose-950/50 border-rose-500/30 text-rose-300'}`}>
+                  {devopsFieldsInfo.message}
+                </div>
+              )}
               <div className="md:col-span-2 flex items-center gap-2 pt-2">
                 <input type="checkbox" id="devops_active" checked={devopsConfig.isActive} onChange={e => setDevopsConfig({...devopsConfig, isActive: e.target.checked})} className="rounded bg-slate-900 border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" />
                 <label htmlFor="devops_active" className="text-sm text-slate-200 cursor-pointer">Sincronização Ativa (Cria e atualiza recursos automaticamente no Azure DevOps)</label>
@@ -8804,11 +9011,8 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 }
                 setSyncLog(prev => [...prev, `Criando Task vinculada à User Story ID ${formData.devopsUserStoryId}...`]);
                 
-                let hoursValue = 0;
-                if (formData.estimatedTime) {
-                    hoursValue = parseDuration(formData.estimatedTime);
-                }
-
+                const hoursValue = formData.estimatedTime ? roundPlanningHours(parseDuration(formData.estimatedTime)) : undefined;
+                const actualValue = formData.actualTime ? roundPlanningHours(parseDuration(formData.actualTime)) : undefined;
                 const tag = formData.type === 'Incidente' ? 'Sustentação' : 'Melhoria';
 
                 const res = await fetch('/api/devops/create-task', {
@@ -8820,7 +9024,12 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                         pat: config.pat,
                         userStoryId: formData.devopsUserStoryId,
                         title: `${formData.id || 'N/A'} - ${formData.summary}`,
-                        estimate: hoursValue,
+                        estimate: hoursValue !== undefined ? hoursValue : 0,
+                        ...(actualValue !== undefined && actualValue > 0 ? { completed: actualValue } : {}),
+                        ...(formData.startDate ? { startDate: formData.startDate } : {}),
+                        ...(formData.endDate ? { endDate: formData.endDate } : {}),
+                        ...(config.startDateField ? { startDateField: config.startDateField } : {}),
+                        ...(config.targetDateField ? { targetDateField: config.targetDateField } : {}),
                         tag: tag,
                         iterationPath: formData.iterationPath || config.defaultIterationPath || undefined
                     })
@@ -8842,7 +9051,9 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 }
                 setSyncLog(prev => [
                     ...prev,
-                    `✔ Task criada com sucesso (ID ${data.id}) | Estimativa: ${hoursValue} horas | Tag: [${tag}]`,
+                    `✔ Task criada com sucesso (ID ${data.id}) | Estimativa: ${hoursValue ?? 0}h${actualValue ? ` | Realizado: ${actualValue}h` : ''} | Tag: [${tag}]`,
+                    ...(Array.isArray(data.appliedDateFields) && data.appliedDateFields.length > 0 ? [`✔ Datas sincronizadas nos campos: ${data.appliedDateFields.join(', ')}`] : []),
+                    ...(data.warning ? [`⚠ ${data.warning}`] : []),
                     `🎉 Task vinculada ao Azure DevOps com sucesso!`
                 ]);
 
@@ -8868,11 +9079,11 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         setSyncLog(["Iniciando atualização do item no Azure DevOps..."]);
 
         try {
-            const estHours = parseDuration(formData.estimatedTime || '0h');
-            const actHours = parseDuration(formData.actualTime || '0h');
+            const estHours = roundPlanningHours(parseDuration(formData.estimatedTime || '0h'));
+            const actHours = roundPlanningHours(parseDuration(formData.actualTime || '0h'));
 
             const res = await fetch('/api/devops/update-task', {
-                method: 'PATCH',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     organization: config.organization,
@@ -8883,6 +9094,10 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     status: formData.status,
                     estimate: estHours,
                     completed: actHours,
+                    ...(formData.startDate ? { startDate: formData.startDate } : {}),
+                    ...(formData.endDate ? { endDate: formData.endDate } : {}),
+                    ...(config.startDateField ? { startDateField: config.startDateField } : {}),
+                    ...(config.targetDateField ? { targetDateField: config.targetDateField } : {}),
                     assignee: formData.assignee || undefined,
                     iterationPath: formData.iterationPath || config.defaultIterationPath || undefined
                 })
@@ -8913,7 +9128,8 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 `✔ Título: ${formData.id || 'N/A'} - ${formData.summary}`,
                 `✔ Status/Estado: ${formData.status}`,
                 formData.iterationPath ? `✔ Iteration Path: ${formData.iterationPath}` : '',
-                `✔ Horas Estimadas: ${estHours} | Horas Realizadas: ${actHours}`,
+                `✔ Horas Estimadas: ${estHours}h | Horas Realizadas: ${actHours}h`,
+                ...(Array.isArray(data.appliedDateFields) && data.appliedDateFields.length > 0 ? [`✔ Datas sincronizadas: ${data.appliedDateFields.join(', ')}`] : []),
                 `✔ Responsável: ${formData.assignee || 'Sem Atribuição'}`,
                 `🎉 ${successMsg}`
             ].filter(Boolean));
@@ -8942,11 +9158,53 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
     };
 
     const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
+    const [planningDriver, setPlanningDriver] = useState<PlanningDriver | undefined>(undefined);
+    const [planningNotice, setPlanningNotice] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
 
     useEffect(() => { if (!formData.projectData) setFormData(prev => ({ ...prev, projectData: { currentPhaseId: '1', phaseStatus: 'Não Iniciado', completedActivities: [] } })); }, []);
-    useEffect(() => { if (formData.startDate && formData.estimatedTime) { const hours = parseDuration(formData.estimatedTime); if (hours > 0) { const daysToAdd = Math.floor((hours - 0.1) / 8); const start = new Date(formData.startDate); const end = new Date(start); end.setDate(start.getDate() + daysToAdd); const endDateStr = end.toISOString().split('T')[0]; if (endDateStr !== formData.endDate) setFormData(prev => ({ ...prev, endDate: endDateStr })); } } }, [formData.startDate, formData.estimatedTime]);
+
+    const handlePlanningFieldChange = (field: 'startDate' | 'endDate' | 'estimatedTime' | 'actualTime', value: string) => {
+        const outcome = applyPlanningFieldChange(
+            {
+                startDate: formData.startDate,
+                endDate: formData.endDate,
+                estimatedTime: formData.estimatedTime,
+                actualTime: formData.actualTime
+            },
+            field,
+            value,
+            DEFAULT_PLANNING_CONFIG,
+            planningDriver
+        );
+        setPlanningDriver(outcome.driver);
+        setPlanningNotice(outcome.notice || null);
+        setFormErrors(prev => {
+            const next = { ...prev };
+            delete next.startDate;
+            delete next.endDate;
+            delete next.estimatedTime;
+            delete next.actualTime;
+            if (outcome.errors.startDate) next.startDate = outcome.errors.startDate;
+            if (outcome.errors.endDate) next.endDate = outcome.errors.endDate;
+            if (outcome.errors.estimatedTime) next.estimatedTime = outcome.errors.estimatedTime;
+            if (outcome.errors.actualTime) next.actualTime = outcome.errors.actualTime;
+            return next;
+        });
+        setFormData(prev => ({
+            ...prev,
+            startDate: outcome.nextState.startDate,
+            endDate: outcome.nextState.endDate,
+            estimatedTime: outcome.nextState.estimatedTime,
+            actualTime: outcome.nextState.actualTime
+        }));
+    };
+
     const handleChange = (e: any) => { 
         const { name, value } = e.target; 
+        if (name === 'startDate' || name === 'endDate' || name === 'estimatedTime' || name === 'actualTime') {
+            handlePlanningFieldChange(name, value);
+            return;
+        }
         if (formErrors[name]) {
             setFormErrors(prev => {
                 const next = { ...prev };
@@ -9103,15 +9361,26 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         setFormData(prev => {
             const updatedSubTasks = (prev.subTasks || []).map(st => st.id === id ? { ...st, [field]: value } : st);
             
-            // Auto-calculate hours
-            const totalEst = updatedSubTasks.reduce((acc, st) => acc + (st.estimatedHours || 0), 0);
-            const totalAct = updatedSubTasks.reduce((acc, st) => acc + (st.actualHours || 0), 0);
+            // Auto-calculate hours from subtasks
+            const totalEst = roundPlanningHours(updatedSubTasks.reduce((acc, st) => acc + (st.estimatedHours || 0), 0));
+            const totalAct = roundPlanningHours(updatedSubTasks.reduce((acc, st) => acc + (st.actualHours || 0), 0));
+            const estLabel = formatHoursAsDuration(totalEst) || '0h';
+            const actLabel = formatHoursAsDuration(totalAct) || '0h';
+
+            let nextEndDate = prev.endDate;
+            if (prev.startDate && totalEst > 0) {
+                const endCalc = calculateEndDateFromHours(prev.startDate, totalEst, DEFAULT_PLANNING_CONFIG);
+                if (endCalc.valid && endCalc.endDate) {
+                    nextEndDate = endCalc.endDate;
+                }
+            }
             
             return { 
                 ...prev, 
                 subTasks: updatedSubTasks,
-                estimatedTime: `${totalEst}h`,
-                actualTime: `${totalAct}h`
+                estimatedTime: estLabel,
+                actualTime: actLabel,
+                endDate: nextEndDate
             };
         });
     };
@@ -9121,14 +9390,25 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
             const updatedSubTasks = (prev.subTasks || []).filter(st => st.id !== id);
             
             // Auto-calculate hours
-            const totalEst = updatedSubTasks.reduce((acc, st) => acc + (st.estimatedHours || 0), 0);
-            const totalAct = updatedSubTasks.reduce((acc, st) => acc + (st.actualHours || 0), 0);
+            const totalEst = roundPlanningHours(updatedSubTasks.reduce((acc, st) => acc + (st.estimatedHours || 0), 0));
+            const totalAct = roundPlanningHours(updatedSubTasks.reduce((acc, st) => acc + (st.actualHours || 0), 0));
+            const estLabel = updatedSubTasks.length > 0 ? (formatHoursAsDuration(totalEst) || '0h') : prev.estimatedTime;
+            const actLabel = updatedSubTasks.length > 0 ? (formatHoursAsDuration(totalAct) || '0h') : prev.actualTime;
+
+            let nextEndDate = prev.endDate;
+            if (updatedSubTasks.length > 0 && prev.startDate && totalEst > 0) {
+                const endCalc = calculateEndDateFromHours(prev.startDate, totalEst, DEFAULT_PLANNING_CONFIG);
+                if (endCalc.valid && endCalc.endDate) {
+                    nextEndDate = endCalc.endDate;
+                }
+            }
 
             return { 
                 ...prev, 
                 subTasks: updatedSubTasks,
-                estimatedTime: updatedSubTasks.length > 0 ? `${totalEst}h` : prev.estimatedTime,
-                actualTime: updatedSubTasks.length > 0 ? `${totalAct}h` : prev.actualTime
+                estimatedTime: estLabel,
+                actualTime: actLabel,
+                endDate: nextEndDate
             };
         });
     };
@@ -9751,10 +10031,12 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-            <div className="sm:col-span-2 flex items-center gap-2 mb-1">
-                <IconClock className="w-4 h-4 text-indigo-400" />
-                <span className="text-xs text-indigo-300 font-bold">Planejamento & Prazos</span>
-                <span className="text-[10px] text-slate-500">(Data Fim sugerida com base no tempo estimado)</span>
+            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-2">
+                    <IconClock className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs text-indigo-300 font-bold">Planejamento & Prazos</span>
+                </div>
+                <span className="text-[10px] text-slate-400">Dias úteis (seg–sex) • jornada de 8h/dia</span>
             </div>
             <div>
                 <label htmlFor="task-startDate" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Início</label>
@@ -9764,8 +10046,11 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     name="startDate" 
                     value={formData.startDate || ''} 
                     onChange={handleChange} 
-                    className="w-full bg-slate-800 border border-slate-600 rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" 
+                    className={`w-full bg-slate-800 border rounded-xl p-2.5 text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${
+                        formErrors.startDate ? 'border-rose-500' : 'border-slate-600'
+                    }`} 
                 />
+                {formErrors.startDate && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.startDate}</p>}
             </div>
             <div>
                 <label htmlFor="task-endDate" className="block text-xs text-slate-400 mb-1 font-medium uppercase tracking-wider">Data Fim (Prevista)</label>
@@ -9813,6 +10098,15 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                 {formErrors.actualTime && <p className="text-rose-400 text-xs mt-1 font-semibold">{formErrors.actualTime}</p>}
                 {formData.subTasks && formData.subTasks.length > 0 && <p className="text-[10px] text-emerald-400 mt-1">Calculado automaticamente via subtarefas</p>}
             </div>
+            {planningNotice && (
+                <div className={`sm:col-span-2 text-[11px] px-3 py-1.5 rounded-lg border ${
+                    planningNotice.type === 'warning'
+                        ? 'bg-rose-950/50 border-rose-500/40 text-rose-300'
+                        : 'bg-indigo-950/40 border-indigo-500/30 text-indigo-300'
+                }`}>
+                    {planningNotice.message}
+                </div>
+            )}
         </div>{isProject && (
     <div className="bg-indigo-900/10 border border-indigo-500/30 p-4 rounded-lg space-y-4">
         <h4 className="text-sm font-bold text-indigo-300 flex items-center gap-2"><IconProject className="w-4 h-4" /> Ciclo de Vida do Projeto & Subtarefas</h4>
@@ -11471,8 +11765,11 @@ export default function App() {
       return;
     }
 
-    const isCreating = !editingTask?.id || editingTask.id.trim() === '';
-    const oldId = editingTask?.id ? editingTask.id.trim() : '';
+    const existingByCleanId = tasks.find(t => t.id.trim().toLowerCase() === cleanId.toLowerCase());
+    const isCreating = editingTask
+      ? (!editingTask.id || editingTask.id.trim() === '')
+      : !existingByCleanId;
+    const oldId = editingTask?.id ? editingTask.id.trim() : (existingByCleanId?.id?.trim() || '');
 
     // Verify duplicate ticket ID across all tasks
     const duplicate = tasks.find(t => 
@@ -11590,33 +11887,59 @@ export default function App() {
     if (finalTask.devopsFeatureId) {
         const config = StorageService.getDevOpsConfig();
         if (config.isActive && config.pat && config.organization && config.project) {
-            const estHours = parseDuration(finalTask.estimatedTime || '0h');
-            const actHours = parseDuration(finalTask.actualTime || '0h');
+            const estHours = roundPlanningHours(parseDuration(finalTask.estimatedTime || '0h'));
+            const actHours = roundPlanningHours(parseDuration(finalTask.actualTime || '0h'));
 
-            fetch('/api/devops/update-task', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    organization: config.organization,
-                    project: config.project,
-                    pat: config.pat,
-                    id: finalTask.devopsFeatureId,
-                    title: `${finalTask.id || 'N/A'} - ${finalTask.summary}`,
-                    status: finalTask.status,
-                    estimate: estHours,
-                    completed: actHours,
-                    assignee: finalTask.assignee || undefined,
-                    iterationPath: finalTask.iterationPath || undefined
-                })
-            }).then(async (res) => {
+            const devopsUpdatePayload = JSON.stringify({
+                organization: config.organization,
+                project: config.project,
+                pat: config.pat,
+                id: finalTask.devopsFeatureId,
+                title: `${finalTask.id || 'N/A'} - ${finalTask.summary}`,
+                status: finalTask.status,
+                estimate: estHours,
+                completed: actHours,
+                ...(finalTask.startDate ? { startDate: finalTask.startDate } : {}),
+                ...(finalTask.endDate ? { endDate: finalTask.endDate } : {}),
+                ...(config.startDateField ? { startDateField: config.startDateField } : {}),
+                ...(config.targetDateField ? { targetDateField: config.targetDateField } : {}),
+                assignee: finalTask.assignee || undefined,
+                iterationPath: finalTask.iterationPath || undefined
+            });
+
+            const sendDevOpsUpdate = async (attempt = 0): Promise<Response> => {
+                try {
+                    return await fetch('/api/devops/update-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: devopsUpdatePayload
+                    });
+                } catch (err) {
+                    if (attempt < 1) {
+                        await new Promise(resolve => setTimeout(resolve, 400));
+                        return sendDevOpsUpdate(attempt + 1);
+                    }
+                    throw err;
+                }
+            };
+
+            sendDevOpsUpdate().then(async (res) => {
+                const text = await res.text();
+                let payload: any = null;
+                try { payload = JSON.parse(text); } catch {}
                 if (res.ok) {
                     console.log(`[DevOps Sync] Sincronização automática bem-sucedida para o ID: ${finalTask.devopsFeatureId}`);
+                    if (payload?.warning) {
+                        showToast('info', payload.warning, 'Aviso Azure DevOps');
+                    }
                 } else {
-                    const err = await res.text();
-                    console.warn(`[DevOps Sync] Sincronização automática falhou:`, err);
+                    const errMsg = payload?.error || text || `HTTP ${res.status}`;
+                    console.warn(`[DevOps Sync] Sincronização automática falhou:`, errMsg);
+                    showToast('error', `Alteração salva no Nexus, mas falhou no Azure DevOps: ${errMsg}`, 'Falha no Azure DevOps');
                 }
             }).catch(err => {
-                console.error(`[DevOps Sync] Erro de rede na sincronização automática:`, err);
+                console.warn(`[DevOps Sync] Falha de conexão na sincronização automática:`, err?.message || err);
+                showToast('error', `Alteração salva no Nexus, mas houve erro de conexão ao sincronizar com o Azure DevOps.`, 'Falha no Azure DevOps');
             });
         }
     }
@@ -12309,7 +12632,7 @@ export default function App() {
       <Route path="/project-report" element={canAccessModule('projectReport') ? <ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/kanban" element={canAccessModule('kanban') ? <KanbanView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/list" element={canAccessModule('list') ? <ListView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} sprints={sprints} setSprints={setSprints} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
-      <Route path="/gantt" element={canAccessModule('gantt') ? <GanttView tasks={visibleTasks} devs={devs} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/gantt" element={canAccessModule('gantt') ? <GanttView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/robots" element={canAccessModule('robots') ? <RobotManagementView robots={robots} setRobots={setRobots} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/totem" element={canAccessModule('totem') ? <AutomationTotemView tasks={visibleTasks} setTasks={setTasks} robots={robots} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/reports" element={canAccessModule('reports') ? <ReportsView tasks={visibleTasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} /> : <Navigate to={defaultAllowedPath} replace />} />

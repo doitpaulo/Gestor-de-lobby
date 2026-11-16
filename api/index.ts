@@ -201,7 +201,7 @@ const readDevOpsConfig = () => {
   } catch (e) {
     console.warn("Error reading tmp devops file:", e);
   }
-  return { organization: "", project: "", pat: "", isActive: false, defaultIterationPath: "" };
+  return { organization: "", project: "", pat: "", isActive: false, defaultIterationPath: "", startDateField: "", targetDateField: "", verifiedTaskFields: [] };
 };
 
 const writeDevOpsConfig = (config: any) => {
@@ -372,7 +372,7 @@ router.post("/devops/config", async (req: express.Request, res: express.Response
       return;
     }
 
-    const { organization, project, pat, isActive, defaultIterationPath } = req.body;
+    const { organization, project, pat, isActive, defaultIterationPath, startDateField, targetDateField, verifiedTaskFields } = req.body;
     const current = readDevOpsConfig();
     // If client sent masked pat "••••••••••••", preserve existing PAT
     const finalPat = (pat && pat.includes("••••")) ? current.pat : String(pat || "").trim();
@@ -383,6 +383,9 @@ router.post("/devops/config", async (req: express.Request, res: express.Response
       pat: finalPat,
       isActive: Boolean(isActive),
       defaultIterationPath: String(defaultIterationPath || "").trim(),
+      startDateField: startDateField !== undefined ? String(startDateField || "").trim() : (current.startDateField || ""),
+      targetDateField: targetDateField !== undefined ? String(targetDateField || "").trim() : (current.targetDateField || ""),
+      verifiedTaskFields: Array.isArray(verifiedTaskFields) ? verifiedTaskFields.map(String) : (current.verifiedTaskFields || []),
       updatedAt: new Date().toISOString()
     };
     writeDevOpsConfig(config);
@@ -649,13 +652,290 @@ router.post("/auth/complete-first-password-change", async (req: express.Request,
 });
 
 // -------------------------------------------------------------
-// Azure DevOps Execution Routes (with Iteration Path support)
+// Azure DevOps Execution Routes (with Effort, Task Fields Check & Iteration Path)
 // -------------------------------------------------------------
+
+interface DevOpsTaskFieldsInspection {
+  available: boolean;
+  fields: Array<{ referenceName: string; name: string; alwaysRequired?: boolean }>;
+  dateFieldCandidates: Array<{ referenceName: string; name: string }>;
+  recommendedStartDateField: string | null;
+  recommendedTargetDateField: string | null;
+  effortFields: {
+    hasOriginalEstimate: boolean;
+    hasCompletedWork: boolean;
+    hasRemainingWork: boolean;
+  };
+  error?: string;
+  cachedAt: number;
+}
+
+const devOpsTaskFieldsCache = new Map<string, DevOpsTaskFieldsInspection>();
+const DEVOPS_FIELDS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function formatDevOpsIsoDate(rawDate?: string | null): string | null {
+  if (!rawDate) return null;
+  const clean = String(rawDate).split("T")[0].trim();
+  const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const d = parseInt(match[3], 10);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null;
+  }
+  // Noon UTC ensures civil calendar date remains unchanged across UTC-11..UTC+11 boards
+  return `${clean}T12:00:00Z`;
+}
+
+async function inspectDevOpsTaskFields(
+  org: string,
+  proj: string,
+  token: string,
+  forceRefresh = false
+): Promise<DevOpsTaskFieldsInspection> {
+  const cacheKey = `${org.toLowerCase()}::${proj.toLowerCase()}`;
+  const cached = devOpsTaskFieldsCache.get(cacheKey);
+  if (!forceRefresh && cached && Date.now() - cached.cachedAt < DEVOPS_FIELDS_CACHE_TTL_MS) {
+    return cached;
+  }
+
+  const url = `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(proj)}/_apis/wit/workitemtypes/Task/fields?api-version=7.0`;
+  const auth = ":" + token.trim();
+  const encoded = Buffer.from(auth).toString("base64");
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Basic ${encoded}`,
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (Nexus-API-Client)"
+      }
+    });
+
+    if (!response.ok || response.status === 203) {
+      const errText = await response.text().catch(() => "");
+      return {
+        available: false,
+        fields: [],
+        dateFieldCandidates: [],
+        recommendedStartDateField: null,
+        recommendedTargetDateField: null,
+        effortFields: { hasOriginalEstimate: false, hasCompletedWork: false, hasRemainingWork: false },
+        error: response.status === 203 || errText.includes("signin")
+          ? "Falha de autenticação ao consultar campos do Azure DevOps."
+          : `HTTP ${response.status} ao consultar campos da Task no Azure DevOps.`,
+        cachedAt: Date.now()
+      };
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return {
+        available: false,
+        fields: [],
+        dateFieldCandidates: [],
+        recommendedStartDateField: null,
+        recommendedTargetDateField: null,
+        effortFields: { hasOriginalEstimate: false, hasCompletedWork: false, hasRemainingWork: false },
+        error: "Resposta não-JSON ao consultar campos da Task no Azure DevOps.",
+        cachedAt: Date.now()
+      };
+    }
+
+    const data = (await response.json()) as { value?: any[] };
+    const rawFields = Array.isArray(data?.value) ? data.value : [];
+    const fields = rawFields
+      .map((f: any) => ({
+        referenceName: String(f.referenceName || "").trim(),
+        name: String(f.name || f.referenceName || "").trim(),
+        alwaysRequired: Boolean(f.alwaysRequired)
+      }))
+      .filter((f) => f.referenceName.length > 0);
+
+    const refSet = new Set(fields.map((f) => f.referenceName));
+    const dateFieldCandidates = fields
+      .filter((f) => {
+        const lower = f.referenceName.toLowerCase();
+        return (
+          lower.includes("startdate") ||
+          lower.includes("targetdate") ||
+          lower.includes("finishdate") ||
+          lower.includes("duedate") ||
+          (lower.startsWith("microsoft.vsts.scheduling.") && lower.endsWith("date")) ||
+          (lower.startsWith("custom.") && lower.includes("date"))
+        );
+      })
+      .map(({ referenceName, name }) => ({ referenceName, name }));
+
+    const recommendedStartDateField =
+      (refSet.has("Microsoft.VSTS.Scheduling.StartDate") && "Microsoft.VSTS.Scheduling.StartDate") ||
+      dateFieldCandidates.find((f) => f.referenceName.toLowerCase().includes("startdate"))?.referenceName ||
+      null;
+
+    const recommendedTargetDateField =
+      (refSet.has("Microsoft.VSTS.Scheduling.TargetDate") && "Microsoft.VSTS.Scheduling.TargetDate") ||
+      (refSet.has("Microsoft.VSTS.Scheduling.FinishDate") && "Microsoft.VSTS.Scheduling.FinishDate") ||
+      (refSet.has("Microsoft.VSTS.Scheduling.DueDate") && "Microsoft.VSTS.Scheduling.DueDate") ||
+      dateFieldCandidates.find((f) => /targetdate|finishdate|duedate/i.test(f.referenceName))?.referenceName ||
+      null;
+
+    const result: DevOpsTaskFieldsInspection = {
+      available: true,
+      fields,
+      dateFieldCandidates,
+      recommendedStartDateField,
+      recommendedTargetDateField,
+      effortFields: {
+        hasOriginalEstimate: refSet.has("Microsoft.VSTS.Scheduling.OriginalEstimate"),
+        hasCompletedWork: refSet.has("Microsoft.VSTS.Scheduling.CompletedWork"),
+        hasRemainingWork: refSet.has("Microsoft.VSTS.Scheduling.RemainingWork")
+      },
+      cachedAt: Date.now()
+    };
+
+    devOpsTaskFieldsCache.set(cacheKey, result);
+    return result;
+  } catch (err: any) {
+    return {
+      available: false,
+      fields: [],
+      dateFieldCandidates: [],
+      recommendedStartDateField: null,
+      recommendedTargetDateField: null,
+      effortFields: { hasOriginalEstimate: false, hasCompletedWork: false, hasRemainingWork: false },
+      error: err?.message || "Erro ao consultar campos da Task no Azure DevOps.",
+      cachedAt: Date.now()
+    };
+  }
+}
+
+async function resolveDevOpsDateOperations(params: {
+  org: string;
+  proj: string;
+  token: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  requestedStartDateField?: string;
+  requestedTargetDateField?: string;
+  savedConfig: any;
+}): Promise<{
+  operations: Array<{ op: string; path: string; value: string }>;
+  appliedDateFields: string[];
+  skippedDateFields: string[];
+}> {
+  const startIso = formatDevOpsIsoDate(params.startDate);
+  const endIso = formatDevOpsIsoDate(params.endDate);
+  if (!startIso && !endIso) {
+    return { operations: [], appliedDateFields: [], skippedDateFields: [] };
+  }
+
+  let startField =
+    params.requestedStartDateField !== undefined
+      ? String(params.requestedStartDateField || "").trim()
+      : String(params.savedConfig?.startDateField || "").trim();
+  let targetField =
+    params.requestedTargetDateField !== undefined
+      ? String(params.requestedTargetDateField || "").trim()
+      : String(params.savedConfig?.targetDateField || "").trim();
+
+  const needsDiscovery =
+    (Boolean(startIso) && startField === "") ||
+    (Boolean(endIso) && targetField === "");
+
+  let inspection: DevOpsTaskFieldsInspection | null = null;
+  if (needsDiscovery) {
+    inspection = await inspectDevOpsTaskFields(params.org, params.proj, params.token);
+  }
+
+  const operations: Array<{ op: string; path: string; value: string }> = [];
+  const appliedDateFields: string[] = [];
+  const skippedDateFields: string[] = [];
+
+  if (startIso) {
+    if (startField.toLowerCase() === "none") {
+      skippedDateFields.push("startDate (desativado na configuração)");
+    } else {
+      const resolvedStart = startField || (inspection?.available ? inspection.recommendedStartDateField || "" : "");
+      if (resolvedStart) {
+        operations.push({ op: "add", path: `/fields/${resolvedStart}`, value: startIso });
+        appliedDateFields.push(resolvedStart);
+      } else {
+        skippedDateFields.push("startDate (campo de data início não disponível no template da Task no DevOps)");
+      }
+    }
+  }
+
+  if (endIso) {
+    if (targetField.toLowerCase() === "none") {
+      skippedDateFields.push("endDate (desativado na configuração)");
+    } else {
+      const resolvedEnd = targetField || (inspection?.available ? inspection.recommendedTargetDateField || "" : "");
+      if (resolvedEnd) {
+        operations.push({ op: "add", path: `/fields/${resolvedEnd}`, value: endIso });
+        appliedDateFields.push(resolvedEnd);
+      } else {
+        skippedDateFields.push("endDate (campo de data prevista não disponível no template da Task no DevOps)");
+      }
+    }
+  }
+
+  return { operations, appliedDateFields, skippedDateFields };
+}
+
+// Inspect available Work Item Type 'Task' fields in Azure DevOps project
+router.post("/devops/task-fields", async (req: express.Request, res: express.Response) => {
+  try {
+    const { organization, project, pat, forceRefresh } = req.body || {};
+    const savedConfig = readDevOpsConfig();
+    const org = String(organization || savedConfig.organization || "").trim();
+    const proj = String(project || savedConfig.project || "").trim();
+    const token = (pat && !String(pat).includes("••••")) ? String(pat).trim() : String(savedConfig.pat || "").trim();
+
+    if (!org || !proj || !token) {
+      res.status(400).json({ error: "Credenciais do Azure DevOps incompletas (organization, project, pat)." });
+      return;
+    }
+
+    const inspection = await inspectDevOpsTaskFields(org, proj, token, Boolean(forceRefresh));
+    if (!inspection.available) {
+      res.status(400).json({ success: false, error: inspection.error || "Não foi possível consultar campos do Azure DevOps." });
+      return;
+    }
+
+    res.json({
+      success: true,
+      dateFieldCandidates: inspection.dateFieldCandidates,
+      recommendedStartDateField: inspection.recommendedStartDateField,
+      recommendedTargetDateField: inspection.recommendedTargetDateField,
+      effortFields: inspection.effortFields,
+      totalFields: inspection.fields.length
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Erro interno ao consultar campos do Azure DevOps." });
+  }
+});
 
 // API Route: Create Task (Incident / Improvement)
 router.post("/devops/create-task", async (req: express.Request, res: express.Response) => {
   try {
-    const { organization, project, pat, userStoryId, title, estimate, tag, iterationPath } = req.body;
+    const {
+      organization,
+      project,
+      pat,
+      userStoryId,
+      title,
+      estimate,
+      completed,
+      tag,
+      iterationPath,
+      startDate,
+      endDate,
+      startDateField,
+      targetDateField
+    } = req.body;
 
     const savedConfig = readDevOpsConfig();
     const org = String(organization || savedConfig.organization || "").trim();
@@ -668,7 +948,7 @@ router.post("/devops/create-task", async (req: express.Request, res: express.Res
       return;
     }
 
-    const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/$Task?api-version=7.0`;
+    const url = `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(proj)}/_apis/wit/workitems/$Task?api-version=7.0`;
     
     const body: any[] = [
       {
@@ -678,12 +958,34 @@ router.post("/devops/create-task", async (req: express.Request, res: express.Res
       }
     ];
 
-    if (estimate !== undefined && estimate !== null && !isNaN(Number(estimate))) {
+    if (estimate !== undefined && estimate !== null && estimate !== "" && !isNaN(Number(estimate)) && Number(estimate) >= 0) {
       body.push({
         "op": "add",
         "path": "/fields/Microsoft.VSTS.Scheduling.OriginalEstimate",
         "value": Number(estimate)
       });
+    }
+
+    if (completed !== undefined && completed !== null && completed !== "" && !isNaN(Number(completed)) && Number(completed) >= 0) {
+      body.push({
+        "op": "add",
+        "path": "/fields/Microsoft.VSTS.Scheduling.CompletedWork",
+        "value": Number(completed)
+      });
+    }
+
+    const dateResolution = await resolveDevOpsDateOperations({
+      org,
+      proj,
+      token,
+      startDate,
+      endDate,
+      requestedStartDateField: startDateField,
+      requestedTargetDateField: targetDateField,
+      savedConfig
+    });
+    if (dateResolution.operations.length > 0) {
+      body.push(...dateResolution.operations);
     }
 
     if (tag) {
@@ -709,15 +1011,40 @@ router.post("/devops/create-task", async (req: express.Request, res: express.Res
       "path": "/relations/-",
       "value": {
         "rel": "System.LinkTypes.Hierarchy-Reverse",
-        "url": `https://dev.azure.com/${org}/_apis/wit/workItems/${userStory}`
+        "url": `https://dev.azure.com/${encodeURIComponent(org)}/_apis/wit/workItems/${userStory}`
       }
     });
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "POST",
       headers: getDevOpsHeaders(token),
       body: JSON.stringify(body)
     });
+
+    let warning: string | undefined;
+    let finalAppliedDateFields = [...dateResolution.appliedDateFields];
+    const finalSkippedDateFields = [...dateResolution.skippedDateFields];
+
+    if (!response.ok && response.status !== 203 && response.status !== 401 && response.status !== 403 && dateResolution.operations.length > 0) {
+      const errPreview = await response.text();
+      const datePaths = new Set(dateResolution.operations.map((op) => op.path));
+      const withoutDates = body.filter((item) => !datePaths.has(item.path));
+      const fallbackRes = await fetch(url, {
+        method: "POST",
+        headers: getDevOpsHeaders(token),
+        body: JSON.stringify(withoutDates)
+      });
+      if (fallbackRes.ok) {
+        response = fallbackRes;
+        finalSkippedDateFields.push(...finalAppliedDateFields);
+        finalAppliedDateFields = [];
+        warning = `Task criada com horas e vínculo à User Story, mas os campos de data (${dateResolution.appliedDateFields.join(", ")}) não foram aceitos pelo projeto no Azure DevOps (${errPreview.slice(0, 120)}).`;
+      } else {
+        const fallbackErr = await fallbackRes.text();
+        res.status(fallbackRes.status).json({ error: `Erro na API do Azure DevOps: ${fallbackErr}` });
+        return;
+      }
+    }
 
     if (!response.ok || response.status === 203) {
       const errText = await response.text();
@@ -737,7 +1064,17 @@ router.post("/devops/create-task", async (req: express.Request, res: express.Res
     }
 
     const data = await response.json() as { id: number };
-    res.json({ success: true, id: data.id, title, iterationPath: iterationPath || undefined });
+    res.json({
+      success: true,
+      id: data.id,
+      title,
+      iterationPath: iterationPath || undefined,
+      estimate: estimate !== undefined ? Number(estimate) : undefined,
+      completed: completed !== undefined ? Number(completed) : undefined,
+      appliedDateFields: finalAppliedDateFields,
+      skippedDateFields: finalSkippedDateFields.length > 0 ? finalSkippedDateFields : undefined,
+      warning
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Internal Server Error" });
   }
@@ -917,10 +1254,25 @@ router.post("/devops/create-structure", async (req: express.Request, res: expres
   }
 });
 
-// API Route: Update Work Item (Task, User Story, Feature, etc.)
-router.patch("/devops/update-task", async (req: express.Request, res: express.Response) => {
+// API Route: Update Work Item (Task, User Story, Feature, etc.) - accepts PATCH and POST for proxy compatibility
+const handleDevOpsUpdateTask = async (req: express.Request, res: express.Response) => {
   try {
-    const { organization, project, pat, id, title, status, estimate, completed, assignee, iterationPath } = req.body;
+    const {
+      organization,
+      project,
+      pat,
+      id,
+      title,
+      status,
+      estimate,
+      completed,
+      assignee,
+      iterationPath,
+      startDate,
+      endDate,
+      startDateField,
+      targetDateField
+    } = req.body;
 
     const savedConfig = readDevOpsConfig();
     const org = String(organization || savedConfig.organization || "").trim();
@@ -933,7 +1285,7 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
       return;
     }
 
-    const url = `https://dev.azure.com/${org}/${proj}/_apis/wit/workitems/${workItemId}?api-version=7.0`;
+    const url = `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(proj)}/_apis/wit/workitems/${encodeURIComponent(workItemId)}?api-version=7.0`;
 
     const body: any[] = [];
 
@@ -967,7 +1319,7 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
       });
     }
 
-    if (estimate !== undefined && estimate !== null && !isNaN(Number(estimate))) {
+    if (estimate !== undefined && estimate !== null && estimate !== "" && !isNaN(Number(estimate)) && Number(estimate) >= 0) {
       body.push({
         "op": "add",
         "path": "/fields/Microsoft.VSTS.Scheduling.OriginalEstimate",
@@ -975,12 +1327,26 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
       });
     }
 
-    if (completed !== undefined && completed !== null && !isNaN(Number(completed))) {
+    if (completed !== undefined && completed !== null && completed !== "" && !isNaN(Number(completed)) && Number(completed) >= 0) {
       body.push({
         "op": "add",
         "path": "/fields/Microsoft.VSTS.Scheduling.CompletedWork",
         "value": Number(completed)
       });
+    }
+
+    const dateResolution = await resolveDevOpsDateOperations({
+      org,
+      proj,
+      token,
+      startDate,
+      endDate,
+      requestedStartDateField: startDateField,
+      requestedTargetDateField: targetDateField,
+      savedConfig
+    });
+    if (dateResolution.operations.length > 0) {
+      body.push(...dateResolution.operations);
     }
 
     if (assignee !== undefined && assignee !== null) {
@@ -1013,24 +1379,57 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
 
     if (!response.ok || response.status === 203) {
       const errText = await response.text();
-      
-      const isStateError = errText.toLowerCase().includes("state") || errText.toLowerCase().includes("transição") || errText.toLowerCase().includes("transition");
-      if (isStateError && status !== undefined) {
-        const fallbackBody = body.filter(item => item.path !== "/fields/System.State");
-        if (fallbackBody.length > 0) {
-          const fallbackRes = await fetch(url, {
-            method: "PATCH",
-            headers: getDevOpsHeaders(token),
-            body: JSON.stringify(fallbackBody)
-          });
-          if (fallbackRes.ok) {
-            res.json({ 
-              success: true, 
-              id: workItemId, 
-              warning: "Os campos de texto/horas/iteração foram atualizados, mas o Estado não pôde ser alterado no Azure DevOps." 
-            });
-            return;
+      const warnings: string[] = [];
+      let workingBody = [...body];
+      let appliedDateFields = [...dateResolution.appliedDateFields];
+      const skippedDateFields = [...dateResolution.skippedDateFields];
+
+      const isAuthFailure =
+        response.status === 203 ||
+        response.status === 401 ||
+        response.status === 403 ||
+        errText.includes("signin") ||
+        errText.includes("login") ||
+        errText.includes("Object moved");
+
+      if (!isAuthFailure) {
+        const isStateError = errText.toLowerCase().includes("state") || errText.toLowerCase().includes("transição") || errText.toLowerCase().includes("transition");
+        if (isStateError && status !== undefined) {
+          workingBody = workingBody.filter(item => item.path !== "/fields/System.State");
+          warnings.push("o Estado não pôde ser alterado no Azure DevOps");
+        }
+
+        if (dateResolution.operations.length > 0) {
+          const datePaths = new Set(dateResolution.operations.map(op => op.path));
+          const hasDateError =
+            dateResolution.appliedDateFields.some(f => errText.toLowerCase().includes(f.toLowerCase())) ||
+            errText.toLowerCase().includes("date") ||
+            errText.toLowerCase().includes("tf401320") ||
+            !isStateError;
+          if (hasDateError) {
+            workingBody = workingBody.filter(item => !datePaths.has(item.path));
+            skippedDateFields.push(...appliedDateFields);
+            appliedDateFields = [];
+            warnings.push("os campos de data não foram aceitos pelo template do Azure DevOps");
           }
+        }
+      }
+
+      if (warnings.length > 0 && workingBody.length > 0 && workingBody.length < body.length) {
+        const fallbackRes = await fetch(url, {
+          method: "PATCH",
+          headers: getDevOpsHeaders(token),
+          body: JSON.stringify(workingBody)
+        });
+        if (fallbackRes.ok) {
+          res.json({
+            success: true,
+            id: workItemId,
+            appliedDateFields,
+            skippedDateFields: skippedDateFields.length > 0 ? skippedDateFields : undefined,
+            warning: `Os campos principais/horas/iteração foram atualizados, mas ${warnings.join(" e ")}.`
+          });
+          return;
         }
       }
 
@@ -1044,11 +1443,19 @@ router.patch("/devops/update-task", async (req: express.Request, res: express.Re
     }
 
     const data = await response.json() as { id: number };
-    res.json({ success: true, id: data.id });
+    res.json({
+      success: true,
+      id: data.id,
+      appliedDateFields: dateResolution.appliedDateFields,
+      skippedDateFields: dateResolution.skippedDateFields.length > 0 ? dateResolution.skippedDateFields : undefined
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Internal Server Error in Update" });
   }
-});
+};
+
+router.patch("/devops/update-task", handleDevOpsUpdateTask);
+router.post("/devops/update-task", handleDevOpsUpdateTask);
 
 // -------------------------------------------------------------
 // AI AGENT API (REST & Tool-Calling for Autonomous AI Agents)

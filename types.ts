@@ -401,6 +401,9 @@ export interface DevOpsConfig {
   pat: string;
   isActive: boolean;
   defaultIterationPath?: string;
+  startDateField?: string;
+  targetDateField?: string;
+  verifiedTaskFields?: string[];
 }
 
 export interface AIAgentApiConfig {
@@ -554,7 +557,7 @@ export const parseDuration = (timeStr?: string | number | null): number => {
   if (timeStr === undefined || timeStr === null) return 0;
   if (typeof timeStr === 'number') return Math.max(0, isFinite(timeStr) ? timeStr : 0);
   
-  const raw = String(timeStr).trim().toLowerCase();
+  const raw = String(timeStr).trim().toLowerCase().replace(',', '.');
   if (!raw || raw === '0') return 0;
   if (raw.startsWith('-')) return 0;
 
@@ -593,7 +596,7 @@ export const isValidDurationString = (timeStr?: string | number | null): boolean
   if (timeStr === undefined || timeStr === null) return true;
   if (typeof timeStr === 'number') return isFinite(timeStr) && timeStr >= 0;
 
-  const clean = String(timeStr).trim().toLowerCase();
+  const clean = String(timeStr).trim().toLowerCase().replace(',', '.');
   if (!clean || clean === '0') return true; // empty or 0 is allowed
 
   // Disallow negative values
