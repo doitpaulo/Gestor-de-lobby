@@ -19,10 +19,19 @@ import {
   DEFAULT_ADM_PERMISSIONS,
   DEFAULT_COLLABORATOR_PERMISSIONS,
   normalizeStatus, 
-  normalizeTaskType 
+  normalizeTaskType,
+  parseDuration,
+  isTerminalStatus
 } from '../types';
 import { BackupService } from './backupService';
-import { FirebaseService } from './firebase';
+import { FirebaseService, auth } from './firebase';
+import {
+  collectRegisteredIterationPaths,
+  convertLegacySprintNameToDevOps,
+  extractDevOpsProjectPrefix,
+  normalizeIterationPath,
+  upsertDevOpsSprintInList
+} from './sprintUtils';
 
 // Confirmed owner identity for Nexus ADM (authoritative UID: pM6ApHmKYfW2nMFRmUFGCtfjCEx1)
 export const OWNER_UID = NEXUS_OWNER_UID;
@@ -157,7 +166,13 @@ const getSavedDevOpsConfig = (): DevOpsConfig => {
           project: parsed.project || '',
           pat: parsed.pat || '',
           isActive: Boolean(parsed.isActive),
-          defaultIterationPath: parsed.defaultIterationPath || ''
+          defaultIterationPath: parsed.defaultIterationPath || '',
+          ...(Array.isArray(parsed.registeredIterationPaths)
+            ? { registeredIterationPaths: parsed.registeredIterationPaths.map(String).filter(Boolean) }
+            : {}),
+          ...(parsed.startDateField !== undefined ? { startDateField: String(parsed.startDateField || '') } : {}),
+          ...(parsed.targetDateField !== undefined ? { targetDateField: String(parsed.targetDateField || '') } : {}),
+          ...(Array.isArray(parsed.verifiedTaskFields) ? { verifiedTaskFields: parsed.verifiedTaskFields.map(String) } : {})
         };
       }
     }
@@ -1075,12 +1090,18 @@ export const StorageService = {
 
   setDevOpsConfigInMemory: (config: DevOpsConfig) => {
     if (!config) return;
+    const cleanDefaultIter = normalizeIterationPath(config.defaultIterationPath);
+    const cleanRegistered = collectRegisteredIterationPaths(
+      { ...config, defaultIterationPath: cleanDefaultIter },
+      []
+    );
     inMemoryDevOps = {
       organization: String(config.organization || '').trim(),
       project: String(config.project || '').trim(),
       pat: String(config.pat || '').trim(),
       isActive: Boolean(config.isActive),
-      defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+      defaultIterationPath: cleanDefaultIter,
+      ...(cleanRegistered.length > 0 ? { registeredIterationPaths: cleanRegistered } : {}),
       ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
       ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
       ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
@@ -1092,13 +1113,20 @@ export const StorageService = {
     window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: inMemoryDevOps }));
   },
 
-  saveDevOpsConfig: async (config: DevOpsConfig, userId?: string): Promise<{ success: boolean; error?: string }> => {
+  saveDevOpsConfig: async (config: DevOpsConfig, userId?: string): Promise<{ success: boolean; error?: string; registeredSprintsCount?: number }> => {
+    const cleanDefaultIter = normalizeIterationPath(config.defaultIterationPath);
+    const cleanRegistered = collectRegisteredIterationPaths(
+      { ...config, defaultIterationPath: cleanDefaultIter },
+      []
+    );
+
     inMemoryDevOps = {
       organization: String(config.organization || '').trim(),
       project: String(config.project || '').trim(),
       pat: String(config.pat || '').trim(),
       isActive: Boolean(config.isActive),
-      defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+      defaultIterationPath: cleanDefaultIter,
+      registeredIterationPaths: cleanRegistered,
       ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
       ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
       ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
@@ -1110,11 +1138,31 @@ export const StorageService = {
     } catch (e) {
       console.warn('Error saving persistent DevOps config to localStorage:', e);
     }
+
+    // 2. Ensure any newly configured DevOps Iteration Paths are registered as Nexus Sprints automatically
+    let nextSprints = [...inMemorySprints];
+    let sprintsChanged = false;
+    let newlyRegisteredCount = 0;
+    cleanRegistered.forEach((iterPath) => {
+      if (iterPath && (iterPath.includes('\\') || /sprint/i.test(iterPath))) {
+        const res = upsertDevOpsSprintInList(nextSprints, iterPath);
+        if (res.created || res.updated) {
+          nextSprints = res.nextSprints;
+          sprintsChanged = true;
+          if (res.created) newlyRegisteredCount++;
+        }
+      }
+    });
+    if (sprintsChanged) {
+      inMemorySprints = nextSprints;
+      window.dispatchEvent(new CustomEvent('nexus-sprints-updated', { detail: inMemorySprints }));
+    }
+
     saveLocalCache();
     window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: inMemoryDevOps }));
     BackupService.triggerAutoBackup("Alteração nas Configurações do Azure DevOps");
 
-    // 2. Persist to Firestore cloud database under both targetUid and NEXUS_OWNER_UID so any device/browser loads it
+    // 3. Persist to Firestore cloud database under both targetUid and NEXUS_OWNER_UID so any device/browser loads it
     const targetUid = userId || currentUserId || undefined;
     try {
       await FirebaseService.saveDevOpsConfig(inMemoryDevOps, NEXUS_OWNER_UID);
@@ -1123,20 +1171,27 @@ export const StorageService = {
         await FirebaseService.saveDevOpsConfig(inMemoryDevOps, targetUid);
         await FirebaseService.saveSetting('devops', inMemoryDevOps, targetUid);
       }
+      if (sprintsChanged) {
+        await FirebaseService.saveSprints(inMemorySprints, currentUserId || targetUid || undefined);
+      }
     } catch (e: any) {
       console.warn('Firebase saveDevOpsConfig notice:', e);
     }
 
-    // 3. Persist to backend server store for complete node resilience
+    // 4. Persist to backend server store for complete node resilience (with Firebase ID token when available)
     try {
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
       await fetch('/api/devops/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+        },
         body: JSON.stringify(inMemoryDevOps)
       });
     } catch {}
 
-    return { success: true };
+    return { success: true, registeredSprintsCount: newlyRegisteredCount };
   },
 
   // Synchronizes Azure DevOps config from Firestore cloud storage across devices
@@ -1157,9 +1212,13 @@ export const StorageService = {
         saveLocalCache();
         window.dispatchEvent(new CustomEvent('nexus-devops-config-updated', { detail: remote }));
         // Keep backend in sync
+        const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
         fetch('/api/devops/config', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+          },
           body: JSON.stringify(remote)
         }).catch(() => {});
         return remote;
@@ -1182,6 +1241,9 @@ export const StorageService = {
             pat: srv.pat || '',
             isActive: Boolean(srv.isActive),
             defaultIterationPath: srv.defaultIterationPath || '',
+            ...(Array.isArray(srv.registeredIterationPaths)
+              ? { registeredIterationPaths: srv.registeredIterationPaths.map(String).filter(Boolean) }
+              : {}),
             ...(srv.startDateField !== undefined ? { startDateField: String(srv.startDateField || '').trim() } : {}),
             ...(srv.targetDateField !== undefined ? { targetDateField: String(srv.targetDateField || '').trim() } : {}),
             ...(Array.isArray(srv.verifiedTaskFields) ? { verifiedTaskFields: srv.verifiedTaskFields.map(String) } : {})
@@ -1252,15 +1314,166 @@ export const StorageService = {
     FirebaseService.saveSprints(sprints, currentUserId || undefined).catch(e => console.warn('Firebase saveSprints error:', e));
   },
 
-  // Mass Sprint assignment or removal: async, pre-validated, atomic batch, zero unwanted mutations
+  registerDevOpsSprint: async (
+    iterationPath: string,
+    options?: {
+      setAsDefault?: boolean;
+      userId?: string;
+      startDate?: string;
+      endDate?: string;
+      status?: Sprint['status'];
+      goals?: string;
+    }
+  ): Promise<{
+    sprint: Sprint | null;
+    created: boolean;
+    updated: boolean;
+    sprints: Sprint[];
+    devopsConfig: DevOpsConfig;
+  }> => {
+    const cleanPath = normalizeIterationPath(iterationPath);
+    if (!cleanPath) {
+      throw new Error('Informe o Iteration Path da Sprint no formato DevOps (ex: Hyperautomation\\Sprint Semana 3 e 4 - Nov-2026).');
+    }
+
+    const { nextSprints, sprint, created, updated } = upsertDevOpsSprintInList(inMemorySprints, cleanPath, {
+      startDate: options?.startDate,
+      endDate: options?.endDate,
+      status: options?.status,
+      goals: options?.goals
+    });
+
+    inMemorySprints = nextSprints;
+
+    const existingList = Array.isArray(inMemoryDevOps.registeredIterationPaths)
+      ? [...inMemoryDevOps.registeredIterationPaths]
+      : [];
+    if (!existingList.some(p => normalizeIterationPath(p).toLowerCase() === cleanPath.toLowerCase())) {
+      existingList.unshift(cleanPath);
+    }
+
+    const projectFromPath = cleanPath.includes('\\') ? cleanPath.split('\\')[0].trim() : '';
+    const nextDevOps: DevOpsConfig = {
+      ...inMemoryDevOps,
+      project: inMemoryDevOps.project || projectFromPath,
+      defaultIterationPath: options?.setAsDefault || !inMemoryDevOps.defaultIterationPath
+        ? cleanPath
+        : inMemoryDevOps.defaultIterationPath,
+      registeredIterationPaths: existingList
+    };
+
+    await StorageService.saveDevOpsConfig(nextDevOps, options?.userId);
+    if (created || updated) {
+      StorageService.saveSprints(inMemorySprints);
+      window.dispatchEvent(new CustomEvent('nexus-sprints-updated', { detail: inMemorySprints }));
+    }
+
+    return { sprint, created, updated, sprints: inMemorySprints, devopsConfig: inMemoryDevOps };
+  },
+
+  alignOpenDemandsAndSprintsToDevOps: async (
+    actorUser: User,
+    options?: { projectPrefix?: string; onlyOpenSprints?: boolean }
+  ): Promise<{ alignedSprintsCount: number; alignedTasksCount: number; updatedTasks: Task[]; updatedSprints: Sprint[] }> => {
+    if (!actorUser || !actorUser.id) {
+      throw new Error('Operação rejeitada: Usuário não autenticado.');
+    }
+    const effectiveUser = StorageService.resolveUserMembership(actorUser);
+    const isAdmin = isUserAdmin(effectiveUser);
+    const perms = getUserPermissions(effectiveUser);
+    if (!isAdmin && !(Boolean(perms.canManageSprints) && Boolean(perms.actions?.edit))) {
+      throw new Error('Permissão insuficiente para padronizar sprints.');
+    }
+
+    const prefix = options?.projectPrefix || extractDevOpsProjectPrefix(inMemoryDevOps);
+    const devopsCtx = prefix ? { ...inMemoryDevOps, project: prefix } : inMemoryDevOps;
+
+    let alignedSprintsCount = 0;
+    const sprintNameById = new Map<string, string>();
+    const updatedSprints = inMemorySprints.map(s => {
+      const shouldAlignSprint = options?.onlyOpenSprints === false ? true : s.status !== 'Concluída';
+      if (!shouldAlignSprint) {
+        sprintNameById.set(s.id, s.iterationPath || s.name);
+        return s;
+      }
+      const converted = convertLegacySprintNameToDevOps(s, devopsCtx);
+      const nextName = converted || s.name;
+      sprintNameById.set(s.id, nextName);
+      if (s.name !== nextName || s.iterationPath !== nextName) {
+        alignedSprintsCount++;
+        return {
+          ...s,
+          name: nextName,
+          iterationPath: nextName
+        };
+      }
+      return s;
+    });
+
+    const sprintById = new Map(updatedSprints.map(s => [s.id, s]));
+    let alignedTasksCount = 0;
+    const nowIso = new Date().toISOString();
+    const updatedTasks = inMemoryTasks.map(task => {
+      if (isTerminalStatus(task.status)) return task;
+      if (!isTaskAuthorized(task, effectiveUser)) return task;
+
+      const spId = getTaskSprintId(task, updatedSprints);
+      const linkedSprint = spId ? sprintById.get(spId) : undefined;
+      if (!linkedSprint) return task;
+
+      const targetPath = linkedSprint.iterationPath || linkedSprint.name;
+      if (!targetPath) return task;
+
+      if (
+        task.sprintId !== linkedSprint.id ||
+        normalizeIterationPath(task.iterationPath).toLowerCase() !== normalizeIterationPath(targetPath).toLowerCase()
+      ) {
+        alignedTasksCount++;
+        const entry: HistoryEntry = {
+          id: 'hist_' + Math.random().toString(36).substring(2, 11),
+          date: nowIso,
+          user: `${actorUser.name || actorUser.email || 'Usuário'} (${isAdmin ? 'ADM' : 'Colaborador'})`,
+          action: `Padronizou Iteration Path / Sprint para "${targetPath}"`
+        };
+        return {
+          ...task,
+          sprintId: linkedSprint.id,
+          iterationPath: targetPath,
+          history: [...(task.history || []), entry]
+        };
+      }
+      return task;
+    });
+
+    if (alignedSprintsCount > 0) {
+      inMemorySprints = updatedSprints;
+      StorageService.saveSprints(inMemorySprints);
+      window.dispatchEvent(new CustomEvent('nexus-sprints-updated', { detail: inMemorySprints }));
+    }
+    if (alignedTasksCount > 0) {
+      inMemoryTasks = updatedTasks;
+      StorageService.saveTasks(inMemoryTasks);
+      window.dispatchEvent(new CustomEvent('nexus-tasks-updated', { detail: inMemoryTasks }));
+    }
+
+    return {
+      alignedSprintsCount,
+      alignedTasksCount,
+      updatedTasks: inMemoryTasks,
+      updatedSprints: inMemorySprints
+    };
+  },
+
+  // Mass Sprint assignment or removal: async, pre-validated, atomic batch, keeps sprintId + iterationPath in sync
   updateTasksSprint: async (
     taskIds: string[], 
     targetSprintId: string | null, 
     actorUser: User,
     options?: {
       allowConcludedSprint?: boolean;
+      syncDevOps?: boolean;
     }
-  ): Promise<{ updatedTasks: Task[]; updatedSprints: Sprint[] }> => {
+  ): Promise<{ updatedTasks: Task[]; updatedSprints: Sprint[]; devopsSyncedCount?: number; devopsErrors?: string[] }> => {
     // 1. Validate actor presence and authentication
     if (!actorUser || !actorUser.id) {
       throw new Error('Operação rejeitada: Usuário não autenticado.');
@@ -1318,6 +1531,7 @@ export const StorageService = {
     // 5. Validate target sprint existence & status
     let targetSprint: Sprint | null = null;
     let targetSprintName = 'Sem sprint';
+    let targetIterationPath: string | null = null;
 
     if (targetSprintId !== null && targetSprintId !== '__none__') {
       targetSprint = inMemorySprints.find(s => s.id === targetSprintId) || null;
@@ -1325,6 +1539,7 @@ export const StorageService = {
         throw new Error(`Operação abortada sem alterações: a sprint de destino "${targetSprintId}" não foi encontrada no workspace.`);
       }
       targetSprintName = targetSprint.name;
+      targetIterationPath = normalizeIterationPath(targetSprint.iterationPath || targetSprint.name) || targetSprint.name;
 
       if (targetSprint.status === 'Concluída' && !options?.allowConcludedSprint) {
         throw new Error(`Operação abortada sem alterações: a sprint "${targetSprint.name}" está com status Concluída e exige confirmação explícita de administrador.`);
@@ -1333,10 +1548,16 @@ export const StorageService = {
 
     const finalTargetSprintId = (targetSprintId === '__none__' || targetSprintId === null) ? null : targetSprintId;
 
-    // 6. Check for NO-OP: if ALL selected tasks already have the target sprint as canonical, do nothing!
+    // 6. Check for changes (sprintId change OR missing/stale iterationPath OR missing sprint task link)
     const tasksActuallyChanging = tasksToProcess.filter(task => {
       const currentCanonical = getTaskSprintId(task, inMemorySprints) || null;
-      return currentCanonical !== finalTargetSprintId;
+      if (currentCanonical !== finalTargetSprintId) return true;
+      if (finalTargetSprintId && targetIterationPath) {
+        const currentIter = normalizeIterationPath(task.iterationPath).toLowerCase();
+        if (currentIter !== targetIterationPath.toLowerCase()) return true;
+        if (targetSprint && !(targetSprint.tasks || []).some(st => st.taskId === task.id)) return true;
+      }
+      return false;
     });
 
     if (tasksActuallyChanging.length === 0) {
@@ -1344,6 +1565,7 @@ export const StorageService = {
       return { updatedTasks: inMemoryTasks, updatedSprints: inMemorySprints };
     }
 
+    const changingIds = new Set(tasksActuallyChanging.map(t => t.id));
     const nowIso = new Date().toISOString();
     const actorRole = isAdmin ? 'ADM' : 'Colaborador';
     const auditUserName = `${actorUser.name || actorUser.email || 'Usuário'} (${actorRole})`;
@@ -1352,13 +1574,12 @@ export const StorageService = {
     const taskPatches: Array<{
       id: string;
       sprintId: string | null;
+      iterationPath?: string | null;
       historyEntry: HistoryEntry;
     }> = [];
 
     const updatedTasksProjection = inMemoryTasks.map(task => {
-      if (!taskIdSet.has(task.id)) return task;
-      const currentCanonical = getTaskSprintId(task, inMemorySprints) || null;
-      if (currentCanonical === finalTargetSprintId) return task; // unchanged
+      if (!changingIds.has(task.id)) return task;
 
       const actionText = finalTargetSprintId 
         ? `Alterou Sprint para "${targetSprintName}"` 
@@ -1371,16 +1592,20 @@ export const StorageService = {
         action: actionText
       };
 
+      const nextIter = finalTargetSprintId ? targetIterationPath : null;
+
       taskPatches.push({
         id: task.id,
         sprintId: finalTargetSprintId,
+        iterationPath: nextIter,
         historyEntry: entry
       });
 
-      // Patch sprintId and append history ONLY. Preserve all other fields!
+      // Patch sprintId, iterationPath and append history ONLY. Preserve all other fields!
       const updatedTask: Task = {
         ...task,
         sprintId: finalTargetSprintId || undefined,
+        iterationPath: finalTargetSprintId && targetIterationPath ? targetIterationPath : undefined,
         history: [...(task.history || []), entry]
       };
       if (finalTargetSprintId === null) {
@@ -1390,10 +1615,20 @@ export const StorageService = {
       return updatedTask;
     });
 
-    // 8. Prepare Sprints projection
-    // Preserves historical records in previous sprints; adds or retains records in destination sprint
-    let updatedSprintsProjection = inMemorySprints;
+    // 8. Prepare Sprints projection (updates target sprint & removes moved tasks from other sprints)
+    let updatedSprintsProjection = [...inMemorySprints];
     let targetSprintPatch: { id: string; tasks: SprintTask[] } | null = null;
+    const otherSprintPatches: Array<{ id: string; tasks: SprintTask[] }> = [];
+
+    // Clean moved tasks out of previous sprints
+    updatedSprintsProjection = updatedSprintsProjection.map(s => {
+      if (s.id === finalTargetSprintId) return s;
+      const hadMovedTask = (s.tasks || []).some(st => changingIds.has(st.taskId));
+      if (!hadMovedTask) return s;
+      const remaining = (s.tasks || []).filter(st => !changingIds.has(st.taskId));
+      otherSprintPatches.push({ id: s.id, tasks: remaining });
+      return { ...s, tasks: remaining };
+    });
 
     if (finalTargetSprintId && targetSprint) {
       const existingTaskMap = new Map((targetSprint.tasks || []).map(st => [st.taskId, st]));
@@ -1401,8 +1636,8 @@ export const StorageService = {
 
       tasksActuallyChanging.forEach(task => {
         if (!existingTaskMap.has(task.id)) {
-          const planned = task.estimatedTime ? parseFloat(task.estimatedTime) || 0 : 0;
-          const actual = task.actualTime ? parseFloat(task.actualTime) || 0 : 0;
+          const planned = task.estimatedTime ? parseDuration(task.estimatedTime) : 0;
+          const actual = task.actualTime ? parseDuration(task.actualTime) : 0;
           const newEntry: SprintTask = {
             taskId: task.id,
             plannedHours: planned,
@@ -1419,7 +1654,7 @@ export const StorageService = {
         tasks: newSprintTasks
       };
 
-      updatedSprintsProjection = inMemorySprints.map(s => {
+      updatedSprintsProjection = updatedSprintsProjection.map(s => {
         if (s.id === finalTargetSprintId) {
           return {
             ...s,
@@ -1432,7 +1667,7 @@ export const StorageService = {
 
     // 9. Commit atomic batch to Firestore Cloud Storage FIRST
     const targetOwnerUid = effectiveUser.workspaceOwnerUid || NEXUS_OWNER_UID;
-    await FirebaseService.updateTasksSprintBatch(targetOwnerUid, taskPatches, targetSprintPatch);
+    await FirebaseService.updateTasksSprintBatch(targetOwnerUid, taskPatches, targetSprintPatch, otherSprintPatches);
 
     // 10. Only upon confirmed cloud commit: commit to in-memory state and local cache!
     inMemoryTasks = updatedTasksProjection;
@@ -1440,7 +1675,49 @@ export const StorageService = {
     saveLocalCache();
     BackupService.triggerAutoBackup(`Alteração em Massa de Sprints (${taskPatches.length} demandas)`);
 
-    return { updatedTasks: inMemoryTasks, updatedSprints: inMemorySprints };
+    // 11. Optional live Azure DevOps IterationPath sync for linked demands
+    let devopsSyncedCount = 0;
+    const devopsErrors: string[] = [];
+    if (
+      options?.syncDevOps !== false &&
+      targetIterationPath &&
+      inMemoryDevOps.isActive &&
+      inMemoryDevOps.pat &&
+      inMemoryDevOps.organization &&
+      inMemoryDevOps.project
+    ) {
+      const linkedChangingTasks = tasksActuallyChanging.filter(t => Boolean(t.devopsFeatureId));
+      for (const linkedTask of linkedChangingTasks) {
+        try {
+          const res = await fetch('/api/devops/update-task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              organization: inMemoryDevOps.organization,
+              project: inMemoryDevOps.project,
+              pat: inMemoryDevOps.pat,
+              id: linkedTask.devopsFeatureId,
+              iterationPath: targetIterationPath
+            })
+          });
+          if (res.ok) {
+            devopsSyncedCount++;
+          } else {
+            const errJson = await res.json().catch(() => null);
+            devopsErrors.push(`${linkedTask.id}: ${errJson?.error || `HTTP ${res.status}`}`);
+          }
+        } catch (err: any) {
+          devopsErrors.push(`${linkedTask.id}: ${err?.message || 'Erro de rede'}`);
+        }
+      }
+    }
+
+    return {
+      updatedTasks: inMemoryTasks,
+      updatedSprints: inMemorySprints,
+      devopsSyncedCount,
+      ...(devopsErrors.length > 0 ? { devopsErrors } : {})
+    };
   },
 
   // --- Backup & Restore (Full Payload from Database memory) ---

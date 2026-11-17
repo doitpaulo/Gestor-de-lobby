@@ -26,6 +26,7 @@ import { OWNER_EMAIL, isUserAdmin, isOwnerUser, isTaskAuthorized, getUserPermiss
 import { NEXUS_OWNER_UID, Task, SubTask, Developer, User, WorkspaceMember, UserRole, UserStatus, UserPermissions, TaskType, Priority, HistoryEntry, WorkflowPhase, Robot, DocumentConfig, Sprint, SprintTask, DevOpsConfig, isCompletedStatus, isCancelledStatus, isTerminalStatus, normalizeStatus, normalizeTaskType, formatCivilDate, parseCivilDate, getTodayCivilString, isValidDurationString, parseDuration, getTaskSprintId, getTaskSprint } from './types';
 import { IconHome, IconKanban, IconList, IconUpload, IconDownload, IconUsers, IconClock, IconChevronLeft, IconPlus, IconProject, IconCheck, IconChartBar, IconRobot, IconDocument, IconSprint, IconSearch, IconCalendar, IconTerminal, IconShieldCheck, IconMenu, IconX, IconPencil, IconBell, IconAlertCircle, IconBot, IconCode, IconKey } from './components/Icons';
 import { DEFAULT_PLANNING_CONFIG, PlanningDriver, addCalendarDaysIso, applyPlanningFieldChange, calculateBusinessHoursBetween, calculateEndDateFromHours, formatHoursAsDuration, getTaskPlanningMetrics, roundPlanningHours } from './services/planningUtils';
+import { collectRegisteredIterationPaths, deriveDatesFromDevOpsSprintName, extractDevOpsProjectPrefix, formatDevOpsSprintName, normalizeIterationPath } from './services/sprintUtils';
 
 // --- Constants ---
 const TASK_TYPES = ['Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução'];
@@ -187,20 +188,11 @@ const formatDuration = (hours: number): string => {
 
 const getSprintNameFromDate = (dateStr: string | undefined): string => {
     if (!dateStr) return "";
-    // Use T12:00:00 to ensure the date is parsed correctly regardless of local timezone
-    const date = new Date(dateStr + 'T12:00:00');
-    if (isNaN(date.getTime())) return "";
-    
-    // Calculate week of the month (1 to 5)
-    const day = date.getDate();
-    const weekOfMonth = Math.ceil(day / 7);
-    
-    // Get month and year (mmm-aaaa)
-    const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-    const month = monthNames[date.getMonth()];
-    const year = date.getFullYear();
-    
-    return `Sprint Semana ${weekOfMonth} - ${month}-${year}`;
+    let devOpsCtx: Partial<DevOpsConfig> | undefined;
+    try {
+        devOpsCtx = StorageService.getDevOpsConfig();
+    } catch {}
+    return formatDevOpsSprintName(dateStr, devOpsCtx);
 };
 
 const getDevWorkload = (devName: string, tasks: Task[], excludeTaskId?: string): number => {
@@ -982,12 +974,31 @@ const DocumentPipelineView = ({ tasks, setTasks, devs, documentsConfig, setDocum
 };
 
 // --- NEW SESSION: SprintsView ---
-const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any) => {
+const SprintsView = ({ tasks, setTasks, sprints, setSprints, devs, user, onEditTask, showToast }: any) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSprint, setEditingSprint] = useState<Sprint | null>(null);
     const [selectedSprint, setSelectedSprint] = useState<Sprint | null>(null);
     const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
     const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+
+    // Sprint Create/Edit Form Drafts
+    const [sprintNameDraft, setSprintNameDraft] = useState('');
+    const [sprintStartDraft, setSprintStartDraft] = useState('');
+    const [sprintEndDraft, setSprintEndDraft] = useState('');
+    const [sprintStatusDraft, setSprintStatusDraft] = useState<Sprint['status']>('Planejada');
+    const [sprintGoalsDraft, setSprintGoalsDraft] = useState('');
+    const [sprintNotesDraft, setSprintNotesDraft] = useState('');
+    const [isSprintNameCustom, setIsSprintNameCustom] = useState(false);
+
+    // Mass Add / Apply Sprint Modal State
+    const [bulkTaskSearch, setBulkTaskSearch] = useState('');
+    const [bulkOnlyOpenTasks, setBulkOnlyOpenTasks] = useState(true);
+    const [bulkDevFilter, setBulkDevFilter] = useState('Todos');
+    const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set());
+    const [bulkAllowConcluded, setBulkAllowConcluded] = useState(false);
+    const [isApplyingBulkAdd, setIsApplyingBulkAdd] = useState(false);
+    const [bulkAddError, setBulkAddError] = useState<string | null>(null);
+    const [isAligningDevOps, setIsAligningDevOps] = useState(false);
     
     // Filters
     const [searchTerm, setSearchTerm] = useState('');
@@ -995,18 +1006,57 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
     const [dateFilter, setDateFilter] = useState('');
     const [taskDevFilter, setTaskDevFilter] = useState('Todos');
 
-    // Auto-select current or most recent sprint
+    const userPerms = getUserPermissions(user);
+    const canManageSprintTasks = isUserAdmin(user) || (Boolean(userPerms?.canManageSprints) && Boolean(userPerms?.actions?.edit));
+
+    // Keep selectedSprint synchronized with sprints updates and auto-select on load
     useEffect(() => {
-        if (!selectedSprint && sprints.length > 0) {
-            const current = sprints.find(s => s.status === 'Em Execução');
-            if (current) {
-                setSelectedSprint(current);
-            } else if (sprints.length > 0) {
-                const sorted = [...sprints].sort((a, b) => b.endDate.localeCompare(a.endDate));
-                setSelectedSprint(sorted[0]);
+        if (sprints.length === 0) {
+            if (selectedSprint) setSelectedSprint(null);
+            return;
+        }
+        if (selectedSprint) {
+            const refreshed = sprints.find((s: Sprint) => s.id === selectedSprint.id);
+            if (refreshed && refreshed !== selectedSprint) {
+                setSelectedSprint(refreshed);
+            } else if (!refreshed) {
+                setSelectedSprint(null);
             }
+            return;
+        }
+        const current = sprints.find((s: Sprint) => s.status === 'Em Execução');
+        if (current) {
+            setSelectedSprint(current);
+        } else {
+            const sorted = [...sprints].sort((a: Sprint, b: Sprint) => (b.endDate || '').localeCompare(a.endDate || ''));
+            setSelectedSprint(sorted[0]);
         }
     }, [sprints, selectedSprint]);
+
+    const openSprintModal = (sprint: Sprint | null) => {
+        setEditingSprint(sprint);
+        if (sprint) {
+            setSprintNameDraft(sprint.iterationPath || sprint.name || '');
+            setSprintStartDraft(sprint.startDate || '');
+            setSprintEndDraft(sprint.endDate || '');
+            setSprintStatusDraft(sprint.status || 'Planejada');
+            setSprintGoalsDraft(sprint.goals || '');
+            setSprintNotesDraft(sprint.notes || '');
+            setIsSprintNameCustom(true);
+        } else {
+            const todayIso = getTodayCivilString();
+            const suggested = getSprintNameFromDate(todayIso);
+            const derived = deriveDatesFromDevOpsSprintName(suggested, todayIso);
+            setSprintNameDraft(suggested);
+            setSprintStartDraft(derived.startDate);
+            setSprintEndDraft(derived.endDate);
+            setSprintStatusDraft('Em Execução');
+            setSprintGoalsDraft('');
+            setSprintNotesDraft('');
+            setIsSprintNameCustom(false);
+        }
+        setIsModalOpen(true);
+    };
 
     const filteredSprints = useMemo(() => {
         const filtered = sprints.filter((s: Sprint) => {
@@ -1023,33 +1073,35 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
         return [...filtered].sort((a, b) => {
             if (a.status === 'Em Execução' && b.status !== 'Em Execução') return -1;
             if (a.status !== 'Em Execução' && b.status === 'Em Execução') return 1;
-            return b.endDate.localeCompare(a.endDate);
+            return (b.endDate || '').localeCompare(a.endDate || '');
         });
     }, [sprints, searchTerm, statusFilter, dateFilter]);
 
     const handleSaveSprint = (e: React.FormEvent) => {
         e.preventDefault();
-        const form = e.target as HTMLFormElement;
-        const formData = new FormData(form);
-        
-        const startDate = formData.get('startDate') as string;
-        const endDate = formData.get('endDate') as string;
+        const startDate = sprintStartDraft;
+        const endDate = sprintEndDraft;
 
         if (startDate && endDate && endDate < startDate) {
             alert('A data de término da Sprint não pode ser anterior à data de início.');
             return;
         }
 
-        const autoName = getSprintNameFromDate(endDate);
-        
+        const cleanName = normalizeIterationPath(sprintNameDraft) || getSprintNameFromDate(endDate);
+        if (!cleanName) {
+            alert('Informe o nome / Iteration Path da Sprint.');
+            return;
+        }
+
         const sprintData: Sprint = {
             id: editingSprint?.id || `sprint-${Date.now()}`,
-            name: autoName || (formData.get('name') as string),
+            name: cleanName,
+            iterationPath: cleanName,
             startDate: startDate,
             endDate: endDate,
-            status: formData.get('status') as any,
-            goals: formData.get('goals') as string,
-            notes: formData.get('notes') as string,
+            status: sprintStatusDraft,
+            goals: sprintGoalsDraft,
+            notes: sprintNotesDraft,
             tasks: editingSprint?.tasks || []
         };
 
@@ -1062,6 +1114,24 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
 
         setSprints(updatedSprints);
         StorageService.saveSprints(updatedSprints);
+        setSelectedSprint(sprintData);
+
+        // Keep open tasks linked to this sprint aligned with the updated DevOps Iteration Path
+        if (setTasks && Array.isArray(tasks)) {
+            let tasksChanged = false;
+            const updatedTasks = tasks.map((t: Task) => {
+                if (!isTerminalStatus(t.status) && t.sprintId === sprintData.id && t.iterationPath !== cleanName) {
+                    tasksChanged = true;
+                    return { ...t, iterationPath: cleanName };
+                }
+                return t;
+            });
+            if (tasksChanged) {
+                setTasks(updatedTasks);
+                StorageService.saveTasks(updatedTasks);
+            }
+        }
+
         setIsModalOpen(false);
         setEditingSprint(null);
     };
@@ -1075,27 +1145,81 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
         }
     };
 
-    const handleAddTaskToSprint = (taskId: string) => {
-        if (!selectedSprint) return;
-        if (selectedSprint.tasks.find(t => t.taskId === taskId)) return;
+    const handleAlignAllToDevOpsFormat = async () => {
+        if (!user) return;
+        setIsAligningDevOps(true);
+        try {
+            const res = await StorageService.alignOpenDemandsAndSprintsToDevOps(user);
+            setSprints(res.updatedSprints);
+            if (setTasks) setTasks(res.updatedTasks);
+            if (showToast) {
+                showToast(
+                    'success',
+                    `${res.alignedSprintsCount} sprint(s) e ${res.alignedTasksCount} demanda(s) em aberto alinhadas ao formato Azure DevOps.`,
+                    'Padronização DevOps'
+                );
+            }
+        } catch (err: any) {
+            if (showToast) {
+                showToast('error', err?.message || 'Erro ao padronizar sprints para formato DevOps.');
+            }
+        } finally {
+            setIsAligningDevOps(false);
+        }
+    };
 
-        const newTask: SprintTask = {
-            taskId,
-            plannedHours: 0,
-            actualHours: 0,
-            status: 'Pendente'
-        };
+    const eligibleTasksForAddModal = useMemo(() => {
+        if (!selectedSprint) return [];
+        const existingIds = new Set((selectedSprint.tasks || []).map(st => st.taskId));
+        return (tasks || []).filter((t: Task) => {
+            if (existingIds.has(t.id) && getTaskSprintId(t, sprints) === selectedSprint.id) return false;
+            if (!isTaskAuthorized(t, user)) return false;
+            if (bulkOnlyOpenTasks && isTerminalStatus(t.status)) return false;
+            if (bulkDevFilter !== 'Todos') {
+                if (bulkDevFilter === 'Sem Dev' && t.assignee) return false;
+                if (bulkDevFilter !== 'Sem Dev' && t.assignee !== bulkDevFilter) return false;
+            }
+            if (bulkTaskSearch.trim()) {
+                const q = bulkTaskSearch.toLowerCase();
+                const hit =
+                    (t.summary || '').toLowerCase().includes(q) ||
+                    (t.id || '').toLowerCase().includes(q) ||
+                    (t.assignee || '').toLowerCase().includes(q) ||
+                    (t.iterationPath || '').toLowerCase().includes(q);
+                if (!hit) return false;
+            }
+            return true;
+        });
+    }, [tasks, sprints, selectedSprint, user, bulkOnlyOpenTasks, bulkDevFilter, bulkTaskSearch]);
 
-        const updatedSprint = {
-            ...selectedSprint,
-            tasks: [...selectedSprint.tasks, newTask]
-        };
-
-        const updatedSprints = sprints.map((s: Sprint) => s.id === selectedSprint.id ? updatedSprint : s);
-        setSprints(updatedSprints);
-        StorageService.saveSprints(updatedSprints);
-        setSelectedSprint(updatedSprint);
-        setIsAddTaskModalOpen(false);
+    const handleApplyBulkTasksToSprint = async () => {
+        if (!selectedSprint || bulkSelectedIds.size === 0) return;
+        setIsApplyingBulkAdd(true);
+        setBulkAddError(null);
+        try {
+            const targetIds = Array.from(bulkSelectedIds) as string[];
+            const res = await StorageService.updateTasksSprint(
+                targetIds,
+                selectedSprint.id,
+                user,
+                { allowConcludedSprint: bulkAllowConcluded }
+            );
+            if (setTasks) setTasks(res.updatedTasks);
+            setSprints(res.updatedSprints);
+            const nextSelected = res.updatedSprints.find((s: Sprint) => s.id === selectedSprint.id) || selectedSprint;
+            setSelectedSprint(nextSelected);
+            if (showToast) {
+                const devopsSuffix = res.devopsSyncedCount ? ` (${res.devopsSyncedCount} sincronizada(s) no Azure DevOps)` : '';
+                showToast('success', `Sprint "${selectedSprint.name}" aplicada em ${targetIds.length} demanda(s)${devopsSuffix}.`, 'Sprint Aplicada em Massa');
+            }
+            setBulkSelectedIds(new Set());
+            setBulkAllowConcluded(false);
+            setIsAddTaskModalOpen(false);
+        } catch (err: any) {
+            setBulkAddError(err?.message || 'Erro ao aplicar sprint em massa.');
+        } finally {
+            setIsApplyingBulkAdd(false);
+        }
     };
 
     const handleUpdateSprintTask = (taskId: string, field: string, value: any) => {
@@ -1110,8 +1234,18 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
         setSelectedSprint(updatedSprint);
     };
 
-    const handleRemoveTaskFromSprint = (taskId: string) => {
+    const handleRemoveTaskFromSprint = async (taskId: string) => {
         if (!selectedSprint) return;
+        if (canManageSprintTasks && setTasks) {
+            try {
+                const res = await StorageService.updateTasksSprint([taskId], null, user, { syncDevOps: false });
+                setTasks(res.updatedTasks);
+                setSprints(res.updatedSprints);
+                const nextSelected = res.updatedSprints.find((s: Sprint) => s.id === selectedSprint.id);
+                if (nextSelected) setSelectedSprint(nextSelected);
+                return;
+            } catch {}
+        }
         const updatedTasks = selectedSprint.tasks.filter((t: SprintTask) => t.taskId !== taskId);
         const updatedSprint = { ...selectedSprint, tasks: updatedTasks };
         const updatedSprints = sprints.map((s: Sprint) => s.id === selectedSprint.id ? updatedSprint : s);
@@ -1237,14 +1371,19 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                     <h2 className="text-xl font-bold text-white">Gestão de Sprints</h2>
                     <p className="text-sm text-slate-400">Planejamento e acompanhamento de ciclos CoE</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-2.5">
+                    {canManageSprintTasks && (
+                        <Button onClick={handleAlignAllToDevOpsFormat} disabled={isAligningDevOps} variant="secondary" title="Converte sprints abertas e demandas em aberto para o formato Hyperautomation\Sprint Semana X e Y - Mmm-AAAA">
+                            <IconTerminal className="w-4 h-4 text-sky-400" /> {isAligningDevOps ? "Padronizando..." : "Padronizar DevOps"}
+                        </Button>
+                    )}
                     <Button onClick={() => setIsAnalyticsOpen(!isAnalyticsOpen)} variant={isAnalyticsOpen ? "secondary" : "primary"}>
                         <IconChartBar className="w-4 h-4" /> {isAnalyticsOpen ? "Ver Sprints" : "Analytics"}
                     </Button>
                     <Button onClick={handleExportSprintData} variant="success">
                         <IconDownload className="w-4 h-4" /> Exportar Dados
                     </Button>
-                    <Button onClick={() => { setEditingSprint(null); setIsModalOpen(true); }} variant="primary">
+                    <Button onClick={() => openSprintModal(null)} variant="primary">
                         <IconPlus className="w-4 h-4" /> Nova Sprint
                     </Button>
                 </div>
@@ -1447,14 +1586,14 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                                 onClick={() => setSelectedSprint(s)}
                                                 className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedSprint?.id === s.id ? 'bg-indigo-600/20 border-indigo-500 shadow-lg shadow-indigo-500/10' : 'bg-slate-900/50 border-slate-700 hover:border-slate-500'}`}
                                             >
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <h4 className="font-bold text-white">{s.name}</h4>
+                                                <div className="flex justify-between items-start gap-2 mb-2">
+                                                    <div className="flex items-start gap-2 min-w-0">
+                                                        <h4 className="font-bold text-white text-sm break-words font-mono">{s.name}</h4>
                                                         {s.status === 'Em Execução' && (
-                                                            <span className="text-[8px] bg-indigo-500 text-white px-1 rounded font-bold animate-pulse">ATUAL</span>
+                                                            <span className="text-[8px] bg-indigo-500 text-white px-1 rounded font-bold animate-pulse shrink-0 mt-0.5">ATUAL</span>
                                                         )}
                                                     </div>
-                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${s.status === 'Concluída' ? 'bg-emerald-500/20 text-emerald-400' : s.status === 'Em Execução' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-amber-500/20 text-amber-400'}`}>
                                                         {s.status}
                                                     </span>
                                                 </div>
@@ -1465,7 +1604,7 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                                 <div className="flex justify-between items-center">
                                                     <span className="text-xs text-slate-500">{s.tasks.length} tarefas</span>
                                                     <div className="flex gap-2">
-                                                        <button onClick={(e) => { e.stopPropagation(); setEditingSprint(s); setIsModalOpen(true); }} aria-label={`Editar sprint ${s.name}`} title={`Editar sprint ${s.name}`} className="text-slate-400 hover:text-white p-1">✏️</button>
+                                                        <button onClick={(e) => { e.stopPropagation(); openSprintModal(s); }} aria-label={`Editar sprint ${s.name}`} title={`Editar sprint ${s.name}`} className="text-slate-400 hover:text-white p-1">✏️</button>
                                                         <button onClick={(e) => { e.stopPropagation(); handleDeleteSprint(s.id); }} aria-label={`Excluir sprint ${s.name}`} title={`Excluir sprint ${s.name}`} className="text-rose-500 hover:text-rose-400 p-1">🗑️</button>
                                                     </div>
                                                 </div>
@@ -1482,12 +1621,12 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                 <Card className="lg:col-span-2 flex flex-col h-full overflow-hidden">
                     {selectedSprint ? (
                         <div className="flex flex-col h-full">
-                            <div className="flex justify-between items-start border-b border-slate-700 pb-4 mb-4">
-                                <div>
-                                    <h3 className="text-2xl font-bold text-white">{selectedSprint.name}</h3>
-                                    <p className="text-sm text-slate-400">{selectedSprint.startDate} até {selectedSprint.endDate}</p>
+                            <div className="flex flex-wrap justify-between items-start gap-3 border-b border-slate-700 pb-4 mb-4">
+                                <div className="min-w-0">
+                                    <h3 className="text-xl font-bold text-white font-mono break-words">{selectedSprint.name}</h3>
+                                    <p className="text-sm text-slate-400 mt-0.5">{selectedSprint.startDate} até {selectedSprint.endDate}</p>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 shrink-0">
                                     <Button onClick={() => exportSprintPPT('opening')} variant="secondary" className="text-xs">
                                         <IconDownload className="w-3 h-3" /> PPT Abertura
                                     </Button>
@@ -1516,7 +1655,7 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
 
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                                 <h4 className="font-bold text-white">Tarefas da Sprint</h4>
-                                <div className="flex items-center gap-4 w-full md:w-auto">
+                                <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
                                     <div className="flex items-center gap-2">
                                         <select 
                                             className="bg-slate-900/90 border border-slate-700 hover:border-indigo-500 text-xs font-medium text-white rounded-xl px-3 py-2 outline-none cursor-pointer transition-colors shadow-sm"
@@ -1530,8 +1669,20 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                                             <option value="Sem Dev" className="bg-slate-900 text-white">Sem Dev</option>
                                         </select>
                                     </div>
-                                    <Button onClick={() => setIsAddTaskModalOpen(true)} variant="success" className="text-xs py-2">
-                                        <IconPlus className="w-3 h-3" /> Adicionar Tarefa
+                                    <Button 
+                                        onClick={() => {
+                                            setBulkTaskSearch('');
+                                            setBulkOnlyOpenTasks(true);
+                                            setBulkDevFilter('Todos');
+                                            setBulkSelectedIds(new Set());
+                                            setBulkAllowConcluded(false);
+                                            setBulkAddError(null);
+                                            setIsAddTaskModalOpen(true);
+                                        }} 
+                                        variant="success" 
+                                        className="text-xs py-2"
+                                    >
+                                        <IconPlus className="w-3 h-3" /> Aplicar Sprint em Massa
                                     </Button>
                                 </div>
                             </div>
@@ -1627,23 +1778,72 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                         <div className="p-6 border-b border-slate-700"><h3 className="text-xl font-bold text-white">{editingSprint ? 'Editar Sprint' : 'Nova Sprint'}</h3></div>
                         <div className="p-6 space-y-4">
                             <div>
-                                <label htmlFor="sprint-name" className="block text-xs text-slate-400 mb-1">Nome da Sprint (Gerado Automaticamente)</label>
-                                <input id="sprint-name" name="name" defaultValue={editingSprint?.name} className="w-full bg-slate-900/50 border border-slate-700 rounded p-3 text-slate-400 outline-none cursor-not-allowed" placeholder="Será gerado com base na Data Fim" readOnly />
-                                <p className="text-[10px] text-slate-500 mt-1 italic">O nome será atualizado ao salvar com base na Data Fim (ex: Sprint Semana 11 / mar-2026)</p>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label htmlFor="sprint-name" className="block text-xs text-slate-400">Nome / Iteration Path da Sprint (Padrão DevOps)</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const suggested = getSprintNameFromDate(sprintEndDraft || sprintStartDraft || getTodayCivilString());
+                                            if (suggested) {
+                                                setSprintNameDraft(suggested);
+                                                setIsSprintNameCustom(false);
+                                            }
+                                        }}
+                                        className="text-[11px] text-sky-400 hover:text-sky-300 font-semibold cursor-pointer"
+                                    >
+                                        Usar padrão DevOps da Data Fim
+                                    </button>
+                                </div>
+                                <input 
+                                    id="sprint-name" 
+                                    name="name" 
+                                    value={sprintNameDraft}
+                                    onChange={(e) => {
+                                        setSprintNameDraft(e.target.value);
+                                        setIsSprintNameCustom(true);
+                                    }}
+                                    required
+                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white font-mono text-sm outline-none focus:border-indigo-500" 
+                                    placeholder="ex: Hyperautomation\Sprint Semana 3 e 4 - Nov-2026" 
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1 italic">Formato Azure DevOps: <code className="text-sky-300">Hyperautomation\Sprint Semana 3 e 4 - Nov-2026</code></p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label htmlFor="sprint-start-date" className="block text-xs text-slate-400 mb-1">Data Início</label>
-                                    <input id="sprint-start-date" type="date" name="startDate" defaultValue={editingSprint?.startDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                    <input 
+                                        id="sprint-start-date" 
+                                        type="date" 
+                                        name="startDate" 
+                                        value={sprintStartDraft} 
+                                        onChange={(e) => setSprintStartDraft(e.target.value)}
+                                        required 
+                                        className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" 
+                                    />
                                 </div>
                                 <div>
                                     <label htmlFor="sprint-end-date" className="block text-xs text-slate-400 mb-1">Data Fim</label>
-                                    <input id="sprint-end-date" type="date" name="endDate" defaultValue={editingSprint?.endDate} required className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" />
+                                    <input 
+                                        id="sprint-end-date" 
+                                        type="date" 
+                                        name="endDate" 
+                                        value={sprintEndDraft}
+                                        onChange={(e) => {
+                                            const nextEnd = e.target.value;
+                                            setSprintEndDraft(nextEnd);
+                                            if (!isSprintNameCustom && !editingSprint && nextEnd) {
+                                                const suggested = getSprintNameFromDate(nextEnd);
+                                                if (suggested) setSprintNameDraft(suggested);
+                                            }
+                                        }}
+                                        required 
+                                        className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500" 
+                                    />
                                 </div>
                             </div>
                             <div>
                                 <label htmlFor="sprint-status" className="block text-xs text-slate-400 mb-1">Status</label>
-                                <select id="sprint-status" name="status" defaultValue={editingSprint?.status || 'Planejada'} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
+                                <select id="sprint-status" name="status" value={sprintStatusDraft} onChange={(e) => setSprintStatusDraft(e.target.value as Sprint['status'])} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500">
                                     <option value="Planejada" className="bg-slate-800 text-slate-100">Planejada</option>
                                     <option value="Em Execução" className="bg-slate-800 text-slate-100">Em Execução</option>
                                     <option value="Concluída" className="bg-slate-800 text-slate-100">Concluída</option>
@@ -1651,11 +1851,11 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                             </div>
                             <div>
                                 <label htmlFor="sprint-goals" className="block text-xs text-slate-400 mb-1">Objetivos</label>
-                                <textarea id="sprint-goals" name="goals" defaultValue={editingSprint?.goals} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="O que pretendemos entregar nesta sprint?" />
+                                <textarea id="sprint-goals" name="goals" value={sprintGoalsDraft} onChange={(e) => setSprintGoalsDraft(e.target.value)} rows={3} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="O que pretendemos entregar nesta sprint?" />
                             </div>
                             <div>
                                 <label htmlFor="sprint-notes" className="block text-xs text-slate-400 mb-1">Observações (Fechamento)</label>
-                                <textarea id="sprint-notes" name="notes" defaultValue={editingSprint?.notes} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="Lições aprendidas, motivos de atraso, etc." />
+                                <textarea id="sprint-notes" name="notes" value={sprintNotesDraft} onChange={(e) => setSprintNotesDraft(e.target.value)} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 resize-none" placeholder="Lições aprendidas, motivos de atraso, etc." />
                             </div>
                         </div>
                         <div className="p-6 border-t border-slate-700 flex justify-end gap-3">
@@ -1666,46 +1866,151 @@ const SprintsView = ({ tasks, sprints, setSprints, devs, user, onEditTask }: any
                 </div>
             )}
 
-            {/* Add Task Modal */}
-            {isAddTaskModalOpen && (
+            {/* Mass Apply Sprint to Tasks Modal */}
+            {isAddTaskModalOpen && selectedSprint && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
-                        <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-                            <h3 className="text-xl font-bold text-white">Adicionar Tarefa à Sprint</h3>
-                            <button onClick={() => setIsAddTaskModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+                    <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh]">
+                        <div className="p-5 border-b border-slate-700 flex justify-between items-start gap-3">
+                            <div>
+                                <h3 className="text-lg font-bold text-white">Aplicar Sprint em Massa nas Demandas</h3>
+                                <p className="text-xs text-sky-300 font-mono mt-0.5 break-all">{selectedSprint.name}</p>
+                            </div>
+                            <button onClick={() => setIsAddTaskModalOpen(false)} className="text-slate-400 hover:text-white p-1">✕</button>
                         </div>
-                        <div className="p-4 bg-slate-900/50 border-b border-slate-700">
-                            <input 
-                                type="text" 
-                                placeholder="Filtrar tarefas..." 
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white outline-none"
-                                onChange={(e) => {
-                                    const val = e.target.value.toLowerCase();
-                                    const rows = document.querySelectorAll('.task-row');
-                                    rows.forEach((row: any) => {
-                                        const text = row.innerText.toLowerCase();
-                                        row.style.display = text.includes(val) ? '' : 'none';
-                                    });
-                                }}
-                            />
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                            {tasks.filter((t: Task) => !selectedSprint?.tasks.find(st => st.taskId === t.id)).map((t: Task) => (
-                                <div 
-                                    key={t.id} 
-                                    onClick={() => handleAddTaskToSprint(t.id)}
-                                    className="task-row p-3 bg-slate-900 border border-slate-700 rounded-lg hover:border-indigo-500 cursor-pointer flex justify-between items-center group transition-all"
+                        <div className="p-4 bg-slate-900/50 border-b border-slate-700 space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                <input 
+                                    type="text" 
+                                    value={bulkTaskSearch}
+                                    onChange={(e) => setBulkTaskSearch(e.target.value)}
+                                    placeholder="Filtrar por ID, título, dev ou iteration..." 
+                                    className="md:col-span-2 bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
+                                />
+                                <select
+                                    value={bulkDevFilter}
+                                    onChange={(e) => setBulkDevFilter(e.target.value)}
+                                    className="bg-slate-900 border border-slate-600 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
                                 >
-                                    <div>
-                                        <p className="text-sm font-bold text-white">{t.summary}</p>
-                                        <p className="text-xs text-slate-500">{t.id} | {t.assignee || 'Sem Dev'} | {t.status}</p>
-                                    </div>
-                                    <IconPlus className="w-4 h-4 text-slate-500 group-hover:text-indigo-400" />
+                                    <option value="Todos">Todos os Devs</option>
+                                    {devs.map((d: Developer) => (
+                                        <option key={d.id} value={d.name}>{d.name}</option>
+                                    ))}
+                                    <option value="Sem Dev">Sem Dev</option>
+                                </select>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                <label className="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={bulkOnlyOpenTasks} 
+                                        onChange={(e) => setBulkOnlyOpenTasks(e.target.checked)}
+                                        className="rounded accent-indigo-500 cursor-pointer"
+                                    />
+                                    Mostrar somente demandas em aberto
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setBulkSelectedIds(new Set(eligibleTasksForAddModal.map((t: Task) => t.id)))}
+                                        disabled={eligibleTasksForAddModal.length === 0}
+                                        className="text-xs px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-semibold disabled:opacity-40 cursor-pointer"
+                                    >
+                                        Selecionar todas filtradas ({eligibleTasksForAddModal.length})
+                                    </button>
+                                    {bulkSelectedIds.size > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setBulkSelectedIds(new Set())}
+                                            className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 cursor-pointer"
+                                        >
+                                            Limpar ({bulkSelectedIds.size})
+                                        </button>
+                                    )}
                                 </div>
-                            ))}
+                            </div>
                         </div>
-                        <div className="p-4 border-t border-slate-700 flex justify-end">
-                            <Button variant="secondary" onClick={() => setIsAddTaskModalOpen(false)}>Fechar</Button>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                            {eligibleTasksForAddModal.length === 0 ? (
+                                <div className="text-center py-10 text-slate-500 text-xs">
+                                    Nenhuma demanda elegível encontrada com os filtros atuais.
+                                </div>
+                            ) : (
+                                eligibleTasksForAddModal.map((t: Task) => {
+                                    const isChecked = bulkSelectedIds.has(t.id);
+                                    const currentSp = getTaskSprint(t, sprints);
+                                    return (
+                                        <label
+                                            key={t.id}
+                                            className={`p-3 rounded-xl border cursor-pointer flex items-center justify-between gap-3 transition-all ${
+                                                isChecked ? 'bg-indigo-950/50 border-indigo-500/70' : 'bg-slate-900 border-slate-700 hover:border-slate-500'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isChecked}
+                                                    onChange={() => {
+                                                        const next = new Set(bulkSelectedIds);
+                                                        if (next.has(t.id)) next.delete(t.id);
+                                                        else next.add(t.id);
+                                                        setBulkSelectedIds(next);
+                                                    }}
+                                                    className="rounded accent-indigo-500 cursor-pointer shrink-0"
+                                                />
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-white truncate">{t.summary}</p>
+                                                    <p className="text-[11px] text-slate-400 font-mono truncate">
+                                                        {t.id} | {t.assignee || 'Sem Dev'} | {t.status}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                                                    {currentSp ? currentSp.name : (t.iterationPath || 'Sem sprint')}
+                                                </span>
+                                            </div>
+                                        </label>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {selectedSprint.status === 'Concluída' && (
+                            <div className="mx-4 mb-2 p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-200 space-y-1.5">
+                                <p>Esta sprint está com status <strong>Concluída</strong>.</p>
+                                <label className="flex items-center gap-2 font-semibold cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={bulkAllowConcluded}
+                                        onChange={(e) => setBulkAllowConcluded(e.target.checked)}
+                                        className="rounded accent-amber-500 cursor-pointer"
+                                    />
+                                    Confirmar aplicação mesmo em sprint concluída
+                                </label>
+                            </div>
+                        )}
+
+                        {bulkAddError && (
+                            <div className="mx-4 mb-2 p-2.5 bg-rose-950/50 border border-rose-500/50 rounded-xl text-xs text-rose-200">
+                                {bulkAddError}
+                            </div>
+                        )}
+
+                        <div className="p-4 border-t border-slate-700 flex justify-between items-center gap-3">
+                            <span className="text-xs text-slate-400 font-mono">
+                                {bulkSelectedIds.size} demanda(s) selecionada(s)
+                            </span>
+                            <div className="flex gap-2">
+                                <Button variant="secondary" disabled={isApplyingBulkAdd} onClick={() => setIsAddTaskModalOpen(false)}>Fechar</Button>
+                                <Button 
+                                    variant="primary" 
+                                    disabled={isApplyingBulkAdd || bulkSelectedIds.size === 0 || (selectedSprint.status === 'Concluída' && !bulkAllowConcluded)}
+                                    onClick={handleApplyBulkTasksToSprint}
+                                >
+                                    {isApplyingBulkAdd ? 'Aplicando...' : `Aplicar Sprint em Massa (${bulkSelectedIds.size})`}
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2296,6 +2601,12 @@ const ListView = ({
     return true;
   }, [selected.size, targetSprintChoice, isDestinationConcluded, allowConcludedSprint, isSubmittingSprint]);
 
+  const [isAligningOpenDemands, setIsAligningOpenDemands] = useState(false);
+
+  const openFilteredAuthorized = useMemo(() => {
+    return filteredAuthorized.filter(t => !isTerminalStatus(t.status));
+  }, [filteredAuthorized]);
+
   const handleConfirmSprintChange = async () => {
     if (!canConfirmSprintChange) return;
     setIsSubmittingSprint(true);
@@ -2304,16 +2615,16 @@ const ListView = ({
     try {
       const targetSprintId = targetSprintChoice === '__none__' ? null : targetSprintChoice;
       const targetIds = Array.from(selected) as string[];
-      const { updatedTasks, updatedSprints } = await StorageService.updateTasksSprint(
+      const res = await StorageService.updateTasksSprint(
         targetIds,
         targetSprintId,
         user,
         { allowConcludedSprint }
       );
 
-      setTasks(updatedTasks);
+      setTasks(res.updatedTasks);
       if (setSprints) {
-        setSprints(updatedSprints);
+        setSprints(res.updatedSprints);
       }
 
       const destLabel = targetSprintChoice === '__none__' 
@@ -2321,7 +2632,8 @@ const ListView = ({
         : (selectedSprintObj ? selectedSprintObj.name : 'Sprint de destino');
 
       if (showToast) {
-        showToast('success', `Sprint atualizada para "${destLabel}" em ${targetIds.length} demanda(s).`, 'Sprint Atualizada');
+        const devopsInfo = res.devopsSyncedCount ? ` (${res.devopsSyncedCount} sincronizada(s) no Azure DevOps)` : '';
+        showToast('success', `Sprint atualizada para "${destLabel}" em ${targetIds.length} demanda(s)${devopsInfo}.`, 'Sprint Atualizada');
       }
 
       setSelected(new Set());
@@ -2573,20 +2885,21 @@ const ListView = ({
                         <td className="p-3.5">
                           {(() => {
                             const taskSprint = getTaskSprint(task, sprints);
-                            if (!taskSprint) {
+                            const displaySprintName = taskSprint?.name || task.iterationPath;
+                            if (!displaySprintName) {
                               return (
                                 <span className="text-xs text-slate-500 italic px-2 py-0.5 rounded bg-slate-900/40 border border-slate-800/60 font-mono">
                                   Sem sprint
                                 </span>
                               );
                             }
-                            const isConcluded = taskSprint.status === 'Concluída';
-                            const isRunning = taskSprint.status === 'Em Execução';
+                            const isConcluded = taskSprint?.status === 'Concluída';
+                            const isRunning = taskSprint?.status === 'Em Execução';
                             return (
                               <div className="flex flex-col gap-0.5">
                                 <span 
-                                  title={`Sprint: ${taskSprint.name} (${taskSprint.status})`}
-                                  className={`text-xs font-semibold px-2 py-0.5 rounded-lg border font-mono inline-flex items-center gap-1.5 w-fit max-w-[160px] truncate ${
+                                  title={`Sprint / Iteration Path: ${displaySprintName}${taskSprint ? ` (${taskSprint.status})` : ''}`}
+                                  className={`text-xs font-semibold px-2 py-0.5 rounded-lg border font-mono inline-flex items-center gap-1.5 w-fit max-w-[260px] truncate ${
                                     isConcluded 
                                       ? 'bg-slate-900/90 text-slate-400 border-slate-700/70' 
                                       : isRunning 
@@ -2595,10 +2908,10 @@ const ListView = ({
                                   }`}
                                 >
                                   <span className="text-[11px]">{isConcluded ? '🏁' : isRunning ? '⚡' : '🎯'}</span>
-                                  <span className="truncate">{taskSprint.name}</span>
+                                  <span className="truncate">{displaySprintName}</span>
                                 </span>
                                 <span className="text-[10px] text-slate-400 font-mono pl-1">
-                                  {taskSprint.status}
+                                  {taskSprint ? taskSprint.status : 'Iteration Path DevOps'}
                                 </span>
                               </div>
                             );
@@ -2677,7 +2990,7 @@ const ListView = ({
             <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1">
               {/* Notice / Rules */}
               <div className="p-3 bg-indigo-950/20 border border-indigo-500/20 rounded-xl text-xs text-indigo-200/90 leading-relaxed">
-                ℹ️ <strong>Importante:</strong> Esta operação atualizará apenas a Sprint e registrará uma entrada no histórico de auditoria das demandas. Status, responsável, datas, horas estimadas e sub-tarefas <strong>não sofrerão alterações</strong>.
+                ℹ️ <strong>Importante:</strong> Esta operação atualizará a Sprint, o campo <code className="text-sky-300">System.IterationPath</code> (sincronizando demandas vinculadas ao Azure DevOps) e registrará o histórico de auditoria. Status, responsável, datas e sub-tarefas <strong>não sofrerão alterações</strong>.
               </div>
 
               {/* Selected Demands Table */}
@@ -7637,13 +7950,21 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
   );
 };
 
-const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: User, setUser: (u: User) => void, onResetData: () => Promise<boolean | void> | void, onOpenAIAgentApi?: () => void }) => {
+const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi, tasks = [], setTasks, sprints = [], setSprints, showToast }: { user: User, setUser: (u: User) => void, onResetData: () => Promise<boolean | void> | void, onOpenAIAgentApi?: () => void, tasks?: Task[], setTasks?: any, sprints?: Sprint[], setSprints?: any, showToast?: (type: 'error' | 'success' | 'info', message: string, title?: string) => void }) => {
     const [name, setName] = useState(user.name); 
     const [avatar, setAvatar] = useState(user.avatar || ''); 
     const [password, setPassword] = useState(user.password || '');
     const [devopsConfig, setDevopsConfig] = useState<DevOpsConfig>(() => StorageService.getDevOpsConfig());
     const [isSavingDevops, setIsSavingDevops] = useState(false);
     const [devopsSavedFeedback, setDevopsSavedFeedback] = useState(false);
+    const [devopsSavedNotice, setDevopsSavedNotice] = useState('');
+    const [newDevOpsSprintInput, setNewDevOpsSprintInput] = useState('');
+    const [setNewSprintAsDefault, setSetNewSprintAsDefault] = useState(true);
+    const [isRegisteringSprint, setIsRegisteringSprint] = useState(false);
+    const [sprintActionFeedback, setSprintActionFeedback] = useState<{ type: 'ok' | 'error'; message: string } | null>(null);
+    const [quickBulkSprintPath, setQuickBulkSprintPath] = useState<string | null>(null);
+    const [quickBulkTaskIds, setQuickBulkTaskIds] = useState<Set<string>>(new Set());
+    const [isApplyingQuickBulk, setIsApplyingQuickBulk] = useState(false);
     const [isInspectingFields, setIsInspectingFields] = useState(false);
     const [devopsFieldsInfo, setDevopsFieldsInfo] = useState<{ status: 'idle' | 'ok' | 'error'; message: string; candidates?: Array<{ referenceName: string; name: string }> }>({ status: 'idle', message: '' });
     const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -7814,16 +8135,151 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
                 <input type="password" value={devopsConfig.pat} onChange={e => setDevopsConfig({...devopsConfig, pat: e.target.value})} className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="Insira o seu PAT - CQJSl..." />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-xs text-slate-400 mb-1 font-medium">Iteration Path Padrão (Azure DevOps)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-slate-400 font-medium">Iteration Path Padrão (Azure DevOps)</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const suggested = formatDevOpsSprintName(getTodayCivilString(), devopsConfig);
+                      if (suggested) setDevopsConfig({ ...devopsConfig, defaultIterationPath: suggested });
+                    }}
+                    className="text-[11px] text-sky-400 hover:text-sky-300 font-medium cursor-pointer"
+                  >
+                    Sugerir Sprint Atual
+                  </button>
+                </div>
                 <input 
                   value={devopsConfig.defaultIterationPath || ''} 
                   onChange={e => setDevopsConfig({ ...devopsConfig, defaultIterationPath: e.target.value })} 
                   className="w-full bg-slate-900 border border-slate-600 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" 
-                  placeholder="ex: Hyperautomation\Sprint 1 ou \Iteration 2" 
+                  placeholder="ex: Hyperautomation\Sprint Semana 3 e 4 - Nov-2026" 
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Caminho padrão da iteração / Sprint no Azure DevOps (campo System.IterationPath). Novas demandas herdarão este caminho caso não especificado individualmente.
+                  Caminho padrão da iteração / Sprint no Azure DevOps (campo System.IterationPath). Ao salvar, esta Sprint também é disponibilizada automaticamente na aba Sprints e na Lista de Demandas.
                 </p>
+              </div>
+
+              {/* DevOps Sprint Registry Panel */}
+              <div className="md:col-span-2 bg-slate-900/70 border border-sky-500/30 rounded-xl p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-sky-300 uppercase tracking-wider">Sprints DevOps Cadastradas (Nexus + DevOps)</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Cadastre novas Sprints no formato exato do Azure DevOps (<code className="text-sky-300">Hyperautomation\Sprint Semana 3 e 4 - Nov-2026</code>) para aplicar em massa na Lista de Demandas e na aba Sprints.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    value={newDevOpsSprintInput}
+                    onChange={e => setNewDevOpsSprintInput(e.target.value)}
+                    placeholder={`${extractDevOpsProjectPrefix(devopsConfig) || 'Hyperautomation'}\\Sprint Semana 3 e 4 - Nov-2026`}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono outline-none focus:border-sky-500"
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={isRegisteringSprint || !newDevOpsSprintInput.trim()}
+                    onClick={async () => {
+                      setIsRegisteringSprint(true);
+                      setSprintActionFeedback(null);
+                      try {
+                        const res = await StorageService.registerDevOpsSprint(newDevOpsSprintInput, {
+                          setAsDefault: setNewSprintAsDefault,
+                          userId: user?.id
+                        });
+                        setDevopsConfig(res.devopsConfig);
+                        if (setSprints) setSprints(res.sprints);
+                        setSprintActionFeedback({
+                          type: 'ok',
+                          message: res.created
+                            ? `Sprint "${res.sprint?.name}" cadastrada e disponível em Lista de Demandas e Sprints!`
+                            : `Sprint "${res.sprint?.name}" atualizada e sincronizada com sucesso!`
+                        });
+                        setNewDevOpsSprintInput('');
+                      } catch (e: any) {
+                        setSprintActionFeedback({ type: 'error', message: e?.message || 'Erro ao cadastrar sprint.' });
+                      } finally {
+                        setIsRegisteringSprint(false);
+                      }
+                    }}
+                    className="text-xs py-2 px-3 whitespace-nowrap"
+                  >
+                    {isRegisteringSprint ? 'Cadastrando...' : '+ Cadastrar Sprint'}
+                  </Button>
+                </div>
+                <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={setNewSprintAsDefault}
+                    onChange={e => setSetNewSprintAsDefault(e.target.checked)}
+                    className="rounded accent-sky-500 cursor-pointer"
+                  />
+                  Definir sprint cadastrada também como Iteration Path Padrão
+                </label>
+
+                {sprintActionFeedback && (
+                  <div className={`p-2.5 rounded-lg text-xs border ${sprintActionFeedback.type === 'ok' ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-rose-950/60 border-rose-500/40 text-rose-300'}`}>
+                    {sprintActionFeedback.message}
+                  </div>
+                )}
+
+                {(() => {
+                  const allPaths = collectRegisteredIterationPaths(devopsConfig, sprints);
+                  if (allPaths.length === 0) return null;
+                  const openAuthTasks = (tasks || []).filter((t: Task) => !isTerminalStatus(t.status) && isTaskAuthorized(t, user));
+                  return (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                      {allPaths.map((iterPath) => {
+                        const matchedSprint = sprints.find((s: Sprint) =>
+                          normalizeIterationPath(s.iterationPath || s.name).toLowerCase() === iterPath.toLowerCase()
+                        );
+                        const isDefault = normalizeIterationPath(devopsConfig.defaultIterationPath).toLowerCase() === iterPath.toLowerCase();
+                        return (
+                          <div key={iterPath} className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono text-slate-100 truncate">{iterPath}</span>
+                              {isDefault && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold shrink-0">Padrão</span>
+                              )}
+                              {matchedSprint && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0">{matchedSprint.status}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {!isDefault && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const nextCfg = { ...devopsConfig, defaultIterationPath: iterPath };
+                                    setDevopsConfig(nextCfg);
+                                    await StorageService.saveDevOpsConfig(nextCfg, user?.id);
+                                    if (setSprints) setSprints(StorageService.getSprints());
+                                  }}
+                                  className="text-[11px] text-slate-300 hover:text-white px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer"
+                                >
+                                  Tornar Padrão
+                                </button>
+                              )}
+                              {matchedSprint && openAuthTasks.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuickBulkSprintPath(matchedSprint.id);
+                                    setQuickBulkTaskIds(new Set(openAuthTasks.map((t: Task) => t.id)));
+                                  }}
+                                  className="text-[11px] text-indigo-300 hover:text-white px-2 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/40 font-semibold cursor-pointer"
+                                >
+                                  Aplicar em Demandas em Aberto ({openAuthTasks.length})
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-1 font-medium">Campo Data Início na Task (Opcional)</label>
@@ -7915,7 +8371,7 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
             {devopsSavedFeedback && (
               <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
                 <IconCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Configurações do Azure DevOps salvas e sincronizadas na sua conta Firestore! Mesmo ao fazer login em outro computador ou navegador, seus dados de integração serão carregados automaticamente.</span>
+                <span>{devopsSavedNotice || 'Configurações do Azure DevOps salvas e sincronizadas na sua conta Firestore!'}</span>
               </div>
             )}
 
@@ -7928,7 +8384,13 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
                 onClick={async () => { 
                   setIsSavingDevops(true);
                   try {
-                    await StorageService.saveDevOpsConfig(devopsConfig, user?.id); 
+                    const saveRes = await StorageService.saveDevOpsConfig(devopsConfig, user?.id); 
+                    if (setSprints) setSprints(StorageService.getSprints());
+                    setDevopsSavedNotice(
+                      saveRes.registeredSprintsCount
+                        ? `Configurações do Azure DevOps salvas e ${saveRes.registeredSprintsCount} nova(s) Sprint(s) sincronizada(s) automaticamente em Sprints e Lista de Demandas!`
+                        : 'Configurações do Azure DevOps e Sprints sincronizadas com sucesso!'
+                    );
                     setDevopsSavedFeedback(true);
                     setTimeout(() => setDevopsSavedFeedback(false), 6000);
                   } catch (e: any) {
@@ -7942,6 +8404,92 @@ const UserProfile = ({ user, setUser, onResetData, onOpenAIAgentApi }: { user: U
               </Button>
             </div>
           </Card>
+
+          {/* Quick Bulk Apply Modal from Azure DevOps Integration */}
+          {quickBulkSprintPath && (() => {
+            const targetSp = sprints.find((s: Sprint) => s.id === quickBulkSprintPath);
+            const openAuthTasks = (tasks || []).filter((t: Task) => !isTerminalStatus(t.status) && isTaskAuthorized(t, user));
+            if (!targetSp) return null;
+            return (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                <div className="bg-slate-800 rounded-2xl border border-slate-700 w-full max-w-2xl shadow-2xl flex flex-col max-h-[85vh]">
+                  <div className="p-5 border-b border-slate-700 flex justify-between items-start gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Aplicar Sprint DevOps nas Demandas em Aberto</h3>
+                      <p className="text-xs text-sky-300 font-mono mt-0.5">{targetSp.name}</p>
+                    </div>
+                    <button onClick={() => setQuickBulkSprintPath(null)} className="text-slate-400 hover:text-white p-1">✕</button>
+                  </div>
+                  <div className="p-4 overflow-y-auto custom-scrollbar space-y-2 flex-1">
+                    {openAuthTasks.map((t: Task) => {
+                      const checked = quickBulkTaskIds.has(t.id);
+                      return (
+                        <label key={t.id} className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer ${checked ? 'bg-indigo-950/50 border-indigo-500/60' : 'bg-slate-900 border-slate-700'}`}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const next = new Set(quickBulkTaskIds);
+                                if (next.has(t.id)) next.delete(t.id);
+                                else next.add(t.id);
+                                setQuickBulkTaskIds(next);
+                              }}
+                              className="rounded accent-indigo-500 cursor-pointer"
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-white truncate">{t.summary}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">{t.id} | {t.assignee || 'Sem Dev'} | {t.status}</p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                            {t.iterationPath || 'Sem iteration'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="p-4 border-t border-slate-700 flex justify-between items-center">
+                    <span className="text-xs text-slate-400">{quickBulkTaskIds.size} demanda(s) selecionada(s)</span>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" disabled={isApplyingQuickBulk} onClick={() => setQuickBulkSprintPath(null)}>Cancelar</Button>
+                      <Button
+                        variant="primary"
+                        disabled={isApplyingQuickBulk || quickBulkTaskIds.size === 0}
+                        onClick={async () => {
+                          setIsApplyingQuickBulk(true);
+                          try {
+                            const res = await StorageService.updateTasksSprint(
+                              Array.from(quickBulkTaskIds) as string[],
+                              targetSp.id,
+                              user,
+                              { allowConcludedSprint: targetSp.status === 'Concluída' }
+                            );
+                            if (setTasks) setTasks(res.updatedTasks);
+                            if (setSprints) setSprints(res.updatedSprints);
+                            setSprintActionFeedback({
+                              type: 'ok',
+                              message: `Sprint "${targetSp.name}" aplicada em ${quickBulkTaskIds.size} demanda(s) em aberto!`
+                            });
+                            if (showToast) {
+                              showToast('success', `Sprint "${targetSp.name}" aplicada em ${quickBulkTaskIds.size} demanda(s).`, 'Sprint Aplicada');
+                            }
+                            setQuickBulkSprintPath(null);
+                          } catch (err: any) {
+                            alert(err?.message || 'Erro ao aplicar sprint nas demandas.');
+                          } finally {
+                            setIsApplyingQuickBulk(false);
+                          }
+                        }}
+                      >
+                        {isApplyingQuickBulk ? 'Aplicando...' : `Confirmar Aplicação (${quickBulkTaskIds.size})`}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* AI Agent API Card */}
@@ -10004,11 +10552,17 @@ const TaskModal = ({ task, developers, allTasks, onClose, onSave, onDelete, work
                     id="task-iterationPath"
                     name="iterationPath" 
                     aria-label="Iteration Path (Azure DevOps)"
+                    list="nexus-iteration-paths-list"
                     value={formData.iterationPath || ''} 
                     onChange={handleChange} 
-                    placeholder="Ex: Hyperautomation\Sprint 1 ou \Iteration 2" 
+                    placeholder="Ex: Hyperautomation\Sprint Semana 3 e 4 - Nov-2026" 
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:ring-2 focus:ring-sky-500 outline-none font-mono" 
                 />
+                <datalist id="nexus-iteration-paths-list">
+                    {collectRegisteredIterationPaths(StorageService.getDevOpsConfig(), StorageService.getSprints()).map(p => (
+                        <option key={p} value={p} />
+                    ))}
+                </datalist>
                 <p className="text-[10px] text-slate-500 mt-1">
                     Caminho da Iteração no Azure DevOps (campo <code className="text-sky-300">System.IterationPath</code>). Enviado automaticamente durante a integração ou sincronização.
                 </p>
@@ -10930,6 +11484,7 @@ export default function App() {
             targetSprint = {
                 id: `sprint-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
                 name: sprintName,
+                iterationPath: sprintName,
                 startDate: monday.toISOString().split('T')[0],
                 endDate: friday.toISOString().split('T')[0],
                 status: 'Planejada',
@@ -11043,11 +11598,25 @@ export default function App() {
         setDocumentsConfig(e.detail);
       }
     };
+    const handleSprintsUpdated = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setSprints(e.detail);
+      }
+    };
+    const handleTasksUpdated = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setTasks(e.detail);
+      }
+    };
     window.addEventListener('nexus-workflow-config-updated', handleWorkflowUpdated);
     window.addEventListener('nexus-documents-config-updated', handleDocsUpdated);
+    window.addEventListener('nexus-sprints-updated', handleSprintsUpdated);
+    window.addEventListener('nexus-tasks-updated', handleTasksUpdated);
     return () => {
       window.removeEventListener('nexus-workflow-config-updated', handleWorkflowUpdated);
       window.removeEventListener('nexus-documents-config-updated', handleDocsUpdated);
+      window.removeEventListener('nexus-sprints-updated', handleSprintsUpdated);
+      window.removeEventListener('nexus-tasks-updated', handleTasksUpdated);
     };
   }, []);
 
@@ -12628,7 +13197,7 @@ export default function App() {
       <Route path="/" element={canAccessModule('dashboard') ? <DashboardView tasks={visibleTasks} devs={devs} onEditTask={setEditingTask} onUpdateTask={handleTaskUpdate} onOpenUpload={() => setIsUploadModalOpen(true)} onCreateTask={handleCreateTask} onOpenNotifications={() => setIsNotificationCenterOpen(true)} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/projects" element={canAccessModule('projects') ? <ProjectFlowView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} workflowConfig={workflowConfig} setWorkflowConfig={setWorkflowConfig} sprints={sprints} setSprints={setSprints} syncTaskWithSprints={syncTaskWithSprints} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/esteira" element={canAccessModule('esteira') ? <DocumentPipelineView tasks={visibleTasks} setTasks={setTasks} devs={devs} documentsConfig={documentsConfig} setDocumentsConfig={setDocumentsConfig} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
-      <Route path="/sprints" element={canAccessModule('sprints') ? <SprintsView tasks={visibleTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} /> : <Navigate to={defaultAllowedPath} replace />} />
+      <Route path="/sprints" element={canAccessModule('sprints') ? <SprintsView tasks={visibleTasks} setTasks={setTasks} sprints={sprints} setSprints={setSprints} devs={devs} user={user!} onEditTask={setEditingTask} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/project-report" element={canAccessModule('projectReport') ? <ProjectReportView tasks={visibleTasks} workflowConfig={workflowConfig} devs={devs} sprints={sprints} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/kanban" element={canAccessModule('kanban') ? <KanbanView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/list" element={canAccessModule('list') ? <ListView tasks={visibleTasks} setTasks={setTasks} devs={devs} onEditTask={setEditingTask} user={user!} sprints={sprints} setSprints={setSprints} showToast={showToast} /> : <Navigate to={defaultAllowedPath} replace />} />
@@ -12637,7 +13206,7 @@ export default function App() {
       <Route path="/totem" element={canAccessModule('totem') ? <AutomationTotemView tasks={visibleTasks} setTasks={setTasks} robots={robots} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/reports" element={canAccessModule('reports') ? <ReportsView tasks={visibleTasks} devs={devs} robots={robots} workflowConfig={workflowConfig} docsConfig={documentsConfig} onEditTask={setEditingTask} onCreateTask={handleCreateTask} onUpdateTask={handleTaskUpdate} /> : <Navigate to={defaultAllowedPath} replace />} />
       <Route path="/admin" element={isAdmin ? <AdminUserManagementView currentUser={user!} tasks={tasks} devs={devs} onMembersUpdated={refreshUserAccess} /> : <Navigate to={defaultAllowedPath} replace />} />
-      <Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} />} />
+      <Route path="/profile" element={<UserProfile user={user!} setUser={setUser} onResetData={handleResetData} onOpenAIAgentApi={() => setIsAIAgentApiModalOpen(true)} tasks={visibleTasks} setTasks={setTasks} sprints={sprints} setSprints={setSprints} showToast={showToast} />} />
       <Route path="/powerbi-data" element={<PowerBIDataView />} />
       <Route path="*" element={<Navigate to={defaultAllowedPath} replace />} />
     </Routes>

@@ -372,17 +372,27 @@ router.post("/devops/config", async (req: express.Request, res: express.Response
       return;
     }
 
-    const { organization, project, pat, isActive, defaultIterationPath, startDateField, targetDateField, verifiedTaskFields } = req.body;
+    const { organization, project, pat, isActive, defaultIterationPath, registeredIterationPaths, startDateField, targetDateField, verifiedTaskFields } = req.body;
     const current = readDevOpsConfig();
     // If client sent masked pat "••••••••••••", preserve existing PAT
     const finalPat = (pat && pat.includes("••••")) ? current.pat : String(pat || "").trim();
+
+    const cleanRegistered = Array.isArray(registeredIterationPaths)
+      ? Array.from(new Set(registeredIterationPaths.map((p: any) => String(p || "").trim()).filter(Boolean)))
+      : (Array.isArray(current.registeredIterationPaths) ? current.registeredIterationPaths : []);
+
+    const cleanDefaultIter = String(defaultIterationPath || "").trim();
+    if (cleanDefaultIter && !cleanRegistered.some((p: string) => p.toLowerCase() === cleanDefaultIter.toLowerCase())) {
+      cleanRegistered.unshift(cleanDefaultIter);
+    }
 
     const config = {
       organization: String(organization || "").trim(),
       project: String(project || "").trim(),
       pat: finalPat,
       isActive: Boolean(isActive),
-      defaultIterationPath: String(defaultIterationPath || "").trim(),
+      defaultIterationPath: cleanDefaultIter,
+      registeredIterationPaths: cleanRegistered,
       startDateField: startDateField !== undefined ? String(startDateField || "").trim() : (current.startDateField || ""),
       targetDateField: targetDateField !== undefined ? String(targetDateField || "").trim() : (current.targetDateField || ""),
       verifiedTaskFields: Array.isArray(verifiedTaskFields) ? verifiedTaskFields.map(String) : (current.verifiedTaskFields || []),
