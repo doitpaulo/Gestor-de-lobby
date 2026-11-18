@@ -30,6 +30,8 @@
         "hasCost": { "type": "boolean", "optional": true },
         "dispatchCount": { "type": "number", "optional": true },
         "costValue": { "type": "number", "optional": true },
+        "sprintId": { "type": "string", "optional": true },
+        "iterationPath": { "type": "string", "optional": true },
         "assignedUid": { "type": "string", "optional": true },
         "allowedUids": { "type": "array", "optional": true }
       }
@@ -94,6 +96,7 @@
       "fields": {
         "id": { "type": "string" },
         "name": { "type": "string" },
+        "iterationPath": { "type": "string", "optional": true },
         "status": { "type": "string" }
       }
     },

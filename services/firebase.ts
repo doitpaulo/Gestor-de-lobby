@@ -891,18 +891,23 @@ export const FirebaseService = {
     }
   },
 
-  // Atomic batch update for mass sprint modification (patches exclusively sprintId & history)
+  // Atomic batch update for mass sprint modification (patches sprintId, iterationPath & history)
   updateTasksSprintBatch: async (
     workspaceOwnerUid: string,
     taskPatches: Array<{
       id: string;
       sprintId: string | null;
+      iterationPath?: string | null;
       historyEntry: any;
     }>,
     targetSprintPatch?: {
       id: string;
       tasks: any[];
-    } | null
+    } | null,
+    otherSprintPatches?: Array<{
+      id: string;
+      tasks: any[];
+    }>
   ): Promise<void> => {
     if (isGuestUserId(workspaceOwnerUid)) return;
     const nowIso = new Date().toISOString();
@@ -914,11 +919,26 @@ export const FirebaseService = {
         sprintId: patch.sprintId,
         updatedAt: nowIso
       };
+      if (patch.iterationPath !== undefined) {
+        payload.iterationPath = patch.iterationPath;
+      }
       if (patch.historyEntry) {
         payload.history = arrayUnion(cleanForFirestore(patch.historyEntry));
       }
       batch.set(taskRef, cleanForFirestore(payload), { merge: true });
     });
+
+    if (Array.isArray(otherSprintPatches)) {
+      otherSprintPatches.forEach(spPatch => {
+        if (spPatch && spPatch.id && spPatch.id !== targetSprintPatch?.id) {
+          const otherRef = FirebaseService.getTargetDoc('sprints', spPatch.id, workspaceOwnerUid);
+          batch.set(otherRef, cleanForFirestore({
+            tasks: spPatch.tasks,
+            updatedAt: nowIso
+          }), { merge: true });
+        }
+      });
+    }
 
     if (targetSprintPatch && targetSprintPatch.id) {
       const sprintRef = FirebaseService.getTargetDoc('sprints', targetSprintPatch.id, workspaceOwnerUid);
@@ -983,12 +1003,21 @@ export const FirebaseService = {
     const uid = userId || auth.currentUser?.uid;
     if (!uid || isGuestUserId(uid)) return false;
     try {
+      const cleanDefaultIter = String(config.defaultIterationPath || '').trim();
+      const cleanRegistered = Array.isArray(config.registeredIterationPaths)
+        ? Array.from(new Set(config.registeredIterationPaths.map(p => String(p || '').trim()).filter(Boolean)))
+        : [];
+      if (cleanDefaultIter && !cleanRegistered.some(p => p.toLowerCase() === cleanDefaultIter.toLowerCase())) {
+        cleanRegistered.unshift(cleanDefaultIter);
+      }
+
       const cleanConfig: DevOpsConfig = {
         organization: String(config.organization || '').trim(),
         project: String(config.project || '').trim(),
         pat: String(config.pat || '').trim(),
         isActive: Boolean(config.isActive),
-        defaultIterationPath: String(config.defaultIterationPath || '').trim(),
+        defaultIterationPath: cleanDefaultIter,
+        registeredIterationPaths: cleanRegistered,
         ...(config.startDateField !== undefined ? { startDateField: String(config.startDateField || '').trim() } : {}),
         ...(config.targetDateField !== undefined ? { targetDateField: String(config.targetDateField || '').trim() } : {}),
         ...(Array.isArray(config.verifiedTaskFields) ? { verifiedTaskFields: config.verifiedTaskFields.map(String) } : {})
@@ -1047,6 +1076,14 @@ export const FirebaseService = {
       const proj = String(target.project || raw.project || '').trim();
       const pat = String(target.pat || raw.pat || '').trim();
       const path = String(target.defaultIterationPath || raw.defaultIterationPath || '').trim();
+      const rawRegistered = Array.isArray(target.registeredIterationPaths)
+        ? target.registeredIterationPaths
+        : Array.isArray(raw.registeredIterationPaths)
+        ? raw.registeredIterationPaths
+        : undefined;
+      const registeredIterationPaths: string[] | undefined = rawRegistered
+        ? Array.from(new Set<string>(rawRegistered.map((p: any) => String(p || '').trim()).filter(Boolean)))
+        : undefined;
       const active = target.isActive !== undefined ? Boolean(target.isActive) : (raw.isActive !== undefined ? Boolean(raw.isActive) : false);
       const startDateField = target.startDateField !== undefined ? String(target.startDateField || '').trim() : (raw.startDateField !== undefined ? String(raw.startDateField || '').trim() : undefined);
       const targetDateField = target.targetDateField !== undefined ? String(target.targetDateField || '').trim() : (raw.targetDateField !== undefined ? String(raw.targetDateField || '').trim() : undefined);
@@ -1062,6 +1099,7 @@ export const FirebaseService = {
           pat,
           isActive: active,
           defaultIterationPath: path,
+          ...(registeredIterationPaths !== undefined ? { registeredIterationPaths } : {}),
           ...(startDateField !== undefined ? { startDateField } : {}),
           ...(targetDateField !== undefined ? { targetDateField } : {}),
           ...(verifiedTaskFields !== undefined ? { verifiedTaskFields } : {})

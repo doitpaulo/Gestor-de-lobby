@@ -143,6 +143,7 @@ export interface SprintTask {
 export interface Sprint {
   id: string;
   name: string;
+  iterationPath?: string;
   startDate: string;
   endDate: string;
   status: 'Planejada' | 'Em Execução' | 'Concluída';
@@ -158,6 +159,15 @@ export const getTaskSprintId = (task: Task, sprints: Sprint[]): string | undefin
       return undefined;
     }
     return task.sprintId;
+  }
+  // Match by explicit Azure DevOps iterationPath if present on legacy/imported tasks:
+  if (task.iterationPath && task.iterationPath.trim()) {
+    const cleanIter = task.iterationPath.trim().toLowerCase();
+    const byIter = sprints.find(s =>
+      (s.iterationPath && s.iterationPath.trim().toLowerCase() === cleanIter) ||
+      (s.name && s.name.trim().toLowerCase() === cleanIter)
+    );
+    if (byIter) return byIter.id;
   }
   // Fallback ONLY for legacy tasks where sprintId field was never defined:
   const found = sprints.find(s => s.tasks && s.tasks.some(st => st.taskId === task.id));
@@ -401,6 +411,7 @@ export interface DevOpsConfig {
   pat: string;
   isActive: boolean;
   defaultIterationPath?: string;
+  registeredIterationPaths?: string[];
   startDateField?: string;
   targetDateField?: string;
   verifiedTaskFields?: string[];
