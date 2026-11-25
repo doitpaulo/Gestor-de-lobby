@@ -1496,7 +1496,7 @@ router.get("/ai/spec", (req: express.Request, res: express.Response) => {
           type: "object",
           properties: {
             status: { type: "string", description: "Filtro por status (ex: 'Novo', 'Em Atendimento', 'Aguardando', 'Concluído', 'Pendente')" },
-            type: { type: "string", description: "Filtro por tipo de demanda ('Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução')" },
+            type: { type: "string", description: "Filtro por tipo de demanda ('Incidente', 'Melhoria', 'Nova Automação', 'Agendamento de Execução', 'Demanda Interna')" },
             assignee: { type: "string", description: "Nome do desenvolvedor responsável" },
             priority: { type: "string", description: "Prioridade ('Baixa', 'Média', 'Alta', 'Crítica')" },
             iterationPath: { type: "string", description: "Caminho da Iteração / Sprint no Azure DevOps" },
@@ -1518,13 +1518,13 @@ router.get("/ai/spec", (req: express.Request, res: express.Response) => {
       },
       {
         name: "create_task",
-        description: "Cria uma nova demanda na plataforma Nexus (Nova Automação, Incidente, Melhoria ou Agendamento). Opcionalmente dispara sincronização com o Azure DevOps.",
+        description: "Cria uma nova demanda na plataforma Nexus (Nova Automação, Incidente, Melhoria, Agendamento ou Demanda Interna). Opcionalmente dispara sincronização com o Azure DevOps.",
         parameters: {
           type: "object",
           required: ["summary"],
           properties: {
             summary: { type: "string", description: "Título / Resumo da demanda" },
-            type: { type: "string", enum: ["Nova Automação", "Incidente", "Melhoria", "Agendamento de Execução"], description: "Tipo da demanda (padrão: 'Nova Automação')" },
+            type: { type: "string", enum: ["Nova Automação", "Incidente", "Melhoria", "Agendamento de Execução", "Demanda Interna"], description: "Tipo da demanda (padrão: 'Nova Automação')" },
             priority: { type: "string", enum: ["Baixa", "Média", "Alta", "Crítica"], description: "Prioridade da demanda (padrão: 'Média')" },
             status: { type: "string", description: "Status inicial (padrão: 'Novo')" },
             assignee: { type: "string", description: "Nome do desenvolvedor responsável" },
@@ -1937,11 +1937,11 @@ router.post("/ai/tasks", validateAIAgentKey, async (req: express.Request, res: e
               newTask.devopsFeatureId = String(featData.id);
               devopsSyncResult = { success: true, featureId: featData.id };
             }
-          } else if ((type === "Incidente" || type === "Melhoria") && devopsUserStoryId) {
+          } else if ((type === "Incidente" || type === "Melhoria" || type === "Demanda Interna") && devopsUserStoryId) {
             const taskUrl = `https://dev.azure.com/${devopsConfig.organization}/${devopsConfig.project}/_apis/wit/workitems/$Task?api-version=7.0`;
             const taskBody: any[] = [
               { "op": "add", "path": "/fields/System.Title", "value": `${newTask.id} - ${newTask.summary}` },
-              { "op": "add", "path": "/fields/System.Tags", "value": type === "Incidente" ? "Sustentação" : "Melhoria" },
+              { "op": "add", "path": "/fields/System.Tags", "value": type === "Incidente" ? "Sustentação" : type === "Demanda Interna" ? "Demanda Interna" : "Melhoria" },
               { "op": "add", "path": "/relations/-", "value": { "rel": "System.LinkTypes.Hierarchy-Reverse", "url": `https://dev.azure.com/${devopsConfig.organization}/_apis/wit/workItems/${devopsUserStoryId}` } }
             ];
             if (newTask.iterationPath) {

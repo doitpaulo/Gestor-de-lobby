@@ -1,5 +1,5 @@
 
-export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação' | 'Agendamento de Execução';
+export type TaskType = 'Incidente' | 'Melhoria' | 'Nova Automação' | 'Agendamento de Execução' | 'Demanda Interna';
 export type Priority = '1 - Crítica' | '2 - Alta' | '3 - Moderada' | '4 - Baixa';
 export type Status = 'Novo' | 'Pendente' | 'Em Atendimento' | 'Em Progresso' | 'Resolvido' | 'Fechado' | 'Aguardando' | 'Concluído' | 'Backlog' | 'Cancelado';
 
@@ -649,6 +649,7 @@ export const normalizeTaskType = (type?: string | null): TaskType => {
   if (!type) return 'Incidente';
   const s = type.trim().toLowerCase();
   if (s.includes('agend') || s.includes('execuc') || s.includes('execuç') || s.includes('schedul')) return 'Agendamento de Execução';
+  if (s === 'demanda interna' || s.includes('demanda interna') || s.includes('demandas internas') || s === 'interna' || s === 'interno' || s === 'internal' || s.includes('internal demand')) return 'Demanda Interna';
   if (s === 'nova automação' || s.includes('auto') || s.includes('rpa') || s.includes('bot')) return 'Nova Automação';
   if (s === 'melhoria' || s.includes('melhoria') || s.includes('feature') || s.includes('enhancement')) return 'Melhoria';
   if (s === 'incidente' || s.includes('incid') || s.includes('bug') || s.includes('defeito') || s.includes('erro')) return 'Incidente';
