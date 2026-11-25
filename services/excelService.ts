@@ -15,6 +15,8 @@ export interface ExcelBackupParseResult {
     incidentsCount: number;
     improvementsCount: number;
     automationsCount: number;
+    schedulingsCount?: number;
+    internalDemandsCount?: number;
     devsCount: number;
     robotsCount: number;
   };
@@ -414,6 +416,16 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
     ) {
       explicitType = 'Agendamento de Execução';
     }
+    // 0.5 Demanda Interna check
+    else if (
+      et.includes('demanda interna') ||
+      et.includes('demandas internas') ||
+      et === 'interna' ||
+      et === 'interno' ||
+      et.includes('internal demand')
+    ) {
+      explicitType = 'Demanda Interna';
+    }
     // 1. Melhoria check (check this FIRST to catch "Melhoria em Robô" / "Evolutiva de Automação")
     else if (
       et.includes('melhoria') || 
@@ -467,6 +479,8 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
     const catScan = `${category} ${subcategory}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (catScan.includes('agend') || catScan.includes('execuc') || catScan.includes('schedul')) {
       explicitType = 'Agendamento de Execução';
+    } else if (catScan.includes('demanda interna') || catScan.includes('demandas internas')) {
+      explicitType = 'Demanda Interna';
     } else if (catScan.includes('melhoria') || catScan.includes('evolutiv') || catScan.includes('enhancement') || catScan.includes('feature') || catScan.includes('ajuste')) {
       explicitType = 'Melhoria';
     } else if (catScan.includes('incid') || catScan.includes('bug') || catScan.includes('defeito') || catScan.includes('corretiv')) {
@@ -481,6 +495,8 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
     const idClean = String(id).toUpperCase().trim();
     if (idClean.match(/^(SCH|AGE|EXEC)/i)) {
       type = 'Agendamento de Execução';
+    } else if (idClean.match(/^(INT|DI)/i)) {
+      type = 'Demanda Interna';
     } else if (idClean.match(/^(INC|BUG|ERR|DEF|CHAM|SUP)/i)) {
       type = 'Incidente';
     } else if (idClean.match(/^(MEL|IMP|ENH|FEAT|US|HIST|CHG|RFC)/i)) {
@@ -529,6 +545,11 @@ const mapRowToTask = (row: any, defaultType?: TaskType, indexFallback = 0): Task
         textToScan.includes('construcao de robo')
       ) {
         type = 'Nova Automação';
+      } else if (
+        textToScan.includes('demanda interna') ||
+        textToScan.includes('demandas internas')
+      ) {
+        type = 'Demanda Interna';
       } else if (idClean.match(/^(REQ|RITM|DEM)/i)) {
         // In ServiceNow, REQ/RITM are standard service requests / improvements
         type = 'Melhoria';
@@ -726,7 +747,9 @@ export const ExcelService = {
     // Check if file name itself hints at a category
     const lowerFileName = file.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     let fileDefaultType: TaskType | undefined = undefined;
-    if (lowerFileName.includes('melhoria') || lowerFileName.includes('evolutiv') || lowerFileName.includes('enhancement') || lowerFileName.includes('feature')) {
+    if (lowerFileName.includes('demanda interna') || lowerFileName.includes('demandas internas') || lowerFileName.includes('interna')) {
+      fileDefaultType = 'Demanda Interna';
+    } else if (lowerFileName.includes('melhoria') || lowerFileName.includes('evolutiv') || lowerFileName.includes('enhancement') || lowerFileName.includes('feature')) {
       fileDefaultType = 'Melhoria';
     } else if (lowerFileName.includes('incid') || lowerFileName.includes('bug') || lowerFileName.includes('defeito') || lowerFileName.includes('chamado')) {
       fileDefaultType = 'Incidente';
@@ -769,7 +792,8 @@ export const ExcelService = {
 
       // 3. Task / Demands sheet (or generic sheet)
       let sheetDefaultType: TaskType | undefined = undefined;
-      if (lowerSheet.includes('incid') || lowerSheet.includes('bug') || lowerSheet.includes('chamado')) sheetDefaultType = 'Incidente';
+      if (lowerSheet.includes('demanda interna') || lowerSheet.includes('demandas internas') || lowerSheet === 'interna' || lowerSheet === 'internas') sheetDefaultType = 'Demanda Interna';
+      else if (lowerSheet.includes('incid') || lowerSheet.includes('bug') || lowerSheet.includes('chamado')) sheetDefaultType = 'Incidente';
       else if (lowerSheet.includes('melhoria') || lowerSheet.includes('evolutiv') || lowerSheet.includes('enhancement') || lowerSheet.includes('feature')) sheetDefaultType = 'Melhoria';
       else if (lowerSheet.includes('nova automacao') || (lowerSheet.includes('automacao') && !lowerSheet.includes('melhoria'))) sheetDefaultType = 'Nova Automação';
       else if (fileDefaultType) sheetDefaultType = fileDefaultType;
@@ -827,6 +851,7 @@ export const ExcelService = {
       improvementsCount: parsedTasks.filter(t => t.type === 'Melhoria').length,
       automationsCount: parsedTasks.filter(t => t.type === 'Nova Automação').length,
       schedulingsCount: parsedTasks.filter(t => t.type === 'Agendamento de Execução').length,
+      internalDemandsCount: parsedTasks.filter(t => t.type === 'Demanda Interna').length,
       devsCount: devs.length,
       robotsCount: parsedRobots.length
     };

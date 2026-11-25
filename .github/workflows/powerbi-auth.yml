@@ -16,8 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - run: npm ci
       - run: node node_modules/tsx/dist/cli.mjs test-powerbi-suite.ts
-      - run: bun run lint
-      - run: bun run build
+      - run: npm run lint
+      - run: npm run build

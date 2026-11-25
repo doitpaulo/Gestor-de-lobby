@@ -174,7 +174,7 @@ print("Demanda criada:", response.json())`;
         "type": "object",
         "properties": {
           "status": { "type": "string", "description": "Filtro de status (ex: Novo, Em Atendimento, Concluído)" },
-          "type": { "type": "string", "description": "Incidente, Melhoria, Nova Automação" },
+          "type": { "type": "string", "description": "Incidente, Melhoria, Nova Automação, Agendamento de Execução, Demanda Interna" },
           "iterationPath": { "type": "string", "description": "Sprint ou Iteration Path" },
           "search": { "type": "string", "description": "Termo de busca" }
         }
@@ -191,7 +191,7 @@ print("Demanda criada:", response.json())`;
         "required": ["summary"],
         "properties": {
           "summary": { "type": "string", "description": "Título da demanda" },
-          "type": { "type": "string", "enum": ["Nova Automação", "Incidente", "Melhoria"] },
+          "type": { "type": "string", "enum": ["Nova Automação", "Incidente", "Melhoria", "Agendamento de Execução", "Demanda Interna"] },
           "priority": { "type": "string", "enum": ["Baixa", "Média", "Alta", "Crítica"] },
           "assignee": { "type": "string", "description": "Nome do desenvolvedor" },
           "iterationPath": { "type": "string", "description": "Iteration Path no DevOps" },
@@ -452,7 +452,7 @@ print("Demanda criada:", response.json())`;
                   <pre className="text-[11px] font-mono bg-slate-900 p-2.5 rounded-lg text-slate-300 overflow-x-auto">
 {`{
   "summary": "Título da demanda",
-  "type": "Nova Automação" | "Incidente" | "Melhoria",
+  "type": "Nova Automação" | "Incidente" | "Melhoria" | "Agendamento de Execução" | "Demanda Interna",
   "priority": "Alta" | "Média" | "Baixa" | "Crítica",
   "status": "Novo",
   "assignee": "Desenvolvedor",
