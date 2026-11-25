@@ -7230,15 +7230,15 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
       return (
           <div className="h-full flex flex-col">
              <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-semibold text-slate-200">{widget.title}</h3><div className="flex items-center gap-2">{isEditMode && ['priority', 'status', 'incidentByAuto', 'automationsByManager', 'fteByManager', 'hoursByProject', 'hoursByDev', 'estVsAct'].includes(widget.type) && (<select className="bg-slate-900 border border-slate-600 text-xs text-white rounded px-2 py-1 outline-none" value={widget.visualStyle || 'bar'} onChange={(e) => changeVisualStyle(widget.id, e.target.value)}><option value="bar">Barras</option><option value="pie">Pizza</option></select>)}{isEditMode && (<div className="flex items-center gap-1 bg-slate-900 rounded p-1"><button onClick={() => toggleSize(widget.id)} className="p-1 hover:text-indigo-400 text-slate-400">↔</button><button onClick={() => toggleVisibility(widget.id)} className="p-1 hover:text-rose-400 text-slate-400">✕</button></div>)}</div></div>
-             <div className="flex-1 min-h-[250px]">
+             <div className={widget.type === 'cards' ? 'min-w-0' : 'flex-1 min-h-[250px]'}>
                   {widget.type === 'cards' && (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 h-full">
+                    <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3 sm:gap-4">
                       <div 
                         onClick={() => { setSelectedKpiModal('total'); setKpiSearch(''); }} 
-                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-indigo-400 hover:bg-slate-800/80 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-slate-900/60 p-4 rounded-xl border border-slate-700/80 hover:border-indigo-400 hover:bg-slate-800/80 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver a lista de todas as demandas ativas"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-slate-400 text-xs uppercase font-bold tracking-wider">Total (Ativos)</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-white/5 border border-white/10 group-hover:bg-indigo-600/30 group-hover:border-indigo-500/50 text-slate-300 group-hover:text-indigo-200 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7253,10 +7253,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <div 
                         onClick={() => { setSelectedKpiModal('incidents'); setKpiSearch(''); }} 
                         style={{ animationDelay: '40ms' }}
-                        className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 hover:border-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-rose-950/20 p-4 rounded-xl border border-rose-500/30 hover:border-rose-400 hover:bg-rose-950/40 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver os Incidentes"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-rose-400 text-xs uppercase font-bold tracking-wider">Incidentes</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 group-hover:bg-rose-600/30 group-hover:border-rose-400 text-rose-300 group-hover:text-rose-100 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7271,10 +7271,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <div 
                         onClick={() => { setSelectedKpiModal('features'); setKpiSearch(''); }} 
                         style={{ animationDelay: '80ms' }}
-                        className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-950/40 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver as Melhorias"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-emerald-400 text-xs uppercase font-bold tracking-wider">Melhorias</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 group-hover:bg-emerald-600/30 group-hover:border-emerald-400 text-emerald-300 group-hover:text-emerald-100 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7289,10 +7289,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <div 
                         onClick={() => { setSelectedKpiModal('automations'); setKpiSearch(''); }} 
                         style={{ animationDelay: '120ms' }}
-                        className="bg-indigo-950/20 p-4 rounded-xl border border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-indigo-950/20 p-4 rounded-xl border border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-950/40 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver as Automações"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-indigo-400 text-xs uppercase font-bold tracking-wider">Automações</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 border border-indigo-500/20 group-hover:bg-indigo-600/30 group-hover:border-indigo-400 text-indigo-300 group-hover:text-indigo-100 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7307,10 +7307,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <div 
                         onClick={() => { setSelectedKpiModal('schedulings'); setKpiSearch(''); }} 
                         style={{ animationDelay: '160ms' }}
-                        className="bg-amber-950/20 p-4 rounded-xl border border-amber-500/30 hover:border-amber-400 hover:bg-amber-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-amber-950/20 p-4 rounded-xl border border-amber-500/30 hover:border-amber-400 hover:bg-amber-950/40 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver os Agendamentos de Execução"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-amber-400 text-xs uppercase font-bold tracking-wider">Agendamentos</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 group-hover:bg-amber-600/30 group-hover:border-amber-400 text-amber-300 group-hover:text-amber-100 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7325,10 +7325,10 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
                       <div 
                         onClick={() => { setSelectedKpiModal('internal'); setKpiSearch(''); }} 
                         style={{ animationDelay: '200ms' }}
-                        className="bg-cyan-950/20 p-4 rounded-xl border border-cyan-500/30 hover:border-cyan-400 hover:bg-cyan-950/40 transition-all cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-lg animate-fade-in"
+                        className="bg-cyan-950/20 p-4 rounded-xl border border-cyan-500/30 hover:border-cyan-400 hover:bg-cyan-950/40 transition-all cursor-pointer group min-w-0 min-h-[140px] flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg animate-fade-in"
                         title="Clique para ver as Demandas Internas"
                       >
-                        <div className="flex items-center justify-between gap-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-cyan-400 text-xs uppercase font-bold tracking-wider">Demandas Internas</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 group-hover:bg-cyan-600/30 group-hover:border-cyan-400 text-cyan-300 group-hover:text-cyan-100 transition-all font-semibold flex items-center gap-1 shrink-0">
                             Ver detalhes →
@@ -7679,7 +7679,7 @@ const DashboardView = ({ tasks, devs, onEditTask, onUpdateTask, onOpenUpload, on
             style={{ animationDelay: `${index * 45}ms` }}
             className={`${widget.size === 'full' ? 'md:col-span-2 xl:col-span-4' : 'md:col-span-1 xl:col-span-2'} relative group transition-all duration-300 animate-fade-in`}
           >
-            <Card className="h-full min-h-[340px] flex flex-col transition-all duration-300 hover:border-slate-600/70 hover:shadow-2xl">{renderWidget(widget)}</Card>
+            <Card className={widget.type === 'cards' ? 'min-w-0 flex flex-col transition-all duration-300 hover:border-slate-600/70 hover:shadow-2xl' : 'h-full min-h-[340px] flex flex-col transition-all duration-300 hover:border-slate-600/70 hover:shadow-2xl'}>{renderWidget(widget)}</Card>
             {isEditMode && (
               <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/90 p-1.5 rounded border border-slate-700 shadow-xl z-20">
                 {index > 0 && (
