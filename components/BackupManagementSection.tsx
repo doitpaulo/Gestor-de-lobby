@@ -718,6 +718,10 @@ export const BackupManagementSection: React.FC<{ onDataRestored?: () => void }> 
                   <span className="text-xl font-bold text-sky-400 block">{excelImportResult.stats.automationsCount}</span>
                   <span className="text-[11px] text-slate-400">Novas Automações</span>
                 </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-cyan-500/20 text-center">
+                  <span className="text-xl font-bold text-cyan-400 block">{excelImportResult.stats.internalDemandsCount || 0}</span>
+                  <span className="text-[11px] text-slate-400">Demandas Internas</span>
+                </div>
                 <div className="bg-slate-800/80 p-2.5 rounded-lg border border-indigo-500/20 text-center">
                   <span className="text-xl font-bold text-indigo-400 block">{excelImportResult.stats.devsCount}</span>
                   <span className="text-[11px] text-slate-400">Desenvolvedores</span>
